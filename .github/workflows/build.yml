@@ -31,12 +31,12 @@ jobs:
         run: ./gradlew applyAllPatches --stacktrace 2>&1 | tee apply.log
 
       - name: Build paperclip jar
-        run: ./gradlew createMojmapPaperclipJar --stacktrace 2>&1 | tee build.log
+        run: (./gradlew createMojmapPaperclipJar --stacktrace || ./gradlew createPaperclipJar --stacktrace) 2>&1 | tee build.log
 
       - name: Smoke test server
         run: |
           set -x
-          JAR=$(ls canvas-server/build/libs/*paperclip*.jar | head -1)
+          JAR=$(find . -name '*paperclip*.jar' -not -path './testrun/*' | head -1)
           cp "$JAR" /tmp/rolia.jar
           mkdir -p testrun && cd testrun
           echo "eula=true" > eula.txt
@@ -69,7 +69,7 @@ jobs:
         run: |
           set -x
           mkdir -p /tmp/out
-          cp canvas-server/build/libs/*paperclip*.jar /tmp/out/ 2>/dev/null || true
+          find . -name '*paperclip*.jar' -not -path './testrun/*' -exec cp {} /tmp/out/ \; 2>/dev/null || true
           cp testrun/server.log /tmp/out/ 2>/dev/null || true
           cp apply.log build.log /tmp/out/ 2>/dev/null || true
           cd /tmp/out
