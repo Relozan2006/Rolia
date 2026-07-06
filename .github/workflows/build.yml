@@ -32,7 +32,9 @@ jobs:
 
       - name: Apply patches
         id: apply
-        run: ./gradlew applyAllPatches --stacktrace 2>&1 | tee apply.log
+        run: |
+          set -o pipefail
+          (./gradlew applyAllPatches --no-parallel --stacktrace || { echo RETRYING; rm -rf .gradle/caches/paperweight/upstreams; ./gradlew applyAllPatches --no-parallel --stacktrace; }) 2>&1 | tee apply.log
 
       - name: Collect base files on patch failure
         if: failure()
