@@ -104,3 +104,38 @@ jobs:
           git add -A
           git commit -m "CI output for $GITHUB_SHA"
           git push --force "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" ci-output
+
+      - name: Create GitHub Release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v26.1.2-build.${GITHUB_RUN_NUMBER}"
+          JAR=/tmp/out/rolia-paperclip-26.1.2.jar
+          SHA=$(sha256sum "$JAR" | awk '{print $1}')
+          cat > /tmp/relnotes.md << NOTES
+          ## Rolia 26.1.2
+
+          **Rolia** — высокопроизводительное ядро Minecraft на базе Canvas с полной поддержкой 1024-битного сида.
+
+          ### Особенности
+          - Вся производительность Canvas: региональная многопоточность (Folia), оптимизации тиков, чанков и сущностей.
+          - **1024-битный защищённый сид**: генерация структур, жеод, слизневых чанков и террейна управляется криптографическим 1024-битным сидом — подбор сида по миру практически невозможен.
+          - Секретная соль в \`rolia-seed.properties\` — дополнительная защита от копирования мира.
+          - Команда \`/seed\` показывает и ванильный сид, и feature seed.
+          - Параметр \`feature-level-seed\` в \`server.properties\` для задания своего 1024-битного сида.
+
+          ### Запуск
+          Требуется Java 25+.
+          \`\`\`
+          java -Xmx4G -jar rolia-paperclip-26.1.2.jar --nogui
+          \`\`\`
+
+          ### Контрольная сумма
+          SHA-256: \`$SHA\`
+          NOTES
+          gh release create "$TAG" "$JAR" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Rolia 26.1.2 (build ${GITHUB_RUN_NUMBER})" \
+            --notes-file /tmp/relnotes.md \
+            --latest
