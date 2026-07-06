@@ -13,7 +13,7 @@ Rolia is a high-performance Minecraft server core based on Canvas (a Folia fork)
 Requires Java 25+.
 
 ```
-java -Xmx4G -jar rolia-paperclip-26.1.2-mojmap.jar --nogui
+java -Xmx4G -jar rolia-paperclip-26.1.2.jar --nogui
 ```
 
 - `level-seed` in server.properties works as usual (vanilla 64-bit seed).
