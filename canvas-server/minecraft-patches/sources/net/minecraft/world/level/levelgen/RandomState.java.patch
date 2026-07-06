@@ -1,8 +1,8 @@
 --- a/net/minecraft/world/level/levelgen/RandomState.java
 +++ b/net/minecraft/world/level/levelgen/RandomState.java
-@@ -4,6 +_,10 @@
+@@ -3,6 +_,10 @@
+ import java.util.HashMap;
  import java.util.Map;
- import java.util.Objects;
  import java.util.concurrent.ConcurrentHashMap;
 +
 +import io.rolia.secureseed.Globals;
@@ -11,12 +11,12 @@
  import net.minecraft.core.Holder;
  import net.minecraft.core.HolderGetter;
  import net.minecraft.core.registries.Registries;
-@@ -34,10 +_,18 @@
+@@ -33,10 +_,19 @@
      }
  
      private RandomState(final NoiseGeneratorSettings settings, final HolderGetter<NormalNoise.NoiseParameters> noises, final long seed) {
 -        this.random = settings.getRandomSource().newInstance(seed).forkPositional();
-+        // Expand 48-bit levelSeed to cryptographically secure 1024-bit seed
++        // Rolia start - Feature secure seed: expand 48-bit levelSeed to cryptographically secure 1024-bit seed
 +        final long[] secureWorldSeed = Hashing.expandLevelSeedTo1024Bits(seed);
 +
 +        // Extract secure seeds for different terrain systems
@@ -30,26 +30,28 @@
 -        this.oreRandom = this.random.fromHashOf(Identifier.withDefaultNamespace("ore")).forkPositional();
 +        this.aquiferRandom = settings.getRandomSource().newInstance(aquiferSeed).forkPositional();
 +        this.oreRandom = settings.getRandomSource().newInstance(oreSeed).forkPositional();
++        // Rolia end - Feature secure seed
          this.noiseIntances = new ConcurrentHashMap<>();
          this.positionalRandoms = new ConcurrentHashMap<>();
          this.surfaceSystem = new SurfaceSystem(this, settings.defaultBlock(), settings.seaLevel(), this.random);
-@@ -53,7 +_,9 @@
-             }
+@@ -46,7 +_,10 @@
+             private final Map<DensityFunction, DensityFunction> wrapped = new HashMap<>();
  
              private RandomSource newLegacyInstance(final long seedOffset) {
 -                return new LegacyRandomSource(seed + seedOffset);
-+                // Use secure climate seed instead of raw levelSeed
++                // Rolia start - Feature secure seed: use secure climate seed instead of raw levelSeed
 +                long climateSeed = Hashing.getTerrainSeed(secureWorldSeed, Hashing.TerrainType.CLIMATE);
-+                return new WorldgenCryptoRandom(0, 0, Globals.Salt.UNDEFINED, climateSeed + seed);
++                return new WorldgenCryptoRandom(0, 0, Globals.Salt.UNDEFINED, climateSeed + seedOffset);
++                // Rolia end - Feature secure seed
              }
  
              @Override
-@@ -79,7 +_,7 @@
+@@ -71,7 +_,7 @@
+                         : RandomState.this.random.fromHashOf(Identifier.withDefaultNamespace("terrain"));
                      return noise.withNewRandom(terrainRandom);
                  } else {
-                     return (DensityFunction)(function instanceof DensityFunctions.EndIslandDensityFunction
--                        ? new DensityFunctions.EndIslandDensityFunction(seed)
-+                            ? new DensityFunctions.EndIslandDensityFunction(Hashing.getTerrainSeed(secureWorldSeed, Hashing.TerrainType.SURFACE))
-                         : function);
+-                    return function instanceof DensityFunctions.EndIslandDensityFunction ? new DensityFunctions.EndIslandDensityFunction(seed) : function;
++                    return function instanceof DensityFunctions.EndIslandDensityFunction ? new DensityFunctions.EndIslandDensityFunction(Hashing.getTerrainSeed(secureWorldSeed, Hashing.TerrainType.SURFACE)) : function; // Rolia - Feature secure seed
                  }
              }
+ 
