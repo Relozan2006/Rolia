@@ -28,7 +28,21 @@ jobs:
           git config --global user.name "Rolia CI"
 
       - name: Apply patches
+        id: apply
         run: ./gradlew applyAllPatches --stacktrace 2>&1 | tee apply.log
+
+      - name: Collect base files on patch failure
+        if: failure()
+        run: |
+          mkdir -p /tmp/out/basefiles
+          for f in net/minecraft/world/level/levelgen/RandomState.java net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java; do
+            { find . -path "*/$f" 2>/dev/null; find ~/.gradle -path "*/$f" 2>/dev/null; } | while read -r pth; do
+              key=$(echo "$pth" | sed 's|[/.]|_|g')
+              cp "$pth" "/tmp/out/basefiles/$key" 2>/dev/null || true
+            done
+          done
+          find . ~/.gradle -name '*.rej' 2>/dev/null | head -50 > /tmp/out/basefiles/rej_list.txt || true
+          ls -la /tmp/out/basefiles
 
       - name: Build paperclip jar
         run: (./gradlew createMojmapPaperclipJar --stacktrace || ./gradlew createPaperclipJar --stacktrace) 2>&1 | tee build.log
