@@ -1,0 +1,58 @@
+--- a/net/minecraft/world/level/chunk/ChunkGenerator.java
++++ b/net/minecraft/world/level/chunk/ChunkGenerator.java
+@@ -22,6 +_,9 @@
+ import java.util.function.Predicate;
+ import java.util.function.Supplier;
+ import java.util.stream.Collectors;
++
++import io.rolia.secureseed.Globals;
++import io.rolia.secureseed.WorldgenCryptoRandom;
+ import net.minecraft.CrashReport;
+ import net.minecraft.CrashReportCategory;
+ import net.minecraft.ReportedException;
+@@ -345,7 +_,7 @@
+             Map<Integer, List<Structure>> structuresByStep = structuresRegistry.stream()
+                 .collect(Collectors.groupingBy(structure -> structure.step().ordinal()));
+             List<FeatureSorter.StepFeatureData> featureList = this.featuresPerStep.get();
+-            WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));
++            WorldgenRandom random = new WorldgenCryptoRandom(origin.getX(), origin.getZ(), Globals.Salt.UNDEFINED, 0);
+             long decorationSeed = random.setDecorationSeed(level.getSeed(), origin.getX(), origin.getZ());
+             Set<Holder<Biome>> possibleBiomes = new ObjectArraySet<>();
+             ChunkPos.rangeClosed(sectionPos.chunk(), 1).forEach(chunkPos -> {
+@@ -464,8 +_,9 @@
+             int x = chunk.getPos().x();
+             int z = chunk.getPos().z();
+             for (org.bukkit.generator.BlockPopulator populator : world.getPopulators()) {
+-                WorldgenRandom seededrandom = new WorldgenRandom(new net.minecraft.world.level.levelgen.LegacyRandomSource(level.getSeed()));
+-                seededrandom.setDecorationSeed(level.getSeed(), x, z);
++                //WorldgenRandom seededrandom = new WorldgenRandom(new net.minecraft.world.level.levelgen.LegacyRandomSource(level.getSeed()));
++                //seededrandom.setDecorationSeed(level.getSeed(), x, z);
++                WorldgenCryptoRandom seededrandom = new WorldgenCryptoRandom(x, z, Globals.Salt.UNDEFINED, 0);
+                 populator.populate(world, new org.bukkit.craftbukkit.util.RandomSourceWrapper.RandomWrapper(seededrandom), x, z, limitedRegion);
+             }
+             limitedRegion.saveEntities();
+@@ -503,6 +_,12 @@
+     ) {
+         Map<Structure, LongSet> structures = structureManager.getAllStructuresAt(pos);
+ 
++    // Canvas start - optimize natural spawning
++        return getMobsAt(biome, structureManager, mobCategory, pos, structures);
++    }
++
++    public WeightedList<MobSpawnSettings.SpawnerData> getMobsAt(final Holder<Biome> biome, final StructureManager structureManager, final MobCategory mobCategory, final BlockPos pos, final Map<Structure, LongSet> structures) {
++    // Canvas end - optimize natural spawning
+         for (Entry<Structure, LongSet> entry : structures.entrySet()) {
+             Structure structure = entry.getKey();
+             StructureSpawnOverride override = structure.spawnOverrides().get(mobCategory);
+@@ -569,8 +_,9 @@
+                             } else {
+                                 ArrayList<StructureSet.StructureSelectionEntry> options = new ArrayList<>(structures.size());
+                                 options.addAll(structures);
+-                                WorldgenRandom random = new WorldgenRandom(new LegacyRandomSource(0L));
+-                                random.setLargeFeatureSeed(state.getLevelSeed(), sourceChunkPos.x(), sourceChunkPos.z());
++                                //WorldgenRandom random = new WorldgenRandom(new LegacyRandomSource(0L));
++                                //random.setLargeFeatureSeed(state.getLevelSeed(), sourceChunkPos.x(), sourceChunkPos.z());
++                                WorldgenRandom random = new WorldgenCryptoRandom(sourceChunkPos.x(), sourceChunkPos.z(), Globals.Salt.GENERATE_FEATURE, 0);
+                                 int total = 0;
+ 
+                                 for (StructureSet.StructureSelectionEntry option : options) {

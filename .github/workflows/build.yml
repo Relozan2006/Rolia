@@ -1,0 +1,86 @@
+name: Build Rolia
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Configure git
+        run: |
+          git config --global user.email "ci@rolia.local"
+          git config --global user.name "Rolia CI"
+
+      - name: Apply patches
+        run: ./gradlew applyAllPatches --stacktrace 2>&1 | tee apply.log
+
+      - name: Build paperclip jar
+        run: ./gradlew createMojmapPaperclipJar --stacktrace 2>&1 | tee build.log
+
+      - name: Smoke test server
+        run: |
+          set -x
+          JAR=$(ls canvas-server/build/libs/*paperclip*.jar | head -1)
+          cp "$JAR" /tmp/rolia.jar
+          mkdir -p testrun && cd testrun
+          echo "eula=true" > eula.txt
+          mkfifo input
+          (java -Xmx3G -jar /tmp/rolia.jar --nogui < input > server.log 2>&1; echo $? > exitcode) &
+          exec 3>input
+          ok=""
+          for i in $(seq 1 180); do
+            if grep -q 'Done' server.log 2>/dev/null; then ok=1; break; fi
+            if [ -f exitcode ]; then break; fi
+            sleep 5
+          done
+          if [ -z "$ok" ]; then echo "SERVER FAILED TO START"; tail -100 server.log; exit 1; fi
+          sleep 5
+          echo "seed" >&3
+          sleep 5
+          echo "version" >&3
+          sleep 5
+          echo "stop" >&3
+          for i in $(seq 1 36); do [ -f exitcode ] && break; sleep 5; done
+          echo "=== branding check ==="
+          grep -i 'rolia' server.log | head -20
+          echo "=== seed check ==="
+          grep -i 'feature seed' server.log | head -5
+          grep -qi 'rolia' server.log || { echo "NO ROLIA BRANDING"; exit 1; }
+          grep -qi 'feature seed' server.log || { echo "NO FEATURE SEED"; exit 1; }
+
+      - name: Publish result to ci-output branch
+        if: always()
+        run: |
+          set -x
+          mkdir -p /tmp/out
+          cp canvas-server/build/libs/*paperclip*.jar /tmp/out/ 2>/dev/null || true
+          cp testrun/server.log /tmp/out/ 2>/dev/null || true
+          cp apply.log build.log /tmp/out/ 2>/dev/null || true
+          cd /tmp/out
+          for f in *.jar; do [ -f "$f" ] && sha256sum "$f" > "$f.sha256"; done
+          echo "status=${{ job.status }}" > status.txt
+          echo "commit=$GITHUB_SHA" >> status.txt
+          # truncate big logs
+          for f in apply.log build.log; do [ -f "$f" ] && tail -c 500000 "$f" > "$f.tail" && mv "$f.tail" "$f"; done
+          git init -b ci-output
+          git config user.email "ci@rolia.local"
+          git config user.name "Rolia CI"
+          git add -A
+          git commit -m "CI output for $GITHUB_SHA"
+          git push --force "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" ci-output

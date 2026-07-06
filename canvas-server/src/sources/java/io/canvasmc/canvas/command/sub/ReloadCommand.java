@@ -1,0 +1,48 @@
+package io.canvasmc.canvas.command.sub;
+
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import io.canvasmc.canvas.GlobalConfiguration;
+import io.canvasmc.canvas.WorldConfig;
+import io.canvasmc.canvas.command.Command;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
+import net.minecraft.util.CommonColors;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
+
+@NullMarked
+public class ReloadCommand implements Command {
+    @Override
+    public String getName() {
+        return "reload";
+    }
+
+    @Override
+    public @Nullable String getDescription() {
+        return "Reloads the Rolia configuration";
+    }
+
+    @Override
+    public boolean isAllowedSelfCommand() {
+        return false;
+    }
+
+    @Override
+    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base) {
+        return base.executes(context -> {
+            context.getSource().sendSystemMessage(
+                Component.literal("Some configuration options cannot be changed at runtime or may work incorrectly after reloading.")
+                    .withColor(CommonColors.RED)
+            );
+            context.getSource().sendSystemMessage(
+                Component.literal("This command is unsupported. If you encounter issues, please run /stop")
+                    .withColor(CommonColors.RED)
+            );
+            long start = System.nanoTime();
+            GlobalConfiguration.reload();
+            WorldConfig.reload();
+            GlobalConfiguration.broadcast("Reloaded all Rolia solid and patch configurations in " + String.format("%.2f", ((System.nanoTime() - start) / 1e+6)) + "ms", GlobalConfiguration.INFO);
+            return 1;
+        });
+    }
+}

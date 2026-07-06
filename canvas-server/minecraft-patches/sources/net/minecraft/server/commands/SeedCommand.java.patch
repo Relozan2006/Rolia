@@ -1,0 +1,25 @@
+--- a/net/minecraft/server/commands/SeedCommand.java
++++ b/net/minecraft/server/commands/SeedCommand.java
+@@ -1,6 +_,7 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import io.rolia.secureseed.Globals;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+ import net.minecraft.network.chat.Component;
+@@ -13,6 +_,14 @@
+                 long seed = c.getSource().getLevel().getSeed();
+                 Component seedText = ComponentUtils.copyOnClickText(String.valueOf(seed));
+                 c.getSource().sendSuccess(() -> Component.translatable("commands.seed.success", seedText), false);
++
++                // Rolia start - feature secure seed
++                Globals.setupGlobals(c.getSource().getLevel());
++                String seedStr = Globals.seedToString(Globals.worldSeed);
++
++                Component featureSeedComponent = ComponentUtils.copyOnClickText(seedStr);
++                c.getSource().sendSuccess(() -> Component.translatable(("Feature seed: %s"), featureSeedComponent), false);
++                // Rolia end
+                 return (int)seed;
+             })
+         );

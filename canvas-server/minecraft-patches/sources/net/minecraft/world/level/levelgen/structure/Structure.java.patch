@@ -1,0 +1,15 @@
+--- a/net/minecraft/world/level/levelgen/structure/Structure.java
++++ b/net/minecraft/world/level/levelgen/structure/Structure.java
+@@ -248,9 +_,9 @@
+         }
+ 
+         private static WorldgenRandom makeRandom(final long seed, final ChunkPos chunkPos) {
+-            WorldgenRandom random = new WorldgenRandom(new LegacyRandomSource(0L));
+-            random.setLargeFeatureSeed(seed, chunkPos.x(), chunkPos.z());
+-            return random;
++            return new io.rolia.secureseed.WorldgenCryptoRandom(
++                    chunkPos.x(), chunkPos.z(), io.rolia.secureseed.Globals.Salt.GENERATE_FEATURE, seed
++            );
+         }
+     }
+ 

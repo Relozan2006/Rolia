@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java
++++ b/net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java
+@@ -202,7 +_,7 @@
+             List<CompletableFuture<ChunkPos>> tasks = new ArrayList<>(count);
+             int spread = placement.spread();
+             HolderSet<Biome> preferredBiomes = placement.preferredBiomes();
+-            RandomSource random = RandomSource.create();
++            RandomSource random = new io.rolia.secureseed.WorldgenCryptoRandom(0, 0, io.rolia.secureseed.Globals.Salt.STRONGHOLDS, 0);
+             // Paper start - Add missing structure set seed configs
+             if (this.conf.strongholdSeed != null && structureSet.is(net.minecraft.world.level.levelgen.structure.BuiltinStructureSets.STRONGHOLDS)) {
+                 random.setSeed(this.conf.strongholdSeed);
