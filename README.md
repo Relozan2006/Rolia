@@ -1,6 +1,4 @@
-# Rolia
-
-Rolia is a high-performance Minecraft server core based on Canvas (a Folia fork) with full 1024-bit secure world seed support.
+<img width="1280" height="720" alt="image" src="https://github.com/user-attachments/assets/938e7151-29c5-4efd-a05a-b6b979b87ebd" />
 
 ## Features
 
