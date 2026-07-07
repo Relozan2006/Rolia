@@ -49,7 +49,18 @@ jobs:
           find . ~/.gradle -name '*.rej' 2>/dev/null | head -50 > /tmp/out/basefiles/rej_list.txt || true
           ls -la /tmp/out/basefiles
 
+      - name: Dump reference sources
+        run: |
+          mkdir -p /tmp/out/refsrc
+          for f in net/minecraft/world/RandomSequences.java net/minecraft/world/level/levelgen/feature/SpikeFeature.java; do
+            src="canvas-server/src/minecraft/java/$f"
+            if [ -f "$src" ]; then cp "$src" "/tmp/out/refsrc/$(basename $f)"; else echo "MISSING $f" >> /tmp/out/refsrc/missing.txt; fi
+          done
+          ls -la /tmp/out/refsrc
+
       - name: Build paperclip jar
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
         run: (./gradlew createMojmapPaperclipJar --stacktrace || ./gradlew createPaperclipJar --stacktrace) 2>&1 | tee build.log
 
       - name: Smoke test server

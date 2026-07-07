@@ -122,7 +122,7 @@ public class Hashing {
             segmentInput[4] = (segment * 0x9E3779B97F4A7C15L) ^ saltHashValue[(segment + 4) % saltHashValue.length];
             segmentInput[5] = (~segment) ^ saltHashValue[(segment + 5) % saltHashValue.length];
             segmentInput[6] = Long.rotateLeft(levelSeed, segment % 64) ^ saltHashValue[(segment + 6) % saltHashValue.length];
-            segmentInput[7] = (levelSeed ^ (segment << 32)) ^ saltHashValue[(segment + 7) % saltHashValue.length];
+            segmentInput[7] = (levelSeed ^ ((long) segment << 32)) ^ saltHashValue[(segment + 7) % saltHashValue.length]; // Rolia - fix int shift by 32 being a no-op
 
             long[] segmentHash = hashWorldSeedInternal(segmentInput);
 

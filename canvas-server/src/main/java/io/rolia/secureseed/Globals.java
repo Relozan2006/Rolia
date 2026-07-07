@@ -15,15 +15,43 @@ public class Globals {
     public static final long[] worldSeed = new long[WORLD_SEED_LONGS];
     public static final ThreadLocal<Integer> dimension = ThreadLocal.withInitial(() -> 0);
 
+    // Rolia start - avoid linear scan + allocations on the hot path (called from getGenerator()/ChunkStep)
+    private static volatile boolean seedInitialized = false;
+    private static final java.util.concurrent.ConcurrentHashMap<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>, Integer> DIMENSION_INDEX_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+
     public static void setupGlobals(ServerLevel world) {
-        long[] seed = world.getServer().getWorldGenSettings().options().featureSeed();
-        System.arraycopy(seed, 0, worldSeed, 0, WORLD_SEED_LONGS);
-        int worldIndex = Iterables.indexOf(world.getServer().levelKeys(), it -> it == world.dimension());
-        // prevent race condition where world is not yet added to levelKeys
-        if (worldIndex == -1)
-            worldIndex = world.getServer().levelKeys().size();
-        dimension.set(worldIndex);
+        if (!seedInitialized) {
+            long[] seed = world.getServer().getWorldGenSettings().options().featureSeed();
+            System.arraycopy(seed, 0, worldSeed, 0, WORLD_SEED_LONGS);
+            seedInitialized = true;
+        }
+        Integer cached = DIMENSION_INDEX_CACHE.get(world.dimension());
+        if (cached == null) {
+            int worldIndex = Iterables.indexOf(world.getServer().levelKeys(), it -> it == world.dimension());
+            // prevent race condition where world is not yet added to levelKeys
+            if (worldIndex == -1) {
+                dimension.set(world.getServer().levelKeys().size()); // do not cache a value computed mid-registration
+                return;
+            }
+            DIMENSION_INDEX_CACHE.put(world.dimension(), worldIndex);
+            cached = worldIndex;
+        }
+        dimension.set(cached);
     }
+
+    /**
+     * Derives a salt-protected 64-bit seed for vanilla systems that would otherwise
+     * leak the raw level seed (loot random sequences, end spikes, ...).
+     * Deterministic per (levelSeed, domain, salt); falls back to the raw seed when disabled.
+     */
+    public static long transformSeed(long levelSeed, long domain) {
+        if (!isSecureSeedEnabled()) {
+            return levelSeed;
+        }
+        long[] expanded = Hashing.expandLevelSeedTo1024Bits(levelSeed ^ domain);
+        return expanded[(int) (domain & 7)];
+    }
+    // Rolia end
 
     public static long[] createRandomWorldSeed() {
         long[] seed = new long[WORLD_SEED_LONGS];

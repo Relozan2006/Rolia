@@ -211,6 +211,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
         }
 
         final int localNum = buildNumber.getAsInt();
+        if (localNum > 0) return new StableStatus(0); // Rolia - our builds are not on CanvasMC's Jenkins, skip the remote update check
         try {
             ClientV2.Build build = Util.CANVAS_CLIENT.getLatestBuild(buildInfo.minecraftVersionId(), true);
             final int distance = build.buildNumber() - localNum;

@@ -103,11 +103,10 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
         WorldgenCryptoRandom fork = new WorldgenCryptoRandom(0, 0, null, 0);
 
-        System.arraycopy(Globals.worldSeed, 0, fork.worldSeed, 0, Globals.WORLD_SEED_LONGS);
-        fork.message[0] = this.message[0];
-        fork.message[1] = this.message[1];
-        fork.message[2] = this.message[2];
-        fork.message[3] = this.message[3];
+        System.arraycopy(this.worldSeed, 0, fork.worldSeed, 0, Globals.WORLD_SEED_LONGS);
+        System.arraycopy(this.message, 0, fork.message, 0, this.message.length);
+        System.arraycopy(this.randomBits, 0, fork.randomBits, 0, this.randomBits.length); // Rolia - fix fork() losing the random bit buffer
+        System.arraycopy(this.cachedInternalState, 0, fork.cachedInternalState, 0, this.cachedInternalState.length); // Rolia - fix fork() losing hash state
         fork.randomBitIndex = this.randomBitIndex;
         fork.counter = this.counter;
 

@@ -26,3 +26,13 @@ java -Xmx4G -jar server.jar --nogui
 ```
 
 The server jar is produced in `canvas-server/build/libs/`.
+
+## Important: back up your salt!
+
+`rolia-seed.properties` contains the secret salt. All terrain, biomes and features depend on it:
+if the file is lost, newly generated chunks in an existing world WILL NOT match the old ones
+(visible chunk borders). Back this file up together with your world and keep it secret —
+the salt is what makes seed reversal impossible.
+
+Note: because slime chunks are driven by the 1024-bit secure seed, the `slime-seed` option
+from spigot.yml has no effect on Rolia.
