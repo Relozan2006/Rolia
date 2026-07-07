@@ -58,6 +58,13 @@ jobs:
           done
           ls -la /tmp/out/refsrc
 
+      - name: Locate end spike seed usage
+        run: |
+          mkdir -p /tmp/out
+          { grep -rn "getSpikesForLevel\|SpikeCacheLoader\|EndSpike\|SpikeConfiguration" canvas-server/src/minecraft/java --include=*.java | head -20; \
+            grep -rln "RandomSource.create(level.getSeed()\|RandomSource.create(this.getSeed()\|create(worldGenLevel.getSeed()" canvas-server/src/minecraft/java --include=*.java | head -10; } > /tmp/out/endspike.txt || true
+          cat /tmp/out/endspike.txt
+
       - name: Build paperclip jar
         env:
           BUILD_NUMBER: ${{ github.run_number }}

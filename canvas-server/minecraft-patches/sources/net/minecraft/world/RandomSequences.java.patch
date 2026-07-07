@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/RandomSequences.java
++++ b/net/minecraft/world/RandomSequences.java
+@@ -53,7 +_,7 @@
+     private RandomSequence createSequence(
+         final Identifier key, final long worldSeed, final int salt, final boolean includeWorldSeed, final boolean includeSequenceId
+     ) {
+-        long seed = (includeWorldSeed ? worldSeed : 0L) ^ salt;
++        long seed = (includeWorldSeed ? io.rolia.secureseed.Globals.transformSeed(worldSeed, 0x524C4F4F54L) : 0L) ^ salt; // Rolia - do not leak the raw level seed through loot random sequences
+         return new RandomSequence(seed, includeSequenceId ? Optional.of(key) : Optional.empty());
+     }
+ 
