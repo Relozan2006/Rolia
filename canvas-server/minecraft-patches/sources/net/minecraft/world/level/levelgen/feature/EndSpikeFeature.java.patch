@@ -1,0 +1,11 @@
+--- a/net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java
++++ b/net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java
+@@ -40,7 +_,7 @@
+     }
+ 
+     public static List<EndSpikeFeature.EndSpike> getSpikesForLevel(final WorldGenLevel level) {
+-        RandomSource random = RandomSource.createThreadLocalInstance(level.getSeed());
++        RandomSource random = RandomSource.createThreadLocalInstance(io.rolia.secureseed.Globals.transformSeed(level.getSeed(), 0x524C5350494BL)); // Rolia - do not leak the raw level seed through the end spike layout
+         long key = random.nextLong() & 65535L;
+         return SPIKE_CACHE.getUnchecked(key);
+     }
