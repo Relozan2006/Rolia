@@ -19,7 +19,7 @@ public class ReloadCommand implements Command {
 
     @Override
     public @Nullable String getDescription() {
-        return "Reloads the Rolia configuration";
+        return "Reloads the CanvasMC configuration";
     }
 
     @Override
@@ -41,7 +41,7 @@ public class ReloadCommand implements Command {
             long start = System.nanoTime();
             GlobalConfiguration.reload();
             WorldConfig.reload();
-            GlobalConfiguration.broadcast("Reloaded all Rolia solid and patch configurations in " + String.format("%.2f", ((System.nanoTime() - start) / 1e+6)) + "ms", GlobalConfiguration.INFO);
+            GlobalConfiguration.broadcast("Reloaded all Canvas solid and patch configurations in " + String.format("%.2f", ((System.nanoTime() - start) / 1e+6)) + "ms", GlobalConfiguration.INFO);
             return 1;
         });
     }

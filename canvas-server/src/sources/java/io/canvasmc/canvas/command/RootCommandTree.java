@@ -103,7 +103,7 @@ public class RootCommandTree {
 
                 TextComponent.Builder builder = Component.text()
                     .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
-                    .append(Component.text("Rolia Commands", HEADER, TextDecoration.BOLD))
+                    .append(Component.text("Canvas Commands", HEADER, TextDecoration.BOLD))
                     .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
                     .appendNewline();
 

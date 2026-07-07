@@ -45,9 +45,9 @@ public class WorldConfig extends Part {
     // we have a logger internally here for level-config related things, and should not be used globally. the global
     // config class should be the logger publicly used
 
-    private static final Logger LOGGER = LoggerFactory.getLogger("RoliaWorlds");
+    private static final Logger LOGGER = LoggerFactory.getLogger("CanvasWorlds");
 
-    private static final Path BASE_FILE = Path.of("config/rolia-worlds.yml").toAbsolutePath().normalize();
+    private static final Path BASE_FILE = Path.of("config/canvas-worlds.yml").toAbsolutePath().normalize();
 
     // for the default configuration, we do need a solid configuration for this or else the patchable
     // variant will fail to load, so we load this in the static block
@@ -87,10 +87,10 @@ public class WorldConfig extends Part {
                 }
             },
             Style.create()
-                .literal("Worlds default configuration file for Rolia").endLine()
+                .literal("Worlds default configuration file for CanvasMC").endLine()
                 .blank()
                 .wordWrap(
-                    "This is the defaults for the per-world configuration file for Rolia.",
+                    "This is the defaults for the per-world configuration file for CanvasMC.",
                     "Each option can be overridden by the patch variant in each dimension folder. You are",
                     "free to modify, add, or remove comments as you please."
                 ).endLine()
@@ -104,7 +104,7 @@ public class WorldConfig extends Part {
                 .wordWrap(
                     "All defaults for the options provided in this configuration are configured for upstream",
                     "compatibility over performance. You must do some manual configuration to get some of the performance",
-                    "benefits Rolia provides."
+                    "benefits Canvas provides."
                 ).endLine()
                 .blank()
                 .wordWrap(
@@ -133,11 +133,11 @@ public class WorldConfig extends Part {
 
         ConfigurationProvider.buildPatchableConfiguration(
             MinecraftServer.getServer().storageSource.getDimensionPath(dimension)
-                .resolve("rolia-patch.yml"),
+                .resolve("canvas-patch.yml"),
             BASE_FILE,
             WorldConfig::new,
             instance -> {
-                LOGGER.info("Loaded Rolia config patch for level {}", dimension.identifier());
+                LOGGER.info("Loaded Canvas config patch for level {}", dimension.identifier());
 
                 result[0] = instance;
 
@@ -148,7 +148,7 @@ public class WorldConfig extends Part {
                 .blank()
                 .wordWrap(
                     "This configuration file can be used to override the values in the default configuration",
-                    "for worlds defined in \"/config/rolia-worlds.yml\""
+                    "for worlds defined in \"/config/canvas-worlds.yml\""
                 ).endLine()
                 .blank()
                 .wordWrap(
@@ -202,13 +202,13 @@ public class WorldConfig extends Part {
     public static class RegionBars extends Part {
 
         {
-            option("enableTpsBar").docs("Enables a regionized TPS-Bar implementation for Rolia.");
+            option("enableTpsBar").docs("Enables a regionized TPS-Bar implementation for Canvas.");
             option("tpsBarFormat")
                 .docs(
                     "MiniMessage-formatted line for the TPS bar. Placeholders are <tps>, <mspt>, <util>, and <players>.",
                     "Legacy tokens(%tps%, %mspt%, %util%, %players%) are also accepted and auto-converted."
                 ).greedyString();
-            option("enableRamBar").docs("Enables a regionized RAM-Bar implementation for Rolia.");
+            option("enableRamBar").docs("Enables a regionized RAM-Bar implementation for Canvas.");
             option("ramBarFormat")
                 .docs(
                     "MiniMessage-formatted line for the RAM bar. Placeholders are <used>, <xmx>, <percent>.",
@@ -548,7 +548,7 @@ public class WorldConfig extends Part {
     {
         option("waypointUpdateScale")
             .docs(
-                "Controls how quickly Rolia' waypoints system falls off with distance between players.",
+                "Controls how quickly Canvas' waypoints system falls off with distance between players.",
                 "You can read more about how this new system works and play around with this configuration",
                 "here: https://docs.canvasmc.io/canvas/info/waypoints/"
             );

@@ -222,7 +222,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
                 case UNKNOWN -> new ErrorStatus();
             };
         } catch (Throwable thrown) {
-            GlobalConfiguration.LOGGER.error("Error parsing version information from Rolia's Jenkins API", thrown);
+            GlobalConfiguration.LOGGER.error("Error parsing version information from CanvasMC's Jenkins API", thrown);
             return new ErrorStatus();
         }
     }

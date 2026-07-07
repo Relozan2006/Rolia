@@ -139,10 +139,10 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
 
         private static @NonNull Map<String, Path> getNestedFiles(@NonNull Path configDir) {
             Map<String, Path> files = new LinkedHashMap<>();
-            files.put("rolia-server.yml", configDir.resolve("rolia-server.yml"));
-            files.put("world-defaults.yml", configDir.resolve("rolia-worlds.yml"));
+            files.put("canvas-server.yml", configDir.resolve("canvas-server.yml"));
+            files.put("world-defaults.yml", configDir.resolve("canvas-worlds.yml"));
             for (World world : Bukkit.getWorlds()) {
-                files.put(world.getName() + ".yml", world.getWorldFolder().toPath().resolve("rolia-patch.yml"));
+                files.put(world.getName() + ".yml", world.getWorldFolder().toPath().resolve("canvas-patch.yml"));
             }
             return files;
         }

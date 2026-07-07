@@ -39,12 +39,12 @@ import org.slf4j.LoggerFactory;
 
 public class GlobalConfiguration extends Part {
 
-    private static final Path CONFIG_PATH = Path.of("config/rolia-server.yml").toAbsolutePath().normalize();
+    private static final Path CONFIG_PATH = Path.of("config/canvas-server.yml").toAbsolutePath().normalize();
     private static final String BROADCAST_PERMISSION = "canvas.broadcasting.receiver";
 
     protected static final int CHAR_LIM = 90;
 
-    public static final Logger LOGGER = LoggerFactory.getLogger("Rolia");
+    public static final Logger LOGGER = LoggerFactory.getLogger("CanvasMC");
 
     public static final int INFO = 0;
     public static final int WARN = 1;
@@ -59,7 +59,7 @@ public class GlobalConfiguration extends Part {
     }
 
     public static void reload() {
-        LOGGER.info("Loading Rolia server configuration");
+        LOGGER.info("Loading Canvas server configuration");
         ConfigurationProvider.buildSolidConfiguration(
             CONFIG_PATH,
             GlobalConfiguration::new,
@@ -101,16 +101,16 @@ public class GlobalConfiguration extends Part {
                             case EXPERIMENTAL ->
                                 broadcast("Running a beta build, there may be bugs, proceed with caution!", WARN);
                             case LOCAL ->
-                                broadcast("You are running a development version of Rolia, which may not be production-ready, be very careful!", WARN);
+                                broadcast("You are running a development version of Canvas, which may not be production-ready, be very careful!", WARN);
                         }
                     }));
                 }
             },
             Style.create()
-                .literal("Global Configuration for Rolia").endLine()
+                .literal("Global Configuration for CanvasMC").endLine()
                 .blank()
                 .wordWrap(
-                    "This is the server-wide configuration file provided by Rolia. This config holds options",
+                    "This is the server-wide configuration file provided by CanvasMC. This config holds options",
                     "that are set across the entire server, and cannot be overridden per-world. You are free to modify,",
                     "add, or remove comments as you please."
                 ).endLine()
@@ -124,7 +124,7 @@ public class GlobalConfiguration extends Part {
                 .wordWrap(
                     "All defaults for the options provided in this configuration are configured for upstream",
                     "compatibility over performance. You must do some manual configuration to get some of the performance",
-                    "benefits Rolia provides."
+                    "benefits Canvas provides."
                 ).endLine()
                 .blank()
                 .wordWrap(
@@ -161,7 +161,7 @@ public class GlobalConfiguration extends Part {
             try {
                 RandomGeneratorFactory.of("Xoroshiro128PlusPlus");
             } catch (Throwable throwable) {
-                broadcast("Rolia' faster random impl is not supported by your VM, falling back to legacy random", WARN);
+                broadcast("Canvas' faster random impl is not supported by your VM, falling back to legacy random", WARN);
                 ENABLE_FASTER_RANDOM = false;
             }
 
@@ -259,7 +259,7 @@ public class GlobalConfiguration extends Part {
         {
             option("affinityScheduler")
                 .docs(
-                    "Configurations for the AFFINITY scheduler provided by Rolia. For these options to take effect,",
+                    "Configurations for the AFFINITY scheduler provided by Canvas. For these options to take effect,",
                     "change the \"threaded-regions.scheduler\" option in \"paper-global.yml\" to \"AFFINITY\""
                 );
         }
@@ -297,7 +297,7 @@ public class GlobalConfiguration extends Part {
 
                 option("enableMidTickTasks").docs("Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick");
                 option("tickRegionAffinity")
-                    .docs("Thread affinity for the AFFINITY scheduler provided by Rolia. By using this, you could pin the threads of region scheduler to cpu cores")
+                    .docs("Thread affinity for the AFFINITY scheduler provided by Canvas. By using this, you could pin the threads of region scheduler to cpu cores")
                     .greaterThanOrEqualTo(0.0F);
 
                 option("enableAffinitySchedulerCpuAffinity").docs("Enables pinning threads of the AFFINITY region scheduler to cpu cores");
@@ -328,7 +328,7 @@ public class GlobalConfiguration extends Part {
             option("guardSeverity")
                 .docs(
                     Style.wrap(
-                        "Rolia introduces extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are"
+                        "Canvas introduces extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are"
                     ).defineEnum(GuardSeverity.class, (severity) -> {
                         return switch (severity) {
                             case LOG -> "Just logs a warning in console, but continues the operation";
@@ -522,7 +522,7 @@ public class GlobalConfiguration extends Part {
         option("displayWorldLoadScreenForPortaling")
             .docs(
                 "Folia's portaling rewrite makes the world loading screen not display on the client properly, and",
-                "instead shows an empty void. With this enabled, Rolia will display the proper world loading screen"
+                "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
             );
         option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
         option("tileEntitySnapshotCreation").docs("Enables creation of tile entity snapshots on retrieving blockstates");

@@ -17,10 +17,10 @@ public class CanvasFileMigration {
             if (!Boolean.getBoolean("paper.disableMigrationDelay")) {
                 Thread.sleep(8_000L);
             }
-            LOGGER.info("Continuing with Rolia file migration, please wait");
+            LOGGER.info("Continuing with Canvas file migration, please wait");
         } catch (InterruptedException thrown) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while waiting before startup Rolia file migration", thrown);
+            throw new RuntimeException("Interrupted while waiting before startup Canvas file migration", thrown);
         } finally {
             MSG_SHOWN = true;
         }
@@ -40,7 +40,7 @@ public class CanvasFileMigration {
         }
 
         if (!todo.isEmpty()) {
-            LOGGER.info("Beginning migration of Rolia filesave features");
+            LOGGER.info("Beginning migration of Canvas filesave features");
             LOGGER.info("{} migration types awaiting conduction: {}", todo.size(), todo.toArray());
 
             if (!MSG_SHOWN) {
@@ -52,7 +52,7 @@ public class CanvasFileMigration {
                 type.migration.conduct(migrationContext);
             }
 
-            LOGGER.info("All Rolia features migrated successfully, continuing with startup");
+            LOGGER.info("All Canvas features migrated successfully, continuing with startup");
         }
     }
 

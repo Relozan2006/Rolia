@@ -59,7 +59,7 @@ public class SchedulerUtil {
      * @return if the region profiler is supported with the scheduler
      */
     public static boolean doesSupportRegionProfiler(final Scheduler scheduler) {
-        if (Boolean.getBoolean("Rolia.DisableRegionProfiler")) {
+        if (Boolean.getBoolean("Canvas.DisableRegionProfiler")) {
             return false;
         }
         if (scheduler instanceof AffinitySchedulerThreadPool) {
