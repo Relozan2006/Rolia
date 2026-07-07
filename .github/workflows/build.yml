@@ -52,7 +52,7 @@ jobs:
       - name: Dump reference sources
         run: |
           mkdir -p /tmp/out/refsrc
-          for f in net/minecraft/world/RandomSequences.java net/minecraft/world/level/levelgen/feature/SpikeFeature.java; do
+          for f in net/minecraft/world/RandomSequences.java net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java; do
             src="canvas-server/src/minecraft/java/$f"
             if [ -f "$src" ]; then cp "$src" "/tmp/out/refsrc/$(basename $f)"; else echo "MISSING $f" >> /tmp/out/refsrc/missing.txt; fi
           done
