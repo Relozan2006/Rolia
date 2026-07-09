@@ -70,36 +70,53 @@ jobs:
           BUILD_NUMBER: ${{ github.run_number }}
         run: (./gradlew createMojmapPaperclipJar --stacktrace || ./gradlew createPaperclipJar --stacktrace) 2>&1 | tee build.log
 
-      - name: Smoke test server
+      - name: Smoke test server (run twice)
         run: |
           set -x
           JAR=$(find . -name '*paperclip*.jar' -not -path './testrun/*' | head -1)
           cp "$JAR" /tmp/rolia.jar
           mkdir -p testrun && cd testrun
           echo "eula=true" > eula.txt
-          mkfifo input
-          (java -Xmx3G -jar /tmp/rolia.jar --nogui < input > server.log 2>&1; echo $? > exitcode) &
-          exec 3>input
-          ok=""
-          for i in $(seq 1 180); do
-            if grep -q 'Done' server.log 2>/dev/null; then ok=1; break; fi
-            if [ -f exitcode ]; then break; fi
-            sleep 5
-          done
-          if [ -z "$ok" ]; then echo "SERVER FAILED TO START"; tail -100 server.log; exit 1; fi
-          sleep 5
-          echo "seed" >&3
-          sleep 5
-          echo "version" >&3
-          sleep 5
-          echo "stop" >&3
-          for i in $(seq 1 36); do [ -f exitcode ] && break; sleep 5; done
-          echo "=== branding check ==="
-          grep -i 'rolia' server.log | head -20
-          echo "=== seed check ==="
-          grep -i 'feature seed' server.log | head -5
-          grep -qi 'rolia' server.log || { echo "NO ROLIA BRANDING"; exit 1; }
-          grep -qi 'feature seed' server.log || { echo "NO FEATURE SEED"; exit 1; }
+
+          run_server () {
+            tag="$1"; log="server_${tag}.log"
+            rm -f input exitcode
+            mkfifo input
+            (java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "$log" 2>&1; echo $? > exitcode) &
+            exec 3>input
+            ok=""
+            for i in $(seq 1 180); do
+              grep -q 'Done (' "$log" 2>/dev/null && { ok=1; break; }
+              [ -f exitcode ] && break
+              sleep 5
+            done
+            if [ -z "$ok" ]; then echo "[$tag] SERVER FAILED TO START"; tail -120 "$log"; exec 3>&- || true; exit 1; fi
+            sleep 5; echo "seed" >&3
+            sleep 5; echo "stop" >&3
+            for i in $(seq 1 36); do [ -f exitcode ] && break; sleep 5; done
+            exec 3>&- || true
+            echo "=== [$tag] branding + seed lines ==="
+            grep -iE 'running rolia|feature seed' "$log" | head
+            grep -qi 'rolia' "$log" || { echo "[$tag] NO ROLIA BRANDING"; exit 1; }
+            grep -qi 'feature seed' "$log" || { echo "[$tag] NO FEATURE SEED"; exit 1; }
+            if grep -Eq 'Exception in thread|Caused by:|Failed to start the minecraft server' "$log"; then
+              echo "[$tag] FATAL ERRORS DETECTED"; grep -nE 'Exception in thread|Caused by:' "$log" | head; exit 1
+            fi
+            ec=$(cat exitcode 2>/dev/null || echo 1)
+            [ "$ec" = "0" ] || { echo "[$tag] non-zero exit ($ec)"; tail -60 "$log"; exit 1; }
+          }
+
+          run_server first     # fresh world: generates world + rolia-seed.properties
+          run_server second    # restart on same world: must load cleanly, identical feature seed
+
+          FS1=$(grep -oiE 'feature seed: \[[0-9]+\]' server_first.log  | grep -oE '[0-9]+' | head -1)
+          FS2=$(grep -oiE 'feature seed: \[[0-9]+\]' server_second.log | grep -oE '[0-9]+' | head -1)
+          echo "run1 feature seed: $FS1"
+          echo "run2 feature seed: $FS2"
+          [ -n "$FS1" ] || { echo "feature seed not printed"; exit 1; }
+          [ "${#FS1}" -ge 20 ] || { echo "feature seed too short (not 1024-bit?): $FS1"; exit 1; }
+          [ "$FS1" = "$FS2" ] || { echo "feature seed changed across restart: $FS1 vs $FS2"; exit 1; }
+          echo "SMOKE TEST OK: two clean starts, stable 1024-bit feature seed, no fatal errors"
 
       - name: Publish result to ci-output branch
         if: always()
@@ -107,7 +124,7 @@ jobs:
           set -x
           mkdir -p /tmp/out
           find . -name '*paperclip*.jar' -not -path './testrun/*' -exec cp {} /tmp/out/ \; 2>/dev/null || true
-          cp testrun/server.log /tmp/out/ 2>/dev/null || true
+          cp testrun/server_*.log /tmp/out/ 2>/dev/null || true
           cp apply.log build.log /tmp/out/ 2>/dev/null || true
           cd /tmp/out
           f=$(ls *paperclip*.jar 2>/dev/null | head -1); if [ -n "$f" ] && [ "$f" != "rolia-paperclip-26.1.2.jar" ]; then mv "$f" rolia-paperclip-26.1.2.jar; fi

@@ -19,6 +19,7 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
     private final long[] worldSeed = new long[Globals.WORLD_SEED_LONGS];
     private final long[] randomBits = new long[8];
     private final long[] message = new long[16];
+    private final long[] keyedMessage = new long[16]; // Rolia - reused keying buffer
     private final long[] cachedInternalState = new long[16];
     private int randomBitIndex;
     private long counter;
@@ -65,8 +66,23 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     private void moreRandomBits() {
         message[3] = counter++;
-        System.arraycopy(getHashedWorldSeed(), 0, randomBits, 0, 8);
-        Hashing.hash(message, randomBits, cachedInternalState, 64, true);
+        // Rolia start - Feature secure seed FIX: actually key the random stream on the hashed
+        // world seed (+ secret salt). Previously getHashedWorldSeed() was copied into randomBits
+        // and then immediately overwritten by hash(message), so worldgen placement was independent
+        // of both the world seed and the salt. Fold the hashed world seed into the message so the
+        // output depends on the secret seed.
+        final long[] hashedWorldSeed = getHashedWorldSeed();
+        for (int i = 0; i < 8; i++) {
+            keyedMessage[i] = message[i] ^ hashedWorldSeed[i % hashedWorldSeed.length];
+        }
+        Hashing.hash(keyedMessage, randomBits, cachedInternalState, 64, true);
+        // Rolia end
+    }
+
+    // Rolia - Java shift counts are taken mod 64, so (1L << 64) - 1 == 0. Guard the full-width
+    // mask so getBits(64) / nextLong() are not silently zeroed.
+    private static long lowMask(int bits) {
+        return bits >= 64 ? -1L : (1L << bits) - 1L;
     }
 
     private long getBits(int count) {
@@ -77,11 +93,11 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
         int alignment = randomBitIndex & 63;
         if ((randomBitIndex >>> 6) == ((randomBitIndex + count) >>> 6)) {
-            long result = (randomBits[randomBitIndex >>> 6] >>> alignment) & ((1L << count) - 1);
+            long result = (randomBits[randomBitIndex >>> 6] >>> alignment) & lowMask(count);
             randomBitIndex += count;
             return result;
         } else {
-            long result = (randomBits[randomBitIndex >>> 6] >>> alignment) & ((1L << (64 - alignment)) - 1);
+            long result = (randomBits[randomBitIndex >>> 6] >>> alignment) & lowMask(64 - alignment);
             randomBitIndex += count;
             if (randomBitIndex >= MAX_RANDOM_BIT_INDEX) {
                 moreRandomBits();
@@ -89,7 +105,7 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
             }
             alignment = randomBitIndex & 63;
             result <<= alignment;
-            result |= (randomBits[randomBitIndex >>> 6] >>> (64 - alignment)) & ((1L << alignment) - 1);
+            result |= (randomBits[randomBitIndex >>> 6] >>> (64 - alignment)) & lowMask(alignment);
 
             return result;
         }
