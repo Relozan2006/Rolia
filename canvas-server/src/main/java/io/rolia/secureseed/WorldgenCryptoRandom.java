@@ -193,11 +193,21 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public void setLargeFeatureSeed(long worldSeed, int chunkX, int chunkZ) {
-        super.setLargeFeatureSeed(worldSeed, chunkX, chunkZ);
+        // Rolia - route through the secure stream instead of the raw level seed (was: super)
+        if (!Globals.isSecureSeedEnabled()) {
+            super.setLargeFeatureSeed(worldSeed, chunkX, chunkZ);
+            return;
+        }
+        setSecureSeed(chunkX, chunkZ, Globals.Salt.GENERATE_FEATURE, (int) (worldSeed ^ (worldSeed >>> 32)));
     }
 
     @Override
     public void setLargeFeatureWithSalt(long worldSeed, int regionX, int regionZ, int salt) {
-        super.setLargeFeatureWithSalt(worldSeed, regionX, regionZ, salt);
+        // Rolia - route through the secure stream instead of the raw level seed (was: super)
+        if (!Globals.isSecureSeedEnabled()) {
+            super.setLargeFeatureWithSalt(worldSeed, regionX, regionZ, salt);
+            return;
+        }
+        setSecureSeed(regionX, regionZ, Globals.Salt.POTENTIONAL_FEATURE, salt);
     }
 }

@@ -31,7 +31,7 @@
 -        }
 -        // Paper end - Add missing structure set seed configs
 +        WorldgenRandom random = new WorldgenCryptoRandom(
-+                sourceX, sourceZ, Globals.Salt.MINESHAFT_FEATURE, 0
++                sourceX, sourceZ, Globals.Salt.MINESHAFT_FEATURE, saltOverride != null ? saltOverride : 0
 +        );
          return random.nextDouble() < probability;
      }
@@ -40,7 +40,7 @@
 -        WorldgenRandom random = new WorldgenRandom(new LegacyRandomSource(0L));
 -        random.setLargeFeatureWithSalt(seed, sourceX, sourceZ, saltOverride != null ? saltOverride : HIGHLY_ARBITRARY_RANDOM_SALT); // Paper - Add missing structure set seed configs
 +        WorldgenRandom random = new WorldgenCryptoRandom(
-+                sourceX, sourceZ, Globals.Salt.BURIED_TREASURE_FEATURE, 0
++                sourceX, sourceZ, Globals.Salt.BURIED_TREASURE_FEATURE, saltOverride != null ? saltOverride : HIGHLY_ARBITRARY_RANDOM_SALT
 +        );
          return random.nextFloat() < probability;
      }

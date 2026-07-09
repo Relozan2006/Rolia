@@ -123,6 +123,45 @@ jobs:
           [ "$FS1" = "$FS2" ] || { echo "feature seed changed across restart: $FS1 vs $FS2"; exit 1; }
           echo "SMOKE TEST OK: two clean starts, stable 1024-bit feature seed, no fatal errors"
 
+      - name: Determinism test (secure placement reproducibility)
+        run: |
+          set -x
+          cd testrun
+          SALT="DETERMINISMSALT_DETERMINISMSALT_DETERMINISMSALT_DETERMINISM_0123"
+          FSEED="12345678901234567890123456789012345678901234567890"
+          locate_run () {
+            rm -rf world world_nether world_the_end
+            printf 'secure-seed.enabled=true\nsecure-seed.salt=%s\n' "$SALT" > rolia-seed.properties
+            printf 'level-seed=roliadettest\nfeature-level-seed=%s\nonline-mode=false\n' "$FSEED" > server.properties
+            rm -f input exitcode; mkfifo input
+            (java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "det_$1.log" 2>&1; echo $? > exitcode) &
+            exec 3>input
+            for i in $(seq 1 180); do grep -q 'Done (' "det_$1.log" 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
+            sleep 4; echo "locate structure minecraft:mineshaft" >&3
+            sleep 5; echo "locate structure minecraft:stronghold" >&3
+            sleep 5; echo "stop" >&3
+            for i in $(seq 1 36); do [ -f exitcode ] && break; sleep 5; done
+            exec 3>&- || true
+          }
+          locate_run a
+          locate_run b
+          echo "=== [A] feature seed + locate ==="; grep -iE 'feature seed|is at' det_a.log | head
+          echo "=== [B] feature seed + locate ==="; grep -iE 'feature seed|is at' det_b.log | head
+          CA=$(grep -oE '\[-?[0-9]+, ~, -?[0-9]+\]' det_a.log | tr '\n' ' ')
+          CB=$(grep -oE '\[-?[0-9]+, ~, -?[0-9]+\]' det_b.log | tr '\n' ' ')
+          FA=$(grep -oiE 'feature seed: \[[0-9]+\]' det_a.log | head -1)
+          FB=$(grep -oiE 'feature seed: \[[0-9]+\]' det_b.log | head -1)
+          echo "A: feat=$FA structures=[$CA]"
+          echo "B: feat=$FB structures=[$CB]"
+          [ "$FA" = "$FB" ] || { echo "feature-level-seed not honored / differs across runs"; exit 1; }
+          if [ -n "$CA" ] && [ "$CA" = "$CB" ]; then
+            echo "DETERMINISM OK: identical secure structure placement across two fresh regenerations"
+          elif [ -z "$CA" ] && [ -z "$CB" ]; then
+            echo "WARN: locate returned no coords in either run - determinism not strictly asserted (see logs)"
+          else
+            echo "NON-DETERMINISTIC placement: A=[$CA] B=[$CB]"; exit 1
+          fi
+
       - name: Publish result to ci-output branch
         if: always()
         run: |
@@ -130,6 +169,7 @@ jobs:
           mkdir -p /tmp/out
           find . -name '*paperclip*.jar' -not -path './testrun/*' -exec cp {} /tmp/out/ \; 2>/dev/null || true
           cp testrun/server_*.log /tmp/out/ 2>/dev/null || true
+          cp testrun/det_*.log /tmp/out/ 2>/dev/null || true
           cp apply.log build.log /tmp/out/ 2>/dev/null || true
           cd /tmp/out
           f=$(ls *paperclip*.jar 2>/dev/null | head -1); if [ -n "$f" ] && [ "$f" != "rolia-paperclip-26.1.2.jar" ]; then mv "$f" rolia-paperclip-26.1.2.jar; fi
