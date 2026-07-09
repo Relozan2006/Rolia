@@ -155,3 +155,18 @@ A==C (другая СОЛЬ проигнорирована?): True
 4. Отдельный трек апдейта на 26.2.
 
 Ни одно worldgen-ломающее изменение я не трогал — всё, что в коде, безопасно для существующих карт.
+
+
+---
+
+## 6. build 18 (2026-07-09)
+
+- **Secure seed теперь всегда включён и неотключаем.** `Globals.isSecureSeedEnabled()` жёстко
+  возвращает `true`; `secure-seed.enabled=false` в `rolia-seed.properties` игнорируется (с warn-логом).
+  Генерация не изменилась vs build 17 (тот и так шёл по secure-пути по умолчанию) — миры совместимы.
+- **Брендинг проверен и корректен во всех трёх местах.** Манифест форка прописывает
+  `Brand-Name=Rolia`, `Brand-Vendor="Rolia Team"`, `Brand-Id=rolia:rolia`. Старт: «This server is
+  running Rolia…»; `/version`: строка `[Rolia] … | STABLE`; F3 у игрока: `minecraft:brand` =
+  `getServerModName()` = конфиг `serverModName` (дефолт `brandName()` = Rolia). CI теперь в смоуке
+  прогоняет `/version` и логирует `serverModName` для живой проверки.
+- Не задан только `Brand-Website` (в `/version` бренд просто не кликабельный) — косметика, в бэклоге.

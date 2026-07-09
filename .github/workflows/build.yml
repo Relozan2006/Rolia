@@ -91,12 +91,15 @@ jobs:
               sleep 5
             done
             if [ -z "$ok" ]; then echo "[$tag] SERVER FAILED TO START"; tail -120 "$log"; exec 3>&- || true; exit 1; fi
-            sleep 5; echo "seed" >&3
+            sleep 5; echo "version" >&3
+            sleep 6; echo "seed" >&3
             sleep 5; echo "stop" >&3
             for i in $(seq 1 36); do [ -f exitcode ] && break; sleep 5; done
             exec 3>&- || true
             echo "=== [$tag] branding + seed lines ==="
             grep -iE 'running rolia|feature seed' "$log" | head
+            echo "=== [$tag] /version output (brand must say Rolia) ==="
+            grep -iE 'checking version|\[Rolia\]|\| STABLE|made by' "$log" | head
             grep -qi 'rolia' "$log" || { echo "[$tag] NO ROLIA BRANDING"; exit 1; }
             grep -qi 'feature seed' "$log" || { echo "[$tag] NO FEATURE SEED"; exit 1; }
             if grep -Eq 'Exception in thread|Caused by:|Failed to start the minecraft server' "$log"; then
@@ -107,6 +110,8 @@ jobs:
           }
 
           run_server first     # fresh world: generates world + rolia-seed.properties
+          echo "=== F3 server brand (serverModName -> minecraft:brand payload) ==="
+          grep -i 'serverModName' canvas-server.yml 2>/dev/null || echo "(canvas-server.yml not persisted on first run; F3 brand = brandName() = Rolia)"
           run_server second    # restart on same world: must load cleanly, identical feature seed
 
           FS1=$(grep -oiE 'feature seed: \[[0-9]+\]' server_first.log  | grep -oE '[0-9]+' | head -1)

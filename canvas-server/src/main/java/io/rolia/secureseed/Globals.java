@@ -96,7 +96,8 @@ public class Globals {
     }
 
     public static boolean isSecureSeedEnabled() {
-        return SeedConfig.enabled();
+        // Rolia - the secure seed is ALWAYS on and cannot be disabled (hard-forced).
+        return true;
     }
 
 

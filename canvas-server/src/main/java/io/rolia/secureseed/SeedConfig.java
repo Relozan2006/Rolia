@@ -12,6 +12,7 @@ import java.util.Properties;
 
 /**
  * Rolia - standalone configuration for the 1024-bit secure world seed system.
+ * The secure seed is ALWAYS enabled and cannot be turned off; only the salt is configurable.
  * Stored in rolia-seed.properties in the server working directory.
  */
 public final class SeedConfig {
@@ -29,7 +30,7 @@ public final class SeedConfig {
 
     public static boolean enabled() {
         load();
-        return enabled;
+        return true; // Rolia - secure seed is always on and cannot be disabled
     }
 
     public static String salt() {
@@ -48,7 +49,11 @@ public final class SeedConfig {
                 LOGGER.warn("Rolia: failed to read {}, using defaults", FILE_NAME, e);
             }
         }
-        enabled = Boolean.parseBoolean(props.getProperty(KEY_ENABLED, "true"));
+        // Rolia - secure seed is always on; a user-set secure-seed.enabled=false is ignored
+        if ("false".equalsIgnoreCase(props.getProperty(KEY_ENABLED, "true").trim())) {
+            LOGGER.warn("Rolia: '{}=false' in {} is ignored - the secure seed is always enabled and cannot be disabled.", KEY_ENABLED, FILE_NAME);
+        }
+        enabled = true;
         String configSalt = props.getProperty(KEY_SALT, "");
         boolean dirty = !file.isFile();
         if (configSalt.isEmpty() || configSalt.length() < 64) {
