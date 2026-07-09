@@ -73,7 +73,33 @@ public final class SeedConfig {
                 LOGGER.error("Rolia: failed to save {}", FILE_NAME, e);
             }
         }
+        // Rolia - the salt is the master secret; keep the file owner-only at rest
+        if (file.isFile()) {
+            restrictPermissions(file);
+        }
         loaded = true;
+    }
+
+    // Rolia start - restrict the salt file so other local users cannot read the secret
+    private static void restrictPermissions(File file) {
+        try {
+            java.nio.file.Path p = file.toPath();
+            java.nio.file.attribute.PosixFileAttributeView view =
+                java.nio.file.Files.getFileAttributeView(p, java.nio.file.attribute.PosixFileAttributeView.class);
+            if (view != null) {
+                view.setPermissions(java.util.EnumSet.of(
+                    java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                    java.nio.file.attribute.PosixFilePermission.OWNER_WRITE));
+            } else {
+                // non-POSIX (e.g. Windows): best-effort owner-only
+                file.setReadable(false, false);
+                file.setReadable(true, true);
+                file.setWritable(false, false);
+                file.setWritable(true, true);
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Rolia: could not restrict permissions on {} - protect it manually!", FILE_NAME);
+        }
     }
 
     private static String generateSecureSalt(int length) {

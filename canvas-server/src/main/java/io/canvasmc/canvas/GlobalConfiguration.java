@@ -88,10 +88,11 @@ public class GlobalConfiguration extends Part {
                             buildStatus = ClientV2.BuildStatus.LOCAL;
                         }
                         else {
-                            try {
-                                buildStatus = Util.CANVAS_CLIENT.getBuild(buildNum).buildStatus();
-                            } catch (Throwable ignored) {
-                            }
+                            // Rolia start - rebranded fork: do not query the CanvasMC build API
+                            // (it does not know Rolia build numbers -> UNKNOWN warning +
+                            // unwanted phone-home). Use the local release channel instead.
+                            buildStatus = ClientV2.BuildStatus.STABLE;
+                            // Rolia end
                         }
                         return buildStatus;
                     }).thenAccept(buildStatus -> RegionizedServer.getInstance().addTask(() -> {
