@@ -126,6 +126,7 @@ jobs:
       - name: Determinism test (secure placement reproducibility)
         run: |
           set -x
+          set +e +o pipefail   # assertions are explicit below; empty greps must not abort the step
           cd testrun
           SALT="DETERMINISMSALT_DETERMINISMSALT_DETERMINISMSALT_DETERMINISM_0123"
           FSEED="12345678901234567890123456789012345678901234567890"
@@ -137,29 +138,30 @@ jobs:
             (java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "det_$1.log" 2>&1; echo $? > exitcode) &
             exec 3>input
             for i in $(seq 1 180); do grep -q 'Done (' "det_$1.log" 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
+            sleep 4; echo "seed" >&3
             sleep 4; echo "locate structure minecraft:mineshaft" >&3
             sleep 5; echo "locate structure minecraft:stronghold" >&3
             sleep 5; echo "stop" >&3
             for i in $(seq 1 36); do [ -f exitcode ] && break; sleep 5; done
-            exec 3>&- || true
+            exec 3>&- 2>/dev/null || true
           }
           locate_run a
           locate_run b
-          echo "=== [A] feature seed + locate ==="; grep -iE 'feature seed|is at' det_a.log | head
-          echo "=== [B] feature seed + locate ==="; grep -iE 'feature seed|is at' det_b.log | head
+          echo "=== [A] feature seed + locate ==="; grep -iE 'feature seed|is at' det_a.log
+          echo "=== [B] feature seed + locate ==="; grep -iE 'feature seed|is at' det_b.log
           CA=$(grep -oE '\[-?[0-9]+, ~, -?[0-9]+\]' det_a.log | tr '\n' ' ')
           CB=$(grep -oE '\[-?[0-9]+, ~, -?[0-9]+\]' det_b.log | tr '\n' ' ')
           FA=$(grep -oiE 'feature seed: \[[0-9]+\]' det_a.log | head -1)
           FB=$(grep -oiE 'feature seed: \[[0-9]+\]' det_b.log | head -1)
-          echo "A: feat=$FA structures=[$CA]"
-          echo "B: feat=$FB structures=[$CB]"
-          [ "$FA" = "$FB" ] || { echo "feature-level-seed not honored / differs across runs"; exit 1; }
-          if [ -n "$CA" ] && [ "$CA" = "$CB" ]; then
-            echo "DETERMINISM OK: identical secure structure placement across two fresh regenerations"
-          elif [ -z "$CA" ] && [ -z "$CB" ]; then
-            echo "WARN: locate returned no coords in either run - determinism not strictly asserted (see logs)"
+          echo "A: feat=$FA coords=[$CA]"
+          echo "B: feat=$FB coords=[$CB]"
+          if [ -n "$FA" ] && [ "$FA" != "$FB" ]; then echo "FAIL: feature-level-seed differs across runs ($FA vs $FB)"; exit 1; fi
+          if [ -z "$CA" ] || [ -z "$CB" ]; then
+            echo "WARN: no locate coords captured - determinism not strictly asserted (see det logs)"
+          elif [ "$CA" = "$CB" ]; then
+            echo "DETERMINISM OK: identical secure structure placement + feature seed across two fresh regenerations"
           else
-            echo "NON-DETERMINISTIC placement: A=[$CA] B=[$CB]"; exit 1
+            echo "FAIL: NON-DETERMINISTIC placement A=[$CA] B=[$CB]"; exit 1
           fi
 
       - name: Publish result to ci-output branch
