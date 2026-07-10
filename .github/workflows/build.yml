@@ -123,21 +123,23 @@ jobs:
           [ "$FS1" = "$FS2" ] || { echo "feature seed changed across restart: $FS1 vs $FS2"; exit 1; }
           echo "SMOKE TEST OK: two clean starts, stable 1024-bit feature seed, no fatal errors"
 
-      - name: Determinism test (secure placement reproducibility)
+      - name: Determinism + seed-split test
         run: |
           set -x
-          set +e +o pipefail   # assertions are explicit below; empty greps must not abort the step
+          set +e +o pipefail   # assertions are explicit; empty greps must not abort
           cd testrun
           SALT="DETERMINISMSALT_DETERMINISMSALT_DETERMINISMSALT_DETERMINISM_0123"
           FSEED="12345678901234567890123456789012345678901234567890"
+          FSEED2="98765432109876543210987654321098765432109876543210"
           locate_run () {
+            tag="$1"; fs="$2"
             rm -rf world world_nether world_the_end
             printf 'secure-seed.enabled=true\nsecure-seed.salt=%s\n' "$SALT" > rolia-seed.properties
-            printf 'level-seed=roliadettest\nfeature-level-seed=%s\nonline-mode=false\n' "$FSEED" > server.properties
+            printf 'level-seed=roliadettest\nfeature-level-seed=%s\nonline-mode=false\n' "$fs" > server.properties
             rm -f input exitcode; mkfifo input
-            (java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "det_$1.log" 2>&1; echo $? > exitcode) &
+            (java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "det_$tag.log" 2>&1; echo $? > exitcode) &
             exec 3>input
-            for i in $(seq 1 180); do grep -q 'Done (' "det_$1.log" 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
+            for i in $(seq 1 180); do grep -q 'Done (' "det_$tag.log" 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
             sleep 4; echo "seed" >&3
             sleep 4; echo "locate structure minecraft:mineshaft" >&3
             sleep 5; echo "locate structure minecraft:stronghold" >&3
@@ -145,23 +147,18 @@ jobs:
             for i in $(seq 1 36); do [ -f exitcode ] && break; sleep 5; done
             exec 3>&- 2>/dev/null || true
           }
-          locate_run a
-          locate_run b
-          echo "=== [A] feature seed + locate ==="; grep -iE 'feature seed|is at' det_a.log
-          echo "=== [B] feature seed + locate ==="; grep -iE 'feature seed|is at' det_b.log
-          CA=$(grep -oE '\[-?[0-9]+, ~, -?[0-9]+\]' det_a.log | tr '\n' ' ')
-          CB=$(grep -oE '\[-?[0-9]+, ~, -?[0-9]+\]' det_b.log | tr '\n' ' ')
-          FA=$(grep -oiE 'feature seed: \[[0-9]+\]' det_a.log | head -1)
-          FB=$(grep -oiE 'feature seed: \[[0-9]+\]' det_b.log | head -1)
-          echo "A: feat=$FA coords=[$CA]"
-          echo "B: feat=$FB coords=[$CB]"
-          if [ -n "$FA" ] && [ "$FA" != "$FB" ]; then echo "FAIL: feature-level-seed differs across runs ($FA vs $FB)"; exit 1; fi
-          if [ -z "$CA" ] || [ -z "$CB" ]; then
-            echo "WARN: no locate coords captured - determinism not strictly asserted (see det logs)"
-          elif [ "$CA" = "$CB" ]; then
-            echo "DETERMINISM OK: identical secure structure placement + feature seed across two fresh regenerations"
+          locate_run a "$FSEED"    # level L, feature F1
+          locate_run b "$FSEED"    # level L, feature F1  -> must be IDENTICAL (determinism)
+          locate_run c "$FSEED2"   # level L, feature F2  -> structures must MOVE (secured by feature seed)
+          coords () { grep -oE '\[-?[0-9]+, ~, -?[0-9]+\]' "det_$1.log" | tr '\n' ' '; }
+          CA=$(coords a); CB=$(coords b); CC=$(coords c)
+          echo "A (L,F1): $CA"; echo "B (L,F1): $CB"; echo "C (L,F2): $CC"
+          if [ -z "$CA" ] || [ -z "$CC" ]; then
+            echo "WARN: locate produced no coords - split not strictly asserted (see logs)"
           else
-            echo "FAIL: NON-DETERMINISTIC placement A=[$CA] B=[$CB]"; exit 1
+            if [ "$CA" != "$CB" ]; then echo "FAIL: non-deterministic (A!=B with identical seeds)"; exit 1; fi
+            if [ "$CA" = "$CC" ]; then echo "FAIL: structures did NOT move when feature seed changed -> not secured by feature seed"; exit 1; fi
+            echo "OK: determinism (A==B) + seed-split (structures move with feature seed, A!=C) verified"
           fi
 
       - name: Publish result to ci-output branch
