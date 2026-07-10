@@ -97,11 +97,9 @@ public class Hashing {
         v[b] = Long.rotateRight(v[b] ^ v[c], 63);
     }
 
+    // Rolia - secure seed is always on; the previous non-secure passthrough/weak-expansion
+    // fallbacks were dead code and have been removed so a weak path can never be revived.
     public static long[] hashWorldSeed(long[] worldSeed) {
-        if (!Globals.isSecureSeedEnabled()) {
-            return worldSeed.clone();
-        }
-
         long[] saltHashValue = getSaltHash();
         long[] saltedSeed = new long[worldSeed.length];
 
@@ -113,14 +111,6 @@ public class Hashing {
     }
 
     public static long[] expandLevelSeedTo1024Bits(long levelSeed) {
-        if (!Globals.isSecureSeedEnabled()) {
-            long[] result = new long[Globals.WORLD_SEED_LONGS];
-            for (int i = 0; i < Globals.WORLD_SEED_LONGS; i++) {
-                result[i] = levelSeed ^ (i * 0x9E3779B97F4A7C15L);
-            }
-            return result;
-        }
-
         long[] result = new long[Globals.WORLD_SEED_LONGS];
         long[] saltHashValue = getSaltHash();
 

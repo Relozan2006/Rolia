@@ -170,7 +170,7 @@ public class GlobalConfiguration extends Part {
             try {
                 SIMDDetection.isEnabled = SIMDDetection.canEnable(LOGGER);
             } catch (NoClassDefFoundError | Exception ignored) {
-                ignored.printStackTrace();
+                // Rolia - SIMD not available on this JVM/CPU; fall back to scalar silently
             }
 
             if (SIMDDetection.isEnabled) {
