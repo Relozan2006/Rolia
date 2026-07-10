@@ -55,7 +55,7 @@ Java **25** или новее.
 
 ```bash
 # рекомендуется: с SIMD-ускорением (Java 25+)
-java -Xmx4G --add-modules=jdk.incubator.vector -jar rolia-paperclip-26.1.2.jar --nogui
+java -Xmx4G --add-modules=jdk.incubator.vector --sun-misc-unsafe-memory-access=allow -jar rolia-paperclip-26.1.2.jar --nogui
 
 # или готовый скрипт из репозитория
 bash start.sh
@@ -131,7 +131,7 @@ Download `rolia-paperclip-26.1.2.jar` from [Releases](../../releases/latest).
 
 ```bash
 # recommended: with SIMD acceleration (Java 25+)
-java -Xmx4G --add-modules=jdk.incubator.vector -jar rolia-paperclip-26.1.2.jar --nogui
+java -Xmx4G --add-modules=jdk.incubator.vector --sun-misc-unsafe-memory-access=allow -jar rolia-paperclip-26.1.2.jar --nogui
 
 # or the ready-made script from the repository
 bash start.sh
