@@ -134,7 +134,7 @@
      }
  
      public boolean isActive(final Activity activity) {
-@@ -396,48 +_,111 @@
+@@ -396,48 +_,113 @@
      }
  
      private void forgetOutdatedMemories() {
@@ -189,6 +189,7 @@
      }
  
      private void startEachNonRunningBehavior(final ServerLevel level, final E body) {
++        if (!io.rolia.optimization.Dab.shouldTickBrain(body)) return; // Rolia - DAB
          long time = level.getGameTime();
  
 -        for (Map<Activity, Set<BehaviorControl<? super E>>> behavioursByActivities : this.availableBehaviorsByPriority.values()) {
@@ -243,6 +244,7 @@
      }
  
      private void tickEachRunningBehavior(final ServerLevel level, final E body) {
++        if (!io.rolia.optimization.Dab.shouldTickBrain(body)) return; // Rolia - DAB
          long timestamp = level.getGameTime();
  
 -        for (BehaviorControl<? super E> behavior : this.getRunningBehaviors()) {

@@ -1,5 +1,7 @@
 package io.rolia.secureseed;
 
+import io.rolia.RoliaConfig;
+
 import com.google.common.collect.Iterables;
 
 import net.minecraft.server.level.ServerLevel;
@@ -102,7 +104,7 @@ public class Globals {
 
 
     public static String getSecureSeedSalt() {
-        return SeedConfig.salt();
+        return RoliaConfig.salt();
     }
 
     public enum Salt {
