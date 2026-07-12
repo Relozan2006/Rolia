@@ -55,6 +55,20 @@ public class Globals {
     }
     // Rolia end
 
+    // Rolia - guarantee a real random 1024-bit feature seed: null/empty/all-zero means "uninitialised"
+    // (e.g. a world created without a feature seed), so generate a fresh cryptographically random one.
+    public static long[] ensureRandomSeed(long[] seed) {
+        if (seed == null || seed.length == 0) {
+            return createRandomWorldSeed();
+        }
+        for (long v : seed) {
+            if (v != 0L) {
+                return seed;
+            }
+        }
+        return createRandomWorldSeed();
+    }
+
     public static long[] createRandomWorldSeed() {
         long[] seed = new long[WORLD_SEED_LONGS];
         SecureRandom rand = new SecureRandom();

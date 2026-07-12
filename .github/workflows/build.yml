@@ -69,6 +69,9 @@ jobs:
             grep -rln "RandomSource.create(level.getSeed()\|RandomSource.create(this.getSeed()\|create(worldGenLevel.getSeed()" canvas-server/src/minecraft/java --include=*.java | head -10; } > /tmp/out/endspike.txt || true
           cat /tmp/out/endspike.txt
 
+      - name: Apply Rolia DAB source hooks
+        run: python3 scripts/apply_dab_hooks.py
+
       - name: Build paperclip jar
         env:
           BUILD_NUMBER: ${{ github.run_number }}
@@ -186,6 +189,35 @@ jobs:
           if grep -Eq 'Exception in thread|Caused by:' dab.log; then echo "FAIL: exceptions with DAB on"; grep -nE 'Exception in thread|Caused by:' dab.log | head; exit 1; fi
           echo "DAB ENABLED SMOKE OK: clean startup with dab.enabled=true"
 
+      - name: Auto-random seed test (fresh server => unique 1024-bit seed)
+        run: |
+          set -x
+          set +e +o pipefail
+          cd testrun
+          fresh_run () {
+            tag="$1"
+            rm -rf world world_nether world_the_end rolia.yml rolia-seed.properties
+            printf 'level-seed=samelevel\nonline-mode=false\n' > server.properties
+            rm -f input exitcode; mkfifo input
+            (java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "auto_$tag.log" 2>&1; echo $? > exitcode) &
+            exec 3>input
+            for i in $(seq 1 180); do grep -q 'Done (' "auto_$tag.log" 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
+            sleep 4; echo "seed" >&3
+            sleep 4; echo "stop" >&3
+            for i in $(seq 1 36); do [ -f exitcode ] && break; sleep 5; done
+            exec 3>&- 2>/dev/null || true
+          }
+          fresh_run a
+          fresh_run b
+          FA=$(grep -oiE 'feature seed: \[[0-9]+\]' auto_a.log | head -1)
+          FB=$(grep -oiE 'feature seed: \[[0-9]+\]' auto_b.log | head -1)
+          echo "A feature seed: $FA"
+          echo "B feature seed: $FB"
+          [ -n "$FA" ] && [ -n "$FB" ] || { echo "FAIL: feature seed not auto-generated on fresh start"; exit 1; }
+          [ "$FA" != "$FB" ] || { echo "FAIL: two fresh servers got the SAME feature seed"; exit 1; }
+          grep -qi 'secure seed active' auto_a.log || { echo "FAIL: secure seed not active on fresh start"; exit 1; }
+          echo "AUTO-RANDOM OK: fresh servers get DIFFERENT 1024-bit feature seeds; secure seed always active"
+
       - name: Publish result to ci-output branch
         if: always()
         run: |
@@ -195,6 +227,7 @@ jobs:
           cp testrun/server_*.log /tmp/out/ 2>/dev/null || true
           cp testrun/det_*.log /tmp/out/ 2>/dev/null || true
           cp testrun/dab.log /tmp/out/ 2>/dev/null || true
+          cp testrun/auto_*.log /tmp/out/ 2>/dev/null || true
           cp apply.log build.log /tmp/out/ 2>/dev/null || true
           cd /tmp/out
           f=$(ls *paperclip*.jar 2>/dev/null | head -1); if [ -n "$f" ] && [ "$f" != "rolia-paperclip-26.1.2.jar" ]; then mv "$f" rolia-paperclip-26.1.2.jar; fi

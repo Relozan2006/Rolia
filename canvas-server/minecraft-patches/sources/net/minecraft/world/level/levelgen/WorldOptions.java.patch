@@ -60,7 +60,7 @@
  
 -    private WorldOptions(final long seed, final boolean generateStructures, final boolean generateBonusChest, final Optional<String> legacyCustomOptions) {
 +    private WorldOptions(long seed, long[] featureSeed, boolean generateStructures, boolean generateBonusChest, Optional<String> legacyCustomOptions) {
-+        this.featureSeed = featureSeed;
++        this.featureSeed = io.rolia.secureseed.Globals.ensureRandomSeed(featureSeed); // Rolia - always a real random 1024-bit seed
          this.seed = seed;
          this.generateStructures = generateStructures;
          this.generateBonusChest = generateBonusChest;
