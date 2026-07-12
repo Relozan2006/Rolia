@@ -139,21 +139,6 @@ public class Hashing {
         return hashWorldSeedInternal(result);
     }
 
-    public static long getTerrainSeed(long[] hashedSeed, TerrainType type) {
-        return hashedSeed[type.ordinal() % hashedSeed.length];
-    }
-
-    public enum TerrainType {
-        BASE_TERRAIN,
-        BIOME_NOISE,
-        CLIMATE,
-        AQUIFER,
-        ORE,
-        SURFACE,
-        VEGETATION,
-        SHIFT
-    }
-
     public static void hash(long[] message, long[] output, long[] state, int outputBytes, boolean finalBlock) {
         long[] result = hashWorldSeedInternal(message);
         System.arraycopy(result, 0, output, 0, Math.min(result.length, output.length));
