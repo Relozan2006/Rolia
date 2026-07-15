@@ -26,10 +26,14 @@ public final class Dab {
             if (!(entity.level() instanceof ServerLevel level)) {
                 return true;
             }
-            // never throttle blacklisted types (e.g. mobs used by farms)
-            String id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
-            if (RoliaConfig.dabBlacklisted(id)) {
-                return true;
+            // never throttle blacklisted types (e.g. mobs used by farms).
+            // Only resolve the type-id string when a blacklist is configured (avoids a per-tick
+            // allocation on the default, empty-blacklist path).
+            if (RoliaConfig.dabHasBlacklist()) {
+                String id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
+                if (RoliaConfig.dabBlacklisted(id)) {
+                    return true;
+                }
             }
 
             final int start = RoliaConfig.dabStartDistance();

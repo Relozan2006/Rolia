@@ -47,6 +47,7 @@ public final class RoliaConfig {
     public static int dabStartDistance() { load(); return dabStartDistance; }
     public static int dabMaxTickInterval() { load(); return dabMaxTickInterval; }
     public static boolean dabBlacklisted(String typeId) { load(); return dabBlacklist.contains(typeId); }
+    public static boolean dabHasBlacklist() { load(); return !dabBlacklist.isEmpty(); }
 
     @SuppressWarnings("unchecked")
     private static synchronized void load() {

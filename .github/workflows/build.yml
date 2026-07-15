@@ -116,7 +116,7 @@ jobs:
             [ "$ec" = "0" ] || { echo "[$tag] non-zero exit ($ec)"; tail -60 "$log"; exit 1; }
           }
 
-          run_server first     # fresh world: generates world + rolia-seed.properties
+          run_server first     # fresh world: generates world + rolia.yml
           echo "=== F3 server brand (serverModName -> minecraft:brand payload) ==="
           grep -i 'serverModName' canvas-server.yml 2>/dev/null || echo "(canvas-server.yml not persisted on first run; F3 brand = brandName() = Rolia)"
           run_server second    # restart on same world: must load cleanly, identical feature seed
@@ -258,8 +258,8 @@ jobs:
 
           ### Особенности
           - Вся производительность Canvas: региональная многопоточность (Folia), оптимизации тиков, чанков и сущностей.
-          - **1024-битный защищённый сид**: генерация структур, жеод, слизневых чанков и террейна управляется криптографическим 1024-битным сидом — подбор сида по миру практически невозможен.
-          - Секретная соль в \`rolia-seed.properties\` — дополнительная защита от копирования мира.
+          - **1024-битный защищённый сид (всегда включён)**: структуры, данжи, руды-фичи, жеоды и слизневые чанки генерируются от секретного 1024-битного сида — подбор по миру практически невозможен. Рельеф и биомы — от обычного level-seed (мир воспроизводим). На каждом новом сервере сид генерируется свой, случайный.
+          - Секретная соль в \`rolia.yml\` (права 0600) — мастер-ключ защиты. Единый конфиг rolia.yml; опциональный DAB (троттлинг ИИ дальних мобов, по умолчанию выключен).
           - Команда \`/seed\` показывает и ванильный сид, и feature seed.
           - Параметр \`feature-level-seed\` в \`server.properties\` для задания своего 1024-битного сида.
 
