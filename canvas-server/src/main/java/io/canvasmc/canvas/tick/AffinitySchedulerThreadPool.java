@@ -393,7 +393,8 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
     public void notifyTasks(final @NonNull SchedulableTick task) {
         if (task.state == null) return;
         final ScheduledState state = (ScheduledState) task.state;
-        state.markedWithTasks.set(true);
+        // Rolia - was: markedWithTasks.set(true) here made the CAS below always fail, so the owning
+        // runner was never unparked (the mid-tick wakeup was dead). Let the CAS detect the false->true edge.
         final boolean changed = state.markedWithTasks.compareAndSet(false, true);
 
         // try wake owner if present. if the thread is parking to wait
@@ -414,7 +415,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
 
         private final AtomicInteger scheduled = new AtomicInteger();
         private AffinitySchedulerThreadPool schedulerOwnedBy;
-        private TickThreadRunner ownedBy;
+        private volatile TickThreadRunner ownedBy; // Rolia - read in notifyTasks() outside the schedule lock
         private final AtomicBoolean markedWithTasks = new AtomicBoolean(false);
 
         public boolean compareHasTasks() {

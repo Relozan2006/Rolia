@@ -522,8 +522,8 @@ index 3c646d9d594cbead75a30150b7e03124e2beaaf8..1fd029da66dee52d63d24fd9af7a4588
 +    private static final float DEFAULT_TICK_RATE = io.canvasmc.canvas.GlobalConfiguration.getInstance().regionScheduler.defaultTickRate;
 +    private static final long DEFAULT_TICK_TIME_NANOS = (long) (1_000_000_000 / DEFAULT_TICK_RATE);
 +
-+    private static float CURRENT_TICK_RATE = DEFAULT_TICK_RATE;
-+    private static long CURRENT_TIME_BETWEEN_TICKS = DEFAULT_TICK_TIME_NANOS;
++    private static volatile float CURRENT_TICK_RATE = DEFAULT_TICK_RATE; // Rolia - visibility across region threads
++    private static volatile long CURRENT_TIME_BETWEEN_TICKS = DEFAULT_TICK_TIME_NANOS; // Rolia - visibility across region threads
 +
 +    // Note: used for setting new tick time nanos, not really for anything else, utility method
 +    //    this is fine for decimal rates, as we round it so if anything, we are like 1 nanosecond off... which isn't bad

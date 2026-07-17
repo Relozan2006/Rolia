@@ -184,7 +184,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
 
         // now we save level data and force pearl data save
 
-        MinecraftServer.getServer().pearls.save(null);
+        MinecraftServer.getServer().pearls.save(null).join(); // Rolia - wait for the async pearl save (was fire-and-forget -> data loss on world unload)
         saveLevelData(this.level);
         this.level.chunkSource.getDataStorage().close();
 

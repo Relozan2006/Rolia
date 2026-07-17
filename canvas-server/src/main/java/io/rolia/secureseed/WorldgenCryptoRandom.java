@@ -3,6 +3,7 @@ package io.rolia.secureseed;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.levelgen.LegacyRandomSource;
+import net.minecraft.world.level.levelgen.PositionalRandomFactory;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
 import org.jetbrains.annotations.NotNull;
 
@@ -127,6 +128,23 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
         fork.counter = this.counter;
 
         return fork;
+    }
+
+    // Rolia - do NOT let positional randoms fall back to the wrapped constant-0 delegate (that would
+    // make them independent of the secret seed). Derive a secret-dependent positional factory instead.
+    @Override
+    public PositionalRandomFactory forkPositional() {
+        if (!Globals.isSecureSeedEnabled()) {
+            return super.forkPositional();
+        }
+        final long[] hashed = getHashedWorldSeed();
+        long secure = 0x9E3779B97F4A7C15L;
+        for (int i = 0; i < hashed.length; i++) {
+            secure ^= hashed[i];
+            secure = Long.rotateLeft(secure, 17) * 0xBF58476D1CE4E5B9L;
+        }
+        secure ^= message[0] ^ Long.rotateLeft(message[1], 32) ^ (message[2] * 0x94D049BB133111EBL) ^ counter;
+        return new LegacyRandomSource(secure).forkPositional();
     }
 
     @Override

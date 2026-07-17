@@ -546,7 +546,13 @@ public class GlobalConfiguration extends Part {
     public String defaultRespawnDimensionKey = Level.OVERWORLD.identifier().toString();
 
     public static @NonNull ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {
-        return ResourceKey.create(Registries.DIMENSION, Identifier.parse(GlobalConfiguration.getInstance().defaultRespawnDimensionKey));
+        final String key = GlobalConfiguration.getInstance().defaultRespawnDimensionKey;
+        try {
+            return ResourceKey.create(Registries.DIMENSION, Identifier.parse(key));
+        } catch (final Throwable t) { // Rolia - never crash startup on a malformed dimension key
+            LOGGER.warn("Rolia: invalid defaultRespawnDimensionKey '{}', falling back to overworld", key);
+            return Level.OVERWORLD;
+        }
     }
 
     public PurpurContainers purpurContainers = new PurpurContainers();

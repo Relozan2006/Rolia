@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/level/levelgen/WorldOptions.java
 +++ b/net/minecraft/world/level/levelgen/WorldOptions.java
-@@ -5,38 +_,57 @@
+@@ -5,38 +_,66 @@
  import com.mojang.serialization.codecs.RecordCodecBuilder;
  import java.util.Optional;
  import java.util.OptionalLong;
@@ -37,7 +37,16 @@
 +    }
 +
 +    private WorldOptions(long seed, String featureSeedJson, boolean generateStructures, boolean bonusChest, Optional<String> legacyCustomOptions) {
-+        this(seed, gson.fromJson(featureSeedJson, long[].class), generateStructures, bonusChest, legacyCustomOptions);
++        this(seed, parseFeatureSeedJson(featureSeedJson), generateStructures, bonusChest, legacyCustomOptions);
++    }
++
++    private static long[] parseFeatureSeedJson(final String json) {
++        try {
++            final long[] parsed = gson.fromJson(json, long[].class);
++            if (parsed != null && parsed.length > 0) return parsed;
++        } catch (final Exception ignored) {
++        }
++        return io.rolia.secureseed.Globals.createRandomWorldSeed();
 +    }
 +
 +    public WorldOptions(long seed, long[] featureSeed, boolean generateStructures, boolean bonusChest) {
