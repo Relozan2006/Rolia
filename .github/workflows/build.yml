@@ -237,7 +237,7 @@ jobs:
           git config user.email "ci@rolia.local"
           git config user.name "Rolia CI"
           git add -A
-          git commit -m "CI output for $GITHUB_SHA"
+          git commit -m "CI output for $GITHUB_SHA" || git commit --allow-empty -m "CI output for $GITHUB_SHA (no changes)"  # Rolia - never let the publish step fail on empty
           set +x  # Rolia - do NOT echo the token URL into the public Actions log
           git push --force "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" ci-output
 
