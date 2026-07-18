@@ -160,13 +160,10 @@ jobs:
           coords () { grep -oE '\[-?[0-9]+, ~, -?[0-9]+\]' "det_$1.log" | tr '\n' ' '; }
           CA=$(coords a); CB=$(coords b); CC=$(coords c)
           echo "A (L,F1): $CA"; echo "B (L,F1): $CB"; echo "C (L,F2): $CC"
-          if [ -z "$CA" ] || [ -z "$CC" ]; then
-            echo "WARN: locate produced no coords - split not strictly asserted (see logs)"
-          else
-            if [ "$CA" != "$CB" ]; then echo "FAIL: non-deterministic (A!=B with identical seeds)"; exit 1; fi
-            if [ "$CA" = "$CC" ]; then echo "FAIL: structures did NOT move when feature seed changed -> not secured by feature seed"; exit 1; fi
-            echo "OK: determinism (A==B) + seed-split (structures move with feature seed, A!=C) verified"
-          fi
+          if [ -z "$CA" ] || [ -z "$CB" ] || [ -z "$CC" ]; then echo "FAIL: locate produced no coords - cannot verify determinism/seed-split"; exit 1; fi
+          if [ "$CA" != "$CB" ]; then echo "FAIL: non-deterministic (A!=B with identical seeds)"; exit 1; fi
+          if [ "$CA" = "$CC" ]; then echo "FAIL: structures did NOT move when feature seed changed -> not secured by feature seed"; exit 1; fi
+          echo "OK: determinism (A==B) + seed-split (structures move with feature seed, A!=C) verified"
 
       - name: DAB enabled smoke
         run: |
@@ -241,6 +238,7 @@ jobs:
           git config user.name "Rolia CI"
           git add -A
           git commit -m "CI output for $GITHUB_SHA"
+          set +x  # Rolia - do NOT echo the token URL into the public Actions log
           git push --force "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" ci-output
 
       - name: Create GitHub Release

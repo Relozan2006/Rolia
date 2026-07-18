@@ -8,17 +8,18 @@
  import net.minecraft.commands.CommandSourceStack;
  import net.minecraft.commands.Commands;
  import net.minecraft.network.chat.Component;
-@@ -13,6 +_,14 @@
+@@ -13,6 +_,15 @@
                  long seed = c.getSource().getLevel().getSeed();
                  Component seedText = ComponentUtils.copyOnClickText(String.valueOf(seed));
                  c.getSource().sendSuccess(() -> Component.translatable("commands.seed.success", seedText), false);
 +
-+                // Rolia start - feature secure seed
-+                Globals.setupGlobals(c.getSource().getLevel());
-+                String seedStr = Globals.seedToString(Globals.worldSeed);
-+
-+                Component featureSeedComponent = ComponentUtils.copyOnClickText(seedStr);
-+                c.getSource().sendSuccess(() -> Component.translatable(("Feature seed: %s"), featureSeedComponent), false);
++                // Rolia start - feature secure seed (operator-only: the feature seed is the SECRET, never show it below op level 4)
++                if (c.getSource().hasPermission(4)) {
++                    Globals.setupGlobals(c.getSource().getLevel());
++                    String seedStr = Globals.seedToString(Globals.worldSeed);
++                    Component featureSeedComponent = ComponentUtils.copyOnClickText(seedStr);
++                    c.getSource().sendSuccess(() -> Component.translatable("Feature seed: %s", featureSeedComponent), false);
++                }
 +                // Rolia end
                  return (int)seed;
              })
