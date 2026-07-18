@@ -51,9 +51,6 @@ public class Globals {
      * Deterministic per (levelSeed, domain, salt); falls back to the raw seed when disabled.
      */
     public static long transformSeed(long levelSeed, long domain) {
-        if (!isSecureSeedEnabled()) {
-            return levelSeed;
-        }
         long[] expanded = Hashing.expandLevelSeedTo1024Bits(levelSeed ^ domain);
         return expanded[(int) (domain & 7)];
     }

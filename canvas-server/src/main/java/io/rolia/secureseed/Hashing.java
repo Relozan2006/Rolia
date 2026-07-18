@@ -27,25 +27,26 @@ public class Hashing {
         {14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3}
     };
 
-    private static volatile long[] cachedSaltHash = null;
-    private static volatile String lastSalt = null;
+    // Rolia - the salt is immutable for the server lifetime (loaded once from rolia.yml), so hash it
+    // exactly once behind a double-checked lock; replaces the previous racy two-field check-then-set cache.
+    private static volatile long[] saltHash;
 
     private static long[] getSaltHash() {
-        String currentSalt = Globals.getSecureSeedSalt();
-        if (cachedSaltHash == null || !currentSalt.equals(lastSalt)) {
-            long[] saltLongs = new long[8];
-            byte[] saltBytes = currentSalt.getBytes();
-
-            for (int i = 0; i < Math.min(saltBytes.length, 64); i++) {
-                int longIndex = i / 8;
-                int byteIndex = i % 8;
-                saltLongs[longIndex] |= ((long) (saltBytes[i] & 0xFF)) << (byteIndex * 8);
-            }
-
-            cachedSaltHash = hashWorldSeedInternal(saltLongs);
-            lastSalt = currentSalt;
+        long[] cached = saltHash;
+        if (cached != null) {
+            return cached;
         }
-        return cachedSaltHash;
+        synchronized (Hashing.class) {
+            if (saltHash == null) {
+                byte[] saltBytes = Globals.getSecureSeedSalt().getBytes();
+                long[] saltLongs = new long[8];
+                for (int i = 0; i < Math.min(saltBytes.length, 64); i++) {
+                    saltLongs[i / 8] |= ((long) (saltBytes[i] & 0xFF)) << ((i % 8) * 8);
+                }
+                saltHash = hashWorldSeedInternal(saltLongs);
+            }
+            return saltHash;
+        }
     }
 
     // BLAKE2b of up to 16 input longs (one 128-byte block), returning the first 8 output longs.
@@ -139,7 +140,7 @@ public class Hashing {
         return hashWorldSeedInternal(result);
     }
 
-    public static void hash(long[] message, long[] output, long[] state, int outputBytes, boolean finalBlock) {
+    public static void hash(long[] message, long[] output) {
         long[] result = hashWorldSeedInternal(message);
         System.arraycopy(result, 0, output, 0, Math.min(result.length, output.length));
     }

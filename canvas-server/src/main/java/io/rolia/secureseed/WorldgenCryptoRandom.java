@@ -21,7 +21,6 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
     private final long[] randomBits = new long[8];
     private final long[] message = new long[16];
     private final long[] keyedMessage = new long[16]; // Rolia - reused keying buffer
-    private final long[] cachedInternalState = new long[16];
     private int randomBitIndex;
     private long counter;
 
@@ -32,11 +31,7 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
             return;
         }
 
-        if (Globals.isSecureSeedEnabled()) {
-            this.setSecureSeed(x, z, typeSalt, salt);
-        } else {
-            super.setSeed(((long) x << 32) | ((long) z & 0xffffffffL) ^ salt);
-        }
+        this.setSecureSeed(x, z, typeSalt, salt);
     }
 
     public static RandomSource seedSlimeChunk(int chunkX, int chunkZ) {
@@ -44,11 +39,6 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
     }
 
     public void setSecureSeed(int x, int z, Globals.Salt typeSalt, long salt) {
-        if (!Globals.isSecureSeedEnabled()) {
-            super.setSeed(((long) x << 32) | ((long) z & 0xffffffffL) ^ salt);
-            return;
-        }
-
         System.arraycopy(Globals.worldSeed, 0, this.worldSeed, 0, Globals.WORLD_SEED_LONGS);
         message[0] = ((long) x << 32) | ((long) z & 0xffffffffL);
         message[1] = ((long) Globals.dimension.get() << 32) | ((long) salt & 0xffffffffL);
@@ -76,7 +66,7 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
         for (int i = 0; i < 8; i++) {
             keyedMessage[i] = message[i] ^ hashedWorldSeed[i % hashedWorldSeed.length];
         }
-        Hashing.hash(keyedMessage, randomBits, cachedInternalState, 64, true);
+        Hashing.hash(keyedMessage, randomBits);
         // Rolia end
     }
 
@@ -114,16 +104,11 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public @NotNull RandomSource fork() {
-        if (!Globals.isSecureSeedEnabled()) {
-            return super.fork();
-        }
-
         WorldgenCryptoRandom fork = new WorldgenCryptoRandom(0, 0, null, 0);
 
         System.arraycopy(this.worldSeed, 0, fork.worldSeed, 0, Globals.WORLD_SEED_LONGS);
         System.arraycopy(this.message, 0, fork.message, 0, this.message.length);
         System.arraycopy(this.randomBits, 0, fork.randomBits, 0, this.randomBits.length); // Rolia - fix fork() losing the random bit buffer
-        System.arraycopy(this.cachedInternalState, 0, fork.cachedInternalState, 0, this.cachedInternalState.length); // Rolia - fix fork() losing hash state
         fork.randomBitIndex = this.randomBitIndex;
         fork.counter = this.counter;
 
@@ -134,9 +119,6 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
     // make them independent of the secret seed). Derive a secret-dependent positional factory instead.
     @Override
     public PositionalRandomFactory forkPositional() {
-        if (!Globals.isSecureSeedEnabled()) {
-            return super.forkPositional();
-        }
         final long[] hashed = getHashedWorldSeed();
         long secure = 0x9E3779B97F4A7C15L;
         for (int i = 0; i < hashed.length; i++) {
@@ -149,15 +131,11 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public int next(int bits) {
-        return Globals.isSecureSeedEnabled() ? (int) getBits(bits) : super.next(bits);
+        return (int) getBits(bits);
     }
 
     @Override
     public void consumeCount(int count) {
-        if (!Globals.isSecureSeedEnabled()) {
-            return;
-        }
-
         randomBitIndex += count;
         if (randomBitIndex >= MAX_RANDOM_BIT_INDEX * 2) {
             randomBitIndex -= MAX_RANDOM_BIT_INDEX;
@@ -169,9 +147,6 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public int nextInt(int bound) {
-        if (!Globals.isSecureSeedEnabled()) {
-            return super.nextInt(bound);
-        }
         int bits = Mth.ceillog2(bound);
         int result;
         do {
@@ -183,49 +158,34 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public long nextLong() {
-        return Globals.isSecureSeedEnabled() ? getBits(64) : super.nextLong();
+        return getBits(64);
     }
 
     @Override
     public double nextDouble() {
-        return Globals.isSecureSeedEnabled() ? (getBits(53) * 0x1.0p-53) : super.nextDouble();
+        return getBits(53) * 0x1.0p-53;
     }
 
     @Override
     public long setDecorationSeed(long worldSeed, int blockX, int blockZ) {
-        if (!Globals.isSecureSeedEnabled()) {
-            return super.setDecorationSeed(worldSeed, blockX, blockZ);
-        }
         setSecureSeed(blockX, blockZ, Globals.Salt.POPULATION, 0);
         return ((long) blockX << 32) | ((long) blockZ & 0xffffffffL);
     }
 
     @Override
     public void setFeatureSeed(long populationSeed, int index, int step) {
-        if (!Globals.isSecureSeedEnabled()) {
-            super.setFeatureSeed(populationSeed, index, step);
-            return;
-        }
         setSecureSeed((int) (populationSeed >> 32), (int) populationSeed, Globals.Salt.DECORATION, index + 10000L * step);
     }
 
     @Override
     public void setLargeFeatureSeed(long worldSeed, int chunkX, int chunkZ) {
         // Rolia - route through the secure stream instead of the raw level seed (was: super)
-        if (!Globals.isSecureSeedEnabled()) {
-            super.setLargeFeatureSeed(worldSeed, chunkX, chunkZ);
-            return;
-        }
         setSecureSeed(chunkX, chunkZ, Globals.Salt.GENERATE_FEATURE, (int) (worldSeed ^ (worldSeed >>> 32)));
     }
 
     @Override
     public void setLargeFeatureWithSalt(long worldSeed, int regionX, int regionZ, int salt) {
         // Rolia - route through the secure stream instead of the raw level seed (was: super)
-        if (!Globals.isSecureSeedEnabled()) {
-            super.setLargeFeatureWithSalt(worldSeed, regionX, regionZ, salt);
-            return;
-        }
         setSecureSeed(regionX, regionZ, Globals.Salt.POTENTIONAL_FEATURE, salt);
     }
 }
