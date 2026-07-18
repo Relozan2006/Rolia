@@ -280,7 +280,9 @@ public class SchedulerUtil {
         @Override
         public boolean isRunningRegionProfilerOnThread(final long threadId, final String threadName) {
             if (isRunningRegionProfiler()) {
-                AffinitySchedulerThreadPool.TickThreadRunner threadRunner = RegionProfiler.STATE.get().threadRunner();
+                final RegionProfiler.ProfilingState state = RegionProfiler.STATE.get(); // Rolia - snapshot; profiler may stop concurrently
+                if (state == null) return false;
+                AffinitySchedulerThreadPool.TickThreadRunner threadRunner = state.threadRunner();
                 return threadRunner.getRunnerThread().getName().equalsIgnoreCase(threadName);
             }
             return false;

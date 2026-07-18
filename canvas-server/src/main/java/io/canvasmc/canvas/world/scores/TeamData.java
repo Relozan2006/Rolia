@@ -151,7 +151,7 @@ public class TeamData {
     public PlayerTeam.Packed pack(final String name, final List<String> players) {
         return new PlayerTeam.Packed(
             name,
-            Optional.of(this.displayName),
+            Optional.ofNullable(this.displayName),
             this.color != ChatFormatting.RESET ? Optional.of(this.color) : Optional.empty(),
             this.allowFriendlyFire,
             this.seeFriendlyInvisibles,

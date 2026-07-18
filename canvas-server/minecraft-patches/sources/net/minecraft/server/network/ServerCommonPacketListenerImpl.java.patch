@@ -39,7 +39,7 @@
 +            if (self instanceof ServerGamePacketListenerImpl listenerImpl
 +                && packet instanceof net.minecraft.network.protocol.game.ClientboundPlayerChatPacket chat && listener != null) {
 +                cancel = true;
-+                listenerImpl.send(chat);
++                listenerImpl.send(new net.minecraft.network.protocol.game.ClientboundSystemChatPacket(chat.chatType().decorate(chat.unsignedContent() != null ? chat.unsignedContent() : Component.literal(chat.body().content())), false), listener); // Rolia - forward the caller's ChannelFutureListener (was dropped)
 +            }
 +
 +            if (cancel) {

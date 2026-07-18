@@ -227,9 +227,9 @@
 +            }
 +            activeBehaviors = it.unimi.dsi.fastutil.objects.ObjectArrays.setLength(list.elements(), list.size());
 +        }
-+        for (int index = 0, size = activeBehaviors.length; index < size; index++) {
-+            if (index >= activeBehaviors.length) break; // Canvas - ensure bounds are kept, odd race condition that makes activeBehaviors empty during iteration of this
-+            var behaviorControls = activeBehaviors[index];
++        final var snapshotBehaviors = activeBehaviors; // Rolia - snapshot once (Canvas band-aided a concurrent-reassignment race here); iterate the stable array
++        for (int index = 0, size = snapshotBehaviors.length; index < size; index++) {
++            var behaviorControls = snapshotBehaviors[index];
 +            var behaviorControlsRaw = behaviorControls.raw();
 +            for (int i = 0, size1 = behaviorControls.size(); i < size1; i++) {
 +                BehaviorControl<? super E> behaviorControl = behaviorControlsRaw[i];

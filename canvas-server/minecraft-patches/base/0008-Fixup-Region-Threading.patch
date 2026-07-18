@@ -137,7 +137,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..11610b628bbf328fef39b4bfe1f8f522
 +                final int chunkX = thrownEnderpearl.getBlockX() >> 4;
 +                final int chunkZ = thrownEnderpearl.getBlockZ() >> 4;
 +                final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
-+                    regionAtChunk = entityPlayer.level().regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
++                    regionAtChunk = thrownEnderpearl.level().regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
 +                if (regionAtChunk == null) {
 +                    // if region isn't loaded, skip
 +                    continue;

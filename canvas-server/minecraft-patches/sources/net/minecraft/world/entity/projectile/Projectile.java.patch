@@ -65,7 +65,7 @@
 +        ) {
 +            BlockPos blockPos = BlockPos.containing(this.position());
 +            int sectionPosX = net.minecraft.core.SectionPos.blockToSectionCoord(this.position().x());
-+            int sectionPosZ = net.minecraft.core.SectionPos.blockToSectionCoord(this.position().x());
++            int sectionPosZ = net.minecraft.core.SectionPos.blockToSectionCoord(this.position().z());
 +            if ((
 +                --this.canvas$ticketTimer <= 0L
 +                    || sectionPosX != net.minecraft.core.SectionPos.blockToSectionCoord(blockPos.getX())

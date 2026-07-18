@@ -17,7 +17,7 @@
          this.packetListener = packetListener;
          this.disconnectListener = null;
          UnconfiguredPipelineHandler.InboundConfigurationTask configMessage = UnconfiguredPipelineHandler.setupInboundProtocol(protocol);
-@@ -363,8 +_,45 @@
+@@ -363,8 +_,43 @@
              configMessage = configMessage.andThen(ctx -> ctx.pipeline().addAfter(HandlerNames.DECODER, HandlerNames.BUNDLER, newBundler));
          }
  
@@ -56,10 +56,8 @@
 +
 +        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.asyncProtocolSwitch) {
 +            future.addListener((ChannelFutureListener) Connection::syncAfterConfigurationChange);
-+            return future;
 +        }
-+
-+        return null;
++        return future; // Rolia - never return null (callers chain .addListener); attach the sync listener only when async
 +    }
 +    // Canvas end - async protocol switch
  

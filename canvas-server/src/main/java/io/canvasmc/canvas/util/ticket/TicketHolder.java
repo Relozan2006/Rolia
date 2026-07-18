@@ -11,7 +11,7 @@ import org.jspecify.annotations.Nullable;
  *     the ticket type, must be a record
  */
 public class TicketHolder<T extends Record> {
-    private volatile T ticket;
+    private final java.util.concurrent.atomic.AtomicReference<T> ticket = new java.util.concurrent.atomic.AtomicReference<>(); // Rolia - atomic propagate/pop
 
     /**
      * Fetches the current ticket
@@ -20,7 +20,7 @@ public class TicketHolder<T extends Record> {
      */
     @Nullable
     public T get() {
-        return this.ticket;
+        return this.ticket.get();
     }
 
     /**
@@ -30,9 +30,7 @@ public class TicketHolder<T extends Record> {
      */
     @Nullable
     public T pop() {
-        T ticket = this.ticket;
-        this.ticket = null;
-        return ticket;
+        return this.ticket.getAndSet(null);
     }
 
     /**
@@ -71,7 +69,7 @@ public class TicketHolder<T extends Record> {
      * @return if a ticket is present
      */
     public boolean isPresent() {
-        return this.ticket != null;
+        return this.ticket.get() != null;
     }
 
     /**
@@ -84,10 +82,9 @@ public class TicketHolder<T extends Record> {
      *     when a ticket is already present
      */
     public void propagate(T ticket) {
-        if (this.ticket != null) {
+        if (!this.ticket.compareAndSet(null, ticket)) {
             throw new IllegalStateException("Ticket already propagated");
         }
-        this.ticket = ticket;
     }
 
     /**

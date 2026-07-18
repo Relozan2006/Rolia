@@ -42,6 +42,27 @@ public class ConfigurationProvider {
     // note: if we want to preserve comments, we have to use compose() on file reads
     private static final Yaml YAML;
 
+    // Rolia - close the readers (were leaking a file descriptor on every config load/reload)
+    private static Node composeFile(final java.io.File file) throws FileNotFoundException {
+        try (java.io.Reader r = new FileReader(file)) {
+            return YAML.compose(r);
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
+
+    private static Object loadAsFile(final java.io.File file, final Class<?> type) throws FileNotFoundException {
+        try (java.io.Reader r = new FileReader(file)) {
+            return YAML.loadAs(r, type);
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
+
     static {
         LOADER_OPTIONS = new LoaderOptions();
         LOADER_OPTIONS.setProcessComments(true);
@@ -250,7 +271,7 @@ public class ConfigurationProvider {
             //       configured our constructor/representer, so for new comments we should just
             //       take the object representation and tokenize it, pull the added configs,
             //       and then inject those comments into the new file representation nodes
-            Node fileRepresentation = YAML.compose(new FileReader(pathAbsolute.toFile()));
+            Node fileRepresentation = composeFile(pathAbsolute.toFile());
             Node objectRepresentation = YAML.represent(defaultObj);
 
             // file representation can be null if the user completely empties the config
@@ -281,7 +302,7 @@ public class ConfigurationProvider {
             // parse pretty perfectly now too, with no extra or missing keys
 
             //noinspection unchecked
-            C userMade = (C) YAML.loadAs(new FileReader(pathAbsolute.toFile()), defaultObj.getClass());
+            C userMade = (C) loadAsFile(pathAbsolute.toFile(), defaultObj.getClass());
 
             // finished load, call resolver and return
             resolver.onFinishLoad(injectNode(userMade, fileRepresentation));
@@ -309,7 +330,7 @@ public class ConfigurationProvider {
         C base;
         try {
             //noinspection unchecked
-            base = (C) YAML.loadAs(new FileReader(baseAbsolute.toFile()), defaultSupplier.get().getClass());
+            base = (C) loadAsFile(baseAbsolute.toFile(), defaultSupplier.get().getClass());
         } catch (FileNotFoundException e) {
             throw new IllegalStateException("Base config disappeared between existence check and load", e);
         }
@@ -339,7 +360,7 @@ public class ConfigurationProvider {
         // are defined in the patch, we just return the default. otherwise, we patch the values
 
         try {
-            Node patchNode = YAML.compose(new FileReader(patchAbsolute.toFile()));
+            Node patchNode = composeFile(patchAbsolute.toFile());
 
             // null or non-mapping means the patch is empty, just return base
             if (patchNode == null) {
