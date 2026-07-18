@@ -51,8 +51,8 @@ public class GlobalConfiguration extends Part {
     public static final int ERROR = 2;
 
     private static GlobalConfiguration INSTANCE;
-    private static ClientV2.BuildStatus BUILD_STATUS = ClientV2.BuildStatus.UNKNOWN;
-    private static boolean ENABLE_FASTER_RANDOM = true;
+    private static volatile ClientV2.BuildStatus BUILD_STATUS = ClientV2.BuildStatus.UNKNOWN; // Rolia - read from region threads, written on reload
+    private static volatile boolean ENABLE_FASTER_RANDOM = true; // Rolia - read from region threads, written on reload
 
     static {
         reload();

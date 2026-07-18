@@ -14,7 +14,7 @@
              .orElse(null);
          if (worldGenSettings == null) {
 -            WorldOptions worldOptions = new WorldOptions(creator.seed(), creator.generateStructures(), creator.bonusChest());
-+            WorldOptions worldOptions = new WorldOptions(creator.seed(), Globals.worldSeed,  creator.generateStructures(), false);
++            WorldOptions worldOptions = new WorldOptions(creator.seed(), Globals.worldSeed, creator.generateStructures(), creator.bonusChest()); // Rolia - keep the WorldCreator bonus-chest flag
  
              DedicatedServerProperties.WorldDimensionData properties = new DedicatedServerProperties.WorldDimensionData(GsonHelper.parse((creator.generatorSettings().isEmpty()) ? "{}" : creator.generatorSettings()), creator.type().name().toLowerCase(Locale.ROOT));
              WorldDimensions worldDimensions = properties.create(context.datapackWorldgen());

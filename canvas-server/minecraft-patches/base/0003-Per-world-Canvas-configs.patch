@@ -13,7 +13,7 @@ index aadd7dff388e0e2e370de0f202ea2b9977f83d08..928e8d42bee8a97c342aabd1b79bd7ad
      }
      // Paper end - add paper world config
 +    // Canvas start - world config
-+    private io.canvasmc.canvas.WorldConfig canvasConfig;
++    private volatile io.canvasmc.canvas.WorldConfig canvasConfig; // Rolia - reassigned by /canvas reload from another thread
 +
 +    public io.canvasmc.canvas.WorldConfig canvasConfig() {
 +        return this.canvasConfig;

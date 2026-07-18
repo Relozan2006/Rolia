@@ -158,6 +158,10 @@ public class WorldConfig extends Part {
                 .compile(60)
         );
 
+        if (result[0] == null) { // Rolia - never return null if the load callback was skipped
+            result[0] = new WorldConfig();
+            result[0].onLoad(level);
+        }
         return result[0];
     }
 

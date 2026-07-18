@@ -3,7 +3,7 @@ package io.canvasmc.canvas.spark.profiler;
 import io.canvasmc.canvas.tick.SchedulerUtil;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
-import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -19,7 +19,7 @@ import me.lucko.spark.paper.proto.SparkSamplerProtos;
  */
 public class RegionThreadDumper implements ThreadDumper {
     private final ThreadFinder threadFinder = new ThreadFinder();
-    private final Map<Long, Boolean> cache = new HashMap<>();
+    private final Map<Long, Boolean> cache = new ConcurrentHashMap<>(); // Rolia - concurrent computeIfAbsent from spark sampler + tick threads
     private final Pattern regionThreadNamePattern = Pattern.compile("Folia Region Scheduler Thread #\\d+", Pattern.CASE_INSENSITIVE);
 
     @Override
