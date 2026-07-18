@@ -84,7 +84,11 @@ public final class RoliaConfig {
         }
 
         Map<String, Object> secureSeed = section(root, "secure-seed");
-        Map<String, Object> dab = section(root, "dab");
+        Map<String, Object> optimizations = section(root, "optimizations");
+        Map<String, Object> dab = section(optimizations, "dab");
+        if (dab.isEmpty()) {
+            dab = section(root, "dab"); // Rolia - back-compat: also accept a top-level dab: block
+        }
 
         // secure-seed
         String cfgSalt = str(secureSeed.get("salt"), "");
@@ -133,16 +137,20 @@ public final class RoliaConfig {
             + "  # 64+ char secret salt, auto-generated on first run. The master key of the 1024-bit seed protection.\n"
             + "  salt: \"" + salt + "\"\n"
             + "\n"
-            + "# Dynamic Activation of Brain: throttles the AI of mobs far from players (villagers/piglins etc.).\n"
-            + "# Mobs near players always tick full AI. Disabled by default; enable to save CPU on mob-heavy servers.\n"
-            + "dab:\n"
-            + "  enabled: " + dabEnabled + "\n"
-            + "  # Mobs closer than this many blocks to a player always tick every tick (full AI).\n"
-            + "  start-distance: " + dabStartDistance + "\n"
-            + "  # The farthest mobs tick their AI at most once per this many ticks.\n"
-            + "  max-tick-interval: " + dabMaxTickInterval + "\n"
-            + "  # Entity type ids never throttled (useful for mob farms), e.g. [\"minecraft:villager\"].\n"
-            + "  blacklist: []\n";
+            + "# Optimizations - Folia-safe, vanilla-preserving performance toggles.\n"
+            + "# Everything here is OFF by default, so the server behaves exactly like vanilla Canvas until you opt in.\n"
+            + "optimizations:\n"
+            + "  # Dynamic Activation of Brain (DAB): throttles the AI of mobs far from ANY player\n"
+            + "  # (villagers/piglins/zombies/skeletons etc.). Mobs near players always tick full AI every\n"
+            + "  # tick, so there is no observable gameplay change - only a CPU saving on mob-heavy servers.\n"
+            + "  dab:\n"
+            + "    enabled: " + dabEnabled + "\n"
+            + "    # Mobs closer than this many blocks to a player always tick every tick (full AI).\n"
+            + "    start-distance: " + dabStartDistance + "\n"
+            + "    # The farthest mobs tick their AI at most once per this many ticks.\n"
+            + "    max-tick-interval: " + dabMaxTickInterval + "\n"
+            + "    # Entity type ids never throttled (useful for mob farms), e.g. [\"minecraft:villager\"].\n"
+            + "    blacklist: []\n";
 
         try (FileWriter w = new FileWriter(file)) {
             w.write(yaml);
