@@ -40,4 +40,11 @@ patch(MOB, block,
       "        } // Rolia - DAB end\n",
       "Mob.serverAiStep DAB gate")
 
+# 3) villager lobotomization: skip the expensive brain tick for boxed-in villagers, but still restock
+VILLAGER = "canvas-server/src/minecraft/java/net/minecraft/world/entity/npc/villager/Villager.java"
+patch(VILLAGER,
+      "        if (!inactive) this.getBrain().tick(level, this); // Paper - EAR 2\n",
+      "        if (!inactive) io.rolia.optimization.Lobotomize.tickVillagerBrain(this, level); // Rolia - villager lobotomization (restock preserved)\n",
+      "Villager.customServerAiStep lobotomize gate")
+
 print("Rolia DAB source hooks applied.")

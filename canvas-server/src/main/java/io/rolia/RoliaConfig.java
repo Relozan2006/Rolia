@@ -38,6 +38,9 @@ public final class RoliaConfig {
     private static int dabStartDistance = 12;
     private static int dabMaxTickInterval = 20;
     private static Set<String> dabBlacklist = Set.of();
+    // villager lobotomization
+    private static boolean lobotomizeEnabled = true;
+    private static boolean lobotomizeWaitUntilTradeLocked = true;
 
     private RoliaConfig() {
     }
@@ -48,6 +51,8 @@ public final class RoliaConfig {
     public static int dabMaxTickInterval() { load(); return dabMaxTickInterval; }
     public static boolean dabBlacklisted(String typeId) { load(); return dabBlacklist.contains(typeId); }
     public static boolean dabHasBlacklist() { load(); return !dabBlacklist.isEmpty(); }
+    public static boolean lobotomizeEnabled() { load(); return lobotomizeEnabled; }
+    public static boolean lobotomizeWaitUntilTradeLocked() { load(); return lobotomizeWaitUntilTradeLocked; }
 
     @SuppressWarnings("unchecked")
     private static synchronized void load() {
@@ -113,6 +118,11 @@ public final class RoliaConfig {
         dabMaxTickInterval = clamp(intv(dab.get("max-tick-interval"), 20), 1, 200);
         dabBlacklist = strSet(dab.get("blacklist"));
 
+        // villager lobotomization
+        Map<String, Object> villagerLobo = section(optimizations, "villager-lobotomize");
+        lobotomizeEnabled = bool(villagerLobo.get("enabled"), true);
+        lobotomizeWaitUntilTradeLocked = bool(villagerLobo.get("wait-until-trade-locked"), true);
+
         // Only (re)write the file on first generation / migration - never clobber a user-edited file.
         if (firstGen) {
             createPrivate(file); // Rolia - create the file owner-only (0600) BEFORE the secret salt is written
@@ -151,7 +161,15 @@ public final class RoliaConfig {
             + "    # The farthest mobs tick their AI at most once per this many ticks.\n"
             + "    max-tick-interval: " + dabMaxTickInterval + "\n"
             + "    # Entity type ids never throttled (useful for mob farms), e.g. [\"minecraft:villager\"].\n"
-            + "    blacklist: []\n";
+            + "    blacklist: []\n"
+            + "  # Lobotomize stuck villagers: a villager boxed in a 1x1 cell (a trading hall) cannot path\n"
+            + "  # anywhere, so its expensive AI/pathfinding tick is skipped. It STILL restocks trades, so\n"
+            + "  # trading halls behave exactly like vanilla - only wasted pathfinding is removed.\n"
+            + "  villager-lobotomize:\n"
+            + "    enabled: " + lobotomizeEnabled + "\n"
+            + "    # Keep full AI for villagers that have not been traded with yet (0 xp) so they can still\n"
+            + "    # gain their first profession level. Recommended true.\n"
+            + "    wait-until-trade-locked: " + lobotomizeWaitUntilTradeLocked + "\n";
 
         try (FileWriter w = new FileWriter(file)) {
             w.write(yaml);
