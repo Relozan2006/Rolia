@@ -56,7 +56,7 @@ jobs:
       - name: Dump reference sources
         run: |
           mkdir -p /tmp/out/refsrc
-          for f in net/minecraft/world/RandomSequences.java net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java net/minecraft/world/entity/Mob.java net/minecraft/world/entity/ai/Brain.java; do
+          for f in net/minecraft/world/RandomSequences.java net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java net/minecraft/world/entity/Mob.java net/minecraft/world/entity/ai/Brain.java net/minecraft/world/entity/npc/villager/Villager.java net/minecraft/world/entity/LivingEntity.java net/minecraft/world/entity/Entity.java net/minecraft/world/entity/ai/goal/GoalSelector.java net/minecraft/world/entity/ai/goal/Goal.java net/minecraft/world/entity/ai/goal/WrappedGoal.java net/minecraft/world/entity/ai/sensing/Sensor.java net/minecraft/network/FriendlyByteBuf.java net/minecraft/network/VarInt.java net/minecraft/network/VarLong.java net/minecraft/network/syncher/SynchedEntityData.java net/minecraft/network/protocol/game/ClientboundLightUpdatePacketData.java net/minecraft/world/phys/shapes/Shapes.java net/minecraft/world/phys/shapes/CollisionContext.java net/minecraft/core/MappedRegistry.java net/minecraft/core/Holder.java net/minecraft/core/Registry.java net/minecraft/world/level/chunk/PalettedContainer.java net/minecraft/util/RandomSource.java net/minecraft/util/Mth.java net/minecraft/world/level/levelgen/RandomState.java net/minecraft/world/level/chunk/ChunkGenerator.java net/minecraft/world/entity/projectile/ThrownEnderpearl.java net/minecraft/world/entity/TamableAnimal.java net/minecraft/world/entity/Leashable.java net/minecraft/nbt/CompoundTag.java net/minecraft/world/entity/raid/Raid.java net/minecraft/world/level/chunk/storage/RegionFile.java net/minecraft/world/level/chunk/storage/RegionFileStorage.java; do
             src="canvas-server/src/minecraft/java/$f"
             if [ -f "$src" ]; then cp "$src" "/tmp/out/refsrc/$(basename $f)"; else echo "MISSING $f" >> /tmp/out/refsrc/missing.txt; fi
           done
@@ -74,7 +74,7 @@ jobs:
 
       - name: Build paperclip jar
         env:
-          BUILD_NUMBER: ${{ github.run_number }}
+          BUILD_NUMBER: 36
         run: (./gradlew createMojmapPaperclipJar --stacktrace || ./gradlew createPaperclipJar --stacktrace) 2>&1 | tee build.log
 
       - name: Smoke test server (run twice)
@@ -242,11 +242,11 @@ jobs:
           git push --force "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" ci-output
 
       - name: Create GitHub Release
-        if: success()
+        if: success() && contains(github.event.head_commit.message, '[release]')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v26.1.2-build.${GITHUB_RUN_NUMBER}"
+          TAG="v26.1.2-build.36"
           JAR=/tmp/out/rolia-paperclip-26.1.2.jar
           SHA=$(sha256sum "$JAR" | awk '{print $1}')
           cat > /tmp/relnotes.md << NOTES
@@ -272,6 +272,6 @@ jobs:
           NOTES
           gh release create "$TAG" "$JAR" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Rolia 26.1.2 (build ${GITHUB_RUN_NUMBER})" \
+            --title "Rolia 26.1.2 (build 36)" \
             --notes-file /tmp/relnotes.md \
             --latest
