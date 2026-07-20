@@ -79,6 +79,21 @@ public class Globals {
         return seed;
     }
 
+    // Rolia - derive a STABLE, salt-keyed 1024-bit feature seed from a world's level seed.
+    // Used only for worlds that carry no stored feature seed yet (a world imported from vanilla/Paper,
+    // or an in-place upgrade): it keeps structure/ore placement identical across restarts even before the
+    // first save, while staying un-computable without the secret salt (both halves are keyed by the salt
+    // hash inside expandLevelSeedTo1024Bits). Fresh Rolia worlds never reach this path - they always get a
+    // fresh random feature seed from server.properties (feature-level-seed) instead.
+    public static long[] deriveFeatureSeedFromLevel(long levelSeed) {
+        long[] seed = new long[WORLD_SEED_LONGS];
+        long[] lo = Hashing.expandLevelSeedTo1024Bits(levelSeed);
+        long[] hi = Hashing.expandLevelSeedTo1024Bits(levelSeed ^ 0x9E3779B97F4A7C15L);
+        System.arraycopy(lo, 0, seed, 0, 8);
+        System.arraycopy(hi, 0, seed, 8, 8);
+        return seed;
+    }
+
     public static Optional<long[]> parseSeed(String seedStr) {
         if (seedStr.isEmpty()) return Optional.empty();
 

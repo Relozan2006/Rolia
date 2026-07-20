@@ -115,6 +115,7 @@ public final class RoliaConfig {
 
         // Only (re)write the file on first generation / migration - never clobber a user-edited file.
         if (firstGen) {
+            createPrivate(file); // Rolia - create the file owner-only (0600) BEFORE the secret salt is written
             writeConfig(file);
             LOGGER.info("Rolia: settings saved to {}", FILE_NAME);
             LOGGER.warn("Rolia: [IMPORTANT] {} holds the secret salt. Keep it secret and back it up with your world!", FILE_NAME);
@@ -202,6 +203,27 @@ public final class RoliaConfig {
             return set;
         }
         return Set.of();
+    }
+
+    // Rolia - create the config file with owner-only (0600) permissions up front, so the secret salt is
+    // never written into a briefly world-readable file. On non-POSIX filesystems (Windows) this falls back
+    // to a best-effort tighten; restrictPermissions() also runs again after the write.
+    private static void createPrivate(File file) {
+        if (file.exists()) {
+            restrictPermissions(file);
+            return;
+        }
+        try {
+            java.nio.file.Path p = file.toPath();
+            if (java.nio.file.Files.getFileAttributeView(p, java.nio.file.attribute.PosixFileAttributeView.class) != null) {
+                java.nio.file.Files.createFile(p, java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
+                    java.util.EnumSet.of(
+                        java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                        java.nio.file.attribute.PosixFilePermission.OWNER_WRITE)));
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Rolia: could not pre-create {} with restricted permissions - protect it manually!", FILE_NAME);
+        }
     }
 
     private static void restrictPermissions(File file) {

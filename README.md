@@ -36,13 +36,13 @@ Rolia разделяет генерацию на два независимых �
 | Рельеф, биомы, пещеры, аквиферы, острова Энда | Обычный `level-seed` (64 бита) | Как в ванилле — мир воспроизводим из сида |
 | Структуры, данжи, деревни, декорации, добываемые руды, жеоды, слизнёвые чанки | Секретный `feature-seed` (1024 бита) + соль | Расположение практически невозможно вычислить или подобрать |
 
-Ключ защиты — секретная **соль** в `rolia-seed.properties`. Пока она в тайне, восстановить расположение структур и руд по миру нельзя.
+Ключ защиты — секретная **соль** в `rolia.yml`. Пока она в тайне, восстановить расположение структур и руд по миру нельзя.
 
 ### Возможности
 
 - Вся производительность Canvas и Folia: регионная многопоточность, оптимизации тиков, чанков и сущностей.
 - 1024-битный секретный feature-сид на настоящем **BLAKE2b** (RFC 7693).
-- Секретная соль хранится в `rolia-seed.properties` с правами доступа только для владельца.
+- Секретная соль хранится в `rolia.yml` с правами доступа только для владельца.
 - Детерминированная генерация: один и тот же `level-seed` + `feature-seed` + соль всегда дают идентичный мир.
 
 ### Требования
@@ -67,13 +67,13 @@ bash start.sh
 | --- | --- | --- |
 | `level-seed` | `server.properties` | Обычный сид. Управляет рельефом и биомами. Мир воспроизводим из него. |
 | `feature-level-seed` | `server.properties` | 1024-битный feature-сид (десятичное число). Если пусто — генерируется криптостойкий случайный. |
-| `secure-seed.salt` | `rolia-seed.properties` | Секретная соль (64+ символа). Создаётся автоматически с правами `0600`. |
+| `secure-seed.salt` | `rolia.yml` | Секретная соль (64+ символа). Создаётся автоматически с правами `0600`. |
 
 Команда `/seed` показывает и обычный сид, и feature-сид.
 
 ### Важно: сохраните соль
 
-`rolia-seed.properties` содержит секретную соль. От неё зависит расположение всех структур и руд. Если файл потерять, в уже существующем мире новые структуры и руды перестанут совпадать со старыми (рельеф совпадёт — он привязан к `level-seed`). Держите файл в секрете и в бэкапе вместе с миром — именно соль делает вычисление сида невозможным.
+`rolia.yml` содержит секретную соль. От неё зависит расположение всех структур и руд. Если файл потерять, в уже существующем мире новые структуры и руды перестанут совпадать со старыми (рельеф совпадёт — он привязан к `level-seed`). Держите файл в секрете и в бэкапе вместе с миром — именно соль делает вычисление сида невозможным.
 
 Примечание: слизнёвые чанки управляются секретным сидом, поэтому опция `slime-seed` из `spigot.yml` на Rolia не действует.
 
@@ -112,13 +112,13 @@ Rolia splits world generation into two independent sources of randomness:
 | Terrain, biomes, caves, aquifers, End islands | Ordinary `level-seed` (64-bit) | Vanilla-like — the world is reproducible from the seed |
 | Structures, dungeons, villages, decorations, mineable ores, geodes, slime chunks | Secret `feature-seed` (1024-bit) + salt | Placement is practically impossible to reverse or brute-force |
 
-The protection key is the secret **salt** in `rolia-seed.properties`. As long as it stays secret, the location of structures and ores cannot be recovered from the world.
+The protection key is the secret **salt** in `rolia.yml`. As long as it stays secret, the location of structures and ores cannot be recovered from the world.
 
 ### Features
 
 - All the performance of Canvas and Folia: regionized multithreading, tick/chunk/entity optimizations.
 - 1024-bit secret feature seed backed by real **BLAKE2b** (RFC 7693).
-- The secret salt is stored in `rolia-seed.properties` with owner-only permissions.
+- The secret salt is stored in `rolia.yml` with owner-only permissions.
 - Deterministic generation: the same `level-seed` + `feature-seed` + salt always produce an identical world.
 
 ### Requirements
@@ -143,13 +143,13 @@ bash start.sh
 | --- | --- | --- |
 | `level-seed` | `server.properties` | Ordinary seed. Drives terrain and biomes. The world is reproducible from it. |
 | `feature-level-seed` | `server.properties` | 1024-bit feature seed (decimal number). If empty, a cryptographically secure random one is generated. |
-| `secure-seed.salt` | `rolia-seed.properties` | Secret salt (64+ chars). Created automatically with `0600` permissions. |
+| `secure-seed.salt` | `rolia.yml` | Secret salt (64+ chars). Created automatically with `0600` permissions. |
 
 The `/seed` command shows both the ordinary seed and the feature seed.
 
 ### Important: back up your salt
 
-`rolia-seed.properties` holds the secret salt. The location of every structure and ore depends on it. If the file is lost, newly generated structures and ores in an existing world will no longer match the old ones (terrain will still match — it is tied to `level-seed`). Keep the file secret and backed up together with your world — the salt is what makes seed reversal impossible.
+`rolia.yml` holds the secret salt. The location of every structure and ore depends on it. If the file is lost, newly generated structures and ores in an existing world will no longer match the old ones (terrain will still match — it is tied to `level-seed`). Keep the file secret and backed up together with your world — the salt is what makes seed reversal impossible.
 
 Note: slime chunks are driven by the secret seed, so the `slime-seed` option from `spigot.yml` has no effect on Rolia.
 
