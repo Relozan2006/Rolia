@@ -219,6 +219,7 @@ jobs:
         if: always()
         run: |
           set -x
+          set +e +o pipefail  # Rolia - never let an empty glob/grep abort the publish before the git push
           mkdir -p /tmp/out
           find . -name '*paperclip*.jar' -not -path './testrun/*' -exec cp {} /tmp/out/ \; 2>/dev/null || true
           cp testrun/server_*.log /tmp/out/ 2>/dev/null || true

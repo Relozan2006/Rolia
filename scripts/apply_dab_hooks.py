@@ -56,9 +56,25 @@ patch(SED,
 
 # 5) Seed V2 - terrain under the secret: seed RandomState's root random from the secret (cascades to all terrain)
 RANDOMSTATE = "canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/RandomState.java"
+# seed is captured by the inner NoiseWiringHelper class, so it must stay final; use a new final local.
 patch(RANDOMSTATE,
       "    private RandomState(final NoiseGeneratorSettings settings, final HolderGetter<NormalNoise.NoiseParameters> noises, final long seed) {\n        this.random = settings.getRandomSource().newInstance(seed).forkPositional();\n",
-      "    private RandomState(final NoiseGeneratorSettings settings, final HolderGetter<NormalNoise.NoiseParameters> noises, long seed) {\n        seed = io.rolia.secureseed.Globals.secureTerrainSeed(seed); // Rolia - Seed V2: terrain under the secret\n        this.random = settings.getRandomSource().newInstance(seed).forkPositional();\n",
-      "RandomState terrain-under-secret (Seed V2)")
+      "    private RandomState(final NoiseGeneratorSettings settings, final HolderGetter<NormalNoise.NoiseParameters> noises, final long seed) {\n        final long secureSeed = io.rolia.secureseed.Globals.secureTerrainSeed(seed); // Rolia - Seed V2: terrain under the secret\n        this.random = settings.getRandomSource().newInstance(secureSeed).forkPositional();\n",
+      "RandomState terrain-under-secret (Seed V2 root)")
+patch(RANDOMSTATE,
+      "                return new LegacyRandomSource(seed + seedOffset);\n",
+      "                return new LegacyRandomSource(secureSeed + seedOffset);\n",
+      "RandomState legacy-nether noise under secret")
+patch(RANDOMSTATE,
+      "new DensityFunctions.EndIslandDensityFunction(seed)",
+      "new DensityFunctions.EndIslandDensityFunction(secureSeed)",
+      "RandomState End-island shape under secret")
+
+# 6) Folia-safety: don't teleport a tamed pet into an UNLOADED chunk (raw getBlockState -> getBlockStateIfLoaded)
+TAMABLE = "canvas-server/src/minecraft/java/net/minecraft/world/entity/TamableAnimal.java"
+patch(TAMABLE,
+      "        BlockState blockStateBelow = this.level().getBlockState(pos.below());\n        if (!this.canFlyToOwner() && blockStateBelow.getBlock() instanceof LeavesBlock) {\n",
+      "        BlockState blockStateBelow = this.level().getBlockStateIfLoaded(pos.below()); // Rolia - Folia-safe\n        if (blockStateBelow == null) return false; // Rolia - do not teleport a pet into an unloaded chunk\n        if (!this.canFlyToOwner() && blockStateBelow.getBlock() instanceof LeavesBlock) {\n",
+      "TamableAnimal.canTeleportTo unloaded-chunk guard")
 
 print("Rolia DAB source hooks applied.")
