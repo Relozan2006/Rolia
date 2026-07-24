@@ -44,7 +44,7 @@ jobs:
         if: failure()
         run: |
           mkdir -p /tmp/out/basefiles
-          for f in net/minecraft/world/level/levelgen/RandomState.java net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java; do
+          for f in net/minecraft/world/level/levelgen/RandomState.java net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java net/minecraft/world/level/Level.java net/minecraft/server/level/ServerLevel.java net/minecraft/server/MinecraftServer.java net/minecraft/server/players/PlayerList.java net/minecraft/world/entity/npc/villager/VillagerTrades.java; do
             { find . -path "*/$f" 2>/dev/null; find ~/.gradle -path "*/$f" 2>/dev/null; } | while read -r pth; do
               key=$(echo "$pth" | sed 's|[/.]|_|g')
               cp "$pth" "/tmp/out/basefiles/$key" 2>/dev/null || true

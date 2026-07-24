@@ -47,4 +47,11 @@ patch(VILLAGER,
       "        if (!inactive) io.rolia.optimization.Lobotomize.tickVillagerBrain(this, level); // Rolia - villager lobotomization (restock preserved)\n",
       "Villager.customServerAiStep lobotomize gate")
 
+# 4) SynchedEntityData.packDirty: pre-size the dirty list (output-identical, avoids ArrayList regrow)
+SED = "canvas-server/src/minecraft/java/net/minecraft/network/syncher/SynchedEntityData.java"
+patch(SED,
+      "        this.isDirty = false;\n        List<SynchedEntityData.DataValue<?>> result = new ArrayList<>();\n",
+      "        this.isDirty = false;\n        List<SynchedEntityData.DataValue<?>> result = new ArrayList<>(this.itemsById.length); // Rolia - pre-size dirty list\n",
+      "SynchedEntityData.packDirty pre-size")
+
 print("Rolia DAB source hooks applied.")
