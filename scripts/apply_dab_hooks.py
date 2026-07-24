@@ -54,4 +54,11 @@ patch(SED,
       "        this.isDirty = false;\n        List<SynchedEntityData.DataValue<?>> result = new ArrayList<>(this.itemsById.length); // Rolia - pre-size dirty list\n",
       "SynchedEntityData.packDirty pre-size")
 
+# 5) Seed V2 - terrain under the secret: seed RandomState's root random from the secret (cascades to all terrain)
+RANDOMSTATE = "canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/RandomState.java"
+patch(RANDOMSTATE,
+      "    private RandomState(final NoiseGeneratorSettings settings, final HolderGetter<NormalNoise.NoiseParameters> noises, final long seed) {\n        this.random = settings.getRandomSource().newInstance(seed).forkPositional();\n",
+      "    private RandomState(final NoiseGeneratorSettings settings, final HolderGetter<NormalNoise.NoiseParameters> noises, long seed) {\n        seed = io.rolia.secureseed.Globals.secureTerrainSeed(seed); // Rolia - Seed V2: terrain under the secret\n        this.random = settings.getRandomSource().newInstance(seed).forkPositional();\n",
+      "RandomState terrain-under-secret (Seed V2)")
+
 print("Rolia DAB source hooks applied.")

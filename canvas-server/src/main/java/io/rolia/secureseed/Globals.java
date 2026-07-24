@@ -54,6 +54,15 @@ public class Globals {
         long[] expanded = Hashing.expandLevelSeedTo1024Bits(levelSeed ^ domain);
         return expanded[(int) (domain & 7)];
     }
+
+    // Rolia - Seed V2: derive the TERRAIN seed from the secret (salt-keyed), so terrain/biomes/caves/
+    // aquifers/ore-noise are no longer reproducible from the public level seed - only with the secret salt.
+    // Applied once at the root of RandomState, so it cascades to every terrain sub-system (aquifer/ore/
+    // climate/surface all fork from this root). Part of the always-on 1024-bit protection; not disableable.
+    public static final long TERRAIN_DOMAIN = 0x5445525241494E00L; // "TERRAIN\0"
+    public static long secureTerrainSeed(long levelSeed) {
+        return transformSeed(levelSeed, TERRAIN_DOMAIN);
+    }
     // Rolia end
 
     // Rolia - guarantee a real random 1024-bit feature seed: null/empty/all-zero means "uninitialised"
