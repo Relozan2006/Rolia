@@ -230,6 +230,9 @@ jobs:
           cd /tmp/out
           f=$(ls *paperclip*.jar 2>/dev/null | head -1); if [ -n "$f" ] && [ "$f" != "rolia-paperclip-26.1.2.jar" ]; then mv "$f" rolia-paperclip-26.1.2.jar; fi
           for f in *.jar; do [ -f "$f" ] && sha256sum "$f" > "$f.sha256"; done
+          # Rolia - GitHub 500s on a >50MB single blob pushed to ci-output; commit the jar in <50MB parts instead.
+          # Keep the full jar in /tmp/out for the Release step (which handles large assets fine).
+          if [ -f rolia-paperclip-26.1.2.jar ]; then split -b 40m rolia-paperclip-26.1.2.jar rolia-paperclip-26.1.2.jar.part.; printf 'rolia-paperclip-26.1.2.jar\n' > .gitignore; fi
           echo "status=${{ job.status }}" > status.txt
           echo "commit=$GITHUB_SHA" >> status.txt
           # truncate big logs

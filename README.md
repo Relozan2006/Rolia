@@ -25,7 +25,7 @@ High-performance Minecraft server core built on Canvas with a 1024-bit cryptogra
 <img width="820" alt="Rolia" src="https://github.com/user-attachments/assets/938e7151-29c5-4efd-a05a-b6b979b87ebd" />
 </div>
 
-**Rolia** — серверное ядро Minecraft **26.1.2** на базе [Canvas](https://github.com/CraftCanvasMC) (форк Folia) с криптографической защитой мирового сида. Территория остаётся воспроизводимой из обычного сида, а всё, что даёт игровое преимущество — структуры, данжи, руды, деревни, сокровища — генерируется от секретного **1024-битного** сида, вычислить который по миру практически невозможно.
+**Rolia** — серверное ядро Minecraft **26.1.2** на базе [Canvas](https://github.com/CraftCanvasMC) (форк Folia) с криптографической защитой мирового сида. **Весь** мир — рельеф, биомы, пещеры, структуры, данжи, руды, деревни, сокровища — генерируется от секретного **1024-битного** сида и секретной соли (Seed V2). По публичному сиду вычислить расположение чего-либо практически невозможно.
 
 ### Как устроена защита сида
 
@@ -33,7 +33,7 @@ Rolia разделяет генерацию на два независимых �
 
 | Что генерируется | Источник | Поведение |
 | --- | --- | --- |
-| Рельеф, биомы, пещеры, аквиферы, острова Энда | Обычный `level-seed` (64 бита) | Как в ванилле — мир воспроизводим из сида |
+| Рельеф, биомы, пещеры, аквиферы, острова Энда | Секретный сид + соль | Под защитой — по публичному сиду не вычислить (Seed V2) |
 | Структуры, данжи, деревни, декорации, добываемые руды, жеоды, слизнёвые чанки | Секретный `feature-seed` (1024 бита) + соль | Расположение практически невозможно вычислить или подобрать |
 
 Ключ защиты — секретная **соль** в `rolia.yml`. Пока она в тайне, восстановить расположение структур и руд по миру нельзя.
@@ -44,6 +44,7 @@ Rolia разделяет генерацию на два независимых �
 - 1024-битный секретный feature-сид на настоящем **BLAKE2b** (RFC 7693).
 - Секретная соль хранится в `rolia.yml` с правами доступа только для владельца.
 - Детерминированная генерация: один и тот же `level-seed` + `feature-seed` + соль всегда дают идентичный мир.
+- Оптимизация запертых торговцев (лоботомия): торговец в 1×1 не тратит такты на пасфайндинг, но **исправно пополняет сделки** — торговые залы работают как в ванилле.
 
 ### Требования
 
@@ -65,7 +66,7 @@ bash start.sh
 
 | Параметр | Файл | Назначение |
 | --- | --- | --- |
-| `level-seed` | `server.properties` | Обычный сид. Управляет рельефом и биомами. Мир воспроизводим из него. |
+| `level-seed` | `server.properties` | Базовый сид. Вместе с секретной солью определяет мир; по одному публичному сиду мир не воспроизвести. |
 | `feature-level-seed` | `server.properties` | 1024-битный feature-сид (десятичное число). Если пусто — генерируется криптостойкий случайный. |
 | `secure-seed.salt` | `rolia.yml` | Секретная соль (64+ символа). Создаётся автоматически с правами `0600`. |
 
@@ -101,7 +102,7 @@ bash start.sh
 <img width="820" alt="Rolia" src="https://github.com/user-attachments/assets/938e7151-29c5-4efd-a05a-b6b979b87ebd" />
 </div>
 
-**Rolia** is a Minecraft **26.1.2** server core built on [Canvas](https://github.com/CraftCanvasMC) (a Folia fork) with a cryptographically protected world seed. The terrain stays reproducible from the ordinary seed, while everything that grants a gameplay advantage — structures, dungeons, ores, villages, loot — is generated from a secret **1024-bit** seed that is practically impossible to reverse from the world.
+**Rolia** is a Minecraft **26.1.2** server core built on [Canvas](https://github.com/CraftCanvasMC) (a Folia fork) with a cryptographically protected world seed. The **entire** world — terrain, biomes, caves, structures, dungeons, ores, villages, loot — is generated from a secret **1024-bit** seed and a secret salt (Seed V2). Nothing's location can be reversed from the public seed.
 
 ### How the secure seed works
 
@@ -109,7 +110,7 @@ Rolia splits world generation into two independent sources of randomness:
 
 | What is generated | Source | Behaviour |
 | --- | --- | --- |
-| Terrain, biomes, caves, aquifers, End islands | Ordinary `level-seed` (64-bit) | Vanilla-like — the world is reproducible from the seed |
+| Terrain, biomes, caves, aquifers, End islands | Secret seed + salt | Protected — cannot be reversed from the public seed (Seed V2) |
 | Structures, dungeons, villages, decorations, mineable ores, geodes, slime chunks | Secret `feature-seed` (1024-bit) + salt | Placement is practically impossible to reverse or brute-force |
 
 The protection key is the secret **salt** in `rolia.yml`. As long as it stays secret, the location of structures and ores cannot be recovered from the world.
@@ -120,6 +121,7 @@ The protection key is the secret **salt** in `rolia.yml`. As long as it stays se
 - 1024-bit secret feature seed backed by real **BLAKE2b** (RFC 7693).
 - The secret salt is stored in `rolia.yml` with owner-only permissions.
 - Deterministic generation: the same `level-seed` + `feature-seed` + salt always produce an identical world.
+- Stuck-villager optimization (lobotomize): a villager in a 1×1 skips wasted pathfinding but **still restocks trades** — trading halls behave exactly like vanilla.
 
 ### Requirements
 
@@ -141,7 +143,7 @@ bash start.sh
 
 | Option | File | Purpose |
 | --- | --- | --- |
-| `level-seed` | `server.properties` | Ordinary seed. Drives terrain and biomes. The world is reproducible from it. |
+| `level-seed` | `server.properties` | Base seed. Together with the secret salt it determines the world; the world cannot be reproduced from the public seed alone. |
 | `feature-level-seed` | `server.properties` | 1024-bit feature seed (decimal number). If empty, a cryptographically secure random one is generated. |
 | `secure-seed.salt` | `rolia.yml` | Secret salt (64+ chars). Created automatically with `0600` permissions. |
 

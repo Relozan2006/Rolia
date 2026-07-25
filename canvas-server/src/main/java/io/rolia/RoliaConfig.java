@@ -145,6 +145,8 @@ public final class RoliaConfig {
             + "# If the salt is lost, newly generated structures/ores in an existing world will no longer match the old ones.\n"
             + "\n"
             + "secure-seed:\n"
+            + "  # Seed V2: the secret protects the ENTIRE world - terrain, biomes, caves, structures, ores, dungeons.\n"
+            + "  # Always on, cannot be disabled. Nothing's location can be computed from the public level seed.\n"
             + "  # 64+ char secret salt, auto-generated on first run. The master key of the 1024-bit seed protection.\n"
             + "  salt: \"" + salt + "\"\n"
             + "\n"
