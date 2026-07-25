@@ -74,7 +74,7 @@ jobs:
 
       - name: Build paperclip jar
         env:
-          BUILD_NUMBER: 36
+          BUILD_NUMBER: 37
         run: (./gradlew createMojmapPaperclipJar --stacktrace || ./gradlew createPaperclipJar --stacktrace) 2>&1 | tee build.log
 
       - name: Smoke test server (run twice)
@@ -250,7 +250,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v26.1.2-build.36"
+          TAG="v26.1.2-build.37"
           JAR=/tmp/out/rolia-paperclip-26.1.2.jar
           SHA=$(sha256sum "$JAR" | awk '{print $1}')
           cat > /tmp/relnotes.md << NOTES
@@ -276,6 +276,6 @@ jobs:
           NOTES
           gh release create "$TAG" "$JAR" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Rolia 26.1.2 (build 36)" \
+            --title "Rolia 26.1.2 (build 37)" \
             --notes-file /tmp/relnotes.md \
             --latest

@@ -77,4 +77,47 @@ patch(TAMABLE,
       "        BlockState blockStateBelow = this.level().getBlockStateIfLoaded(pos.below()); // Rolia - Folia-safe\n        if (blockStateBelow == null) return false; // Rolia - do not teleport a pet into an unloaded chunk\n        if (!this.canFlyToOwner() && blockStateBelow.getBlock() instanceof LeavesBlock) {\n",
       "TamableAnimal.canTeleportTo unloaded-chunk guard")
 
+
+# 7) Bulk writeLongArray (from Leaf) - byte-identical output (uses source.order()), faster chunk serialization
+FBB = "canvas-server/src/minecraft/java/net/minecraft/network/FriendlyByteBuf.java"
+_BULK = (
+    "    // Rolia start - bulk writeLongArray (byte-identical; config: optimizations.faster-network)\n"
+    "    private static void writeLongArrayBulk(final FriendlyByteBuf output, final long[] longs) {\n"
+    "        VarInt.write(output, longs.length);\n"
+    "        writeFixedSizeLongArrayBulk(output, longs);\n"
+    "    }\n"
+    "    private static void writeFixedSizeLongArrayBulk(final FriendlyByteBuf output, final long[] longs) {\n"
+    "        if (longs.length == 0) return;\n"
+    "        if (!io.rolia.RoliaConfig.fasterNetwork()) { for (long l : longs) output.source.writeLong(l); return; }\n"
+    "        final int neededBytes = longs.length * Long.BYTES;\n"
+    "        if (output.source.maxWritableBytes() >= neededBytes) {\n"
+    "            output.source.ensureWritable(neededBytes);\n"
+    "            final int wi = output.source.writerIndex();\n"
+    "            if (output.source.hasArray()) {\n"
+    "                java.nio.ByteBuffer.wrap(output.source.array(), output.source.arrayOffset() + wi, neededBytes).order(output.source.order()).asLongBuffer().put(longs);\n"
+    "                output.source.writerIndex(wi + neededBytes);\n"
+    "            } else if (output.source.nioBufferCount() > 0) {\n"
+    "                output.source.nioBuffer(wi, neededBytes).asLongBuffer().put(longs);\n"
+    "                output.source.writerIndex(wi + neededBytes);\n"
+    "            } else {\n"
+    "                final java.nio.ByteBuffer t = java.nio.ByteBuffer.allocate(neededBytes).order(output.source.order());\n"
+    "                t.asLongBuffer().put(longs); t.rewind();\n"
+    "                output.source.writeBytes(t);\n"
+    "            }\n"
+    "        } else {\n"
+    "            for (long l : longs) output.source.writeLong(l);\n"
+    "        }\n"
+    "    }\n"
+    "    // Rolia end\n"
+)
+patch(FBB,
+      "    public FriendlyByteBuf writeLongArray(final long[] longs) {\n        writeLongArray(this, longs);\n",
+      _BULK + "    public FriendlyByteBuf writeLongArray(final long[] longs) {\n        writeLongArrayBulk(this, longs);\n",
+      "FriendlyByteBuf bulk writeLongArray + methods")
+patch(FBB,
+      "        writeFixedSizeLongArray(this, longs);\n",
+      "        writeFixedSizeLongArrayBulk(this, longs);\n",
+      "FriendlyByteBuf bulk writeFixedSizeLongArray call")
+
+
 print("Rolia DAB source hooks applied.")

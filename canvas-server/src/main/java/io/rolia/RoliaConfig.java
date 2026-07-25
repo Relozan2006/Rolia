@@ -41,6 +41,7 @@ public final class RoliaConfig {
     // villager lobotomization
     private static boolean lobotomizeEnabled = true;
     private static boolean lobotomizeWaitUntilTradeLocked = true;
+    private static boolean fasterNetwork = true;
 
     private RoliaConfig() {
     }
@@ -53,6 +54,7 @@ public final class RoliaConfig {
     public static boolean dabHasBlacklist() { load(); return !dabBlacklist.isEmpty(); }
     public static boolean lobotomizeEnabled() { load(); return lobotomizeEnabled; }
     public static boolean lobotomizeWaitUntilTradeLocked() { load(); return lobotomizeWaitUntilTradeLocked; }
+    public static boolean fasterNetwork() { load(); return fasterNetwork; }
 
     @SuppressWarnings("unchecked")
     private static synchronized void load() {
@@ -122,6 +124,7 @@ public final class RoliaConfig {
         Map<String, Object> villagerLobo = section(optimizations, "villager-lobotomize");
         lobotomizeEnabled = bool(villagerLobo.get("enabled"), true);
         lobotomizeWaitUntilTradeLocked = bool(villagerLobo.get("wait-until-trade-locked"), true);
+        fasterNetwork = bool(section(optimizations, "faster-network").get("enabled"), true);
 
         // Only (re)write the file on first generation / migration - never clobber a user-edited file.
         if (firstGen) {
@@ -171,7 +174,11 @@ public final class RoliaConfig {
             + "    enabled: " + lobotomizeEnabled + "\n"
             + "    # Keep full AI for villagers that have not been traded with yet (0 xp) so they can still\n"
             + "    # gain their first profession level. Recommended true.\n"
-            + "    wait-until-trade-locked: " + lobotomizeWaitUntilTradeLocked + "\n";
+            + "    wait-until-trade-locked: " + lobotomizeWaitUntilTradeLocked + "\n"
+            + "  # Faster network: bulk-write long arrays (chunk light/heightmap) in one copy instead of a loop.\n"
+            + "  # Bytes on the wire are IDENTICAL - purely faster serialization.\n"
+            + "  faster-network:\n"
+            + "    enabled: " + fasterNetwork + "\n";
 
         try (FileWriter w = new FileWriter(file)) {
             w.write(yaml);

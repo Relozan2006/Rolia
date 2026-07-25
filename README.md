@@ -45,6 +45,7 @@ Rolia разделяет генерацию на два независимых �
 - Секретная соль хранится в `rolia.yml` с правами доступа только для владельца.
 - Детерминированная генерация: один и тот же `level-seed` + `feature-seed` + соль всегда дают идентичный мир.
 - Оптимизация запертых торговцев (лоботомия): торговец в 1×1 не тратит такты на пасфайндинг, но **исправно пополняет сделки** — торговые залы работают как в ванилле.
+- Ускоренная сериализация чанковых данных (bulk-запись длинных массивов) — байты на проводе идентичны, просто быстрее.
 
 ### Требования
 
@@ -122,6 +123,7 @@ The protection key is the secret **salt** in `rolia.yml`. As long as it stays se
 - The secret salt is stored in `rolia.yml` with owner-only permissions.
 - Deterministic generation: the same `level-seed` + `feature-seed` + salt always produce an identical world.
 - Stuck-villager optimization (lobotomize): a villager in a 1×1 skips wasted pathfinding but **still restocks trades** — trading halls behave exactly like vanilla.
+- Faster chunk-data serialization (bulk long-array writes) — the bytes on the wire are identical, just faster.
 
 ### Requirements
 
