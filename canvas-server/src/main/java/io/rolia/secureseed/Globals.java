@@ -1,5 +1,6 @@
 package io.rolia.secureseed;
 
+import com.mojang.logging.LogUtils;
 import io.rolia.RoliaConfig;
 
 import com.google.common.collect.Iterables;
@@ -11,6 +12,7 @@ import java.security.SecureRandom;
 import java.util.Optional;
 
 public class Globals {
+    private static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
     public static final int WORLD_SEED_LONGS = 16;
     public static final int WORLD_SEED_BITS = WORLD_SEED_LONGS * 64;
 
@@ -25,9 +27,15 @@ public class Globals {
         if (!seedInitialized) {
             synchronized (Globals.class) { // Rolia - publish the shared world seed exactly once, safely
                 if (!seedInitialized) {
-                    long[] seed = world.getServer().getWorldGenSettings().options().featureSeed();
+                    long[] seed = normalizeLength(world.getServer().getWorldGenSettings().options().featureSeed());
                     System.arraycopy(seed, 0, worldSeed, 0, WORLD_SEED_LONGS);
-                    seedInitialized = true;
+                    seedInitialized = true; // Rolia - volatile write; publishes the array contents written above
+                    // Rolia - the one authoritative startup line. Emitted at the point of publication and
+                    // derived from real state (fingerprint of seed+salt), so it cannot report "active" for
+                    // a seed that is not. The CI gate asserts on the fingerprint, not on a fixed string.
+                    LOGGER.info("Rolia: config loaded (secure seed {}; DAB {}).",
+                        isActive() ? "ACTIVE fp=" + seedFingerprint() : "INACTIVE",
+                        RoliaConfig.dabEnabled() ? "ON" : "off");
                 }
             }
         }
@@ -46,9 +54,73 @@ public class Globals {
     }
 
     /**
+     * Rolia - a volatile read of the publication flag. Callers that touch {@link #worldSeed} without
+     * having gone through {@link #setupGlobals} must call this first: reading the volatile {@code true}
+     * establishes the happens-before edge to the array writes inside the synchronized block above.
+     * Without it a worldgen thread may legally observe a partially written (or all-zero) seed on
+     * weakly-ordered hardware (ARM/Graviton), which would silently generate chunks off the wrong seed.
+     */
+    public static boolean seedPublished() {
+        return seedInitialized;
+    }
+
+    /**
+     * Rolia - the correct way to read the shared seed from a thread that did not itself call
+     * {@link #setupGlobals}. The branch below consumes the volatile {@code seedInitialized} read, so
+     * it cannot be optimised away, and that read is what orders the array writes in setupGlobals
+     * before this thread's copy of them.
+     */
+    public static long[] publishedWorldSeed() {
+        if (seedInitialized) {
+            return worldSeed; // published - the volatile read above orders the writes before this point
+        }
+        // Not published yet (very early boot); the array is all-zero by definition, nothing to order.
+        return worldSeed;
+    }
+
+    /** Rolia - true once a real (non-zero) 1024-bit seed is in effect. Used by the startup log + CI gate. */
+    public static boolean isActive() {
+        if (!seedInitialized) {
+            return false;
+        }
+        for (long v : worldSeed) {
+            if (v != 0L) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Rolia - a 16-hex-char fingerprint of the ACTIVE secret (seed + salt), safe to print.
+     * It is the truncated BLAKE2b of the salted seed, so it reveals nothing about either input but
+     * differs for every distinct (seed, salt) pair. This is what the startup line and the CI assertion
+     * use, so that check depends on real state instead of a hardcoded literal.
+     */
+    public static String seedFingerprint() {
+        if (!isActive()) {
+            return "0000000000000000";
+        }
+        long[] h = Hashing.hashWorldSeed(worldSeed);
+        return String.format("%016x", h[0]);
+    }
+
+    /** Rolia - pad/truncate a stored feature seed to exactly WORLD_SEED_LONGS so a malformed level.dat cannot throw. */
+    public static long[] normalizeLength(long[] seed) {
+        if (seed != null && seed.length == WORLD_SEED_LONGS) {
+            return seed;
+        }
+        long[] out = new long[WORLD_SEED_LONGS];
+        if (seed != null && seed.length > 0) {
+            System.arraycopy(seed, 0, out, 0, Math.min(seed.length, WORLD_SEED_LONGS));
+        }
+        return out;
+    }
+
+    /**
      * Derives a salt-protected 64-bit seed for vanilla systems that would otherwise
      * leak the raw level seed (loot random sequences, end spikes, ...).
-     * Deterministic per (levelSeed, domain, salt); falls back to the raw seed when disabled.
+     * Deterministic per (levelSeed, domain, salt).
      */
     public static long transformSeed(long levelSeed, long domain) {
         long[] expanded = Hashing.expandLevelSeedTo1024Bits(levelSeed ^ domain);
@@ -73,7 +145,7 @@ public class Globals {
         }
         for (long v : seed) {
             if (v != 0L) {
-                return seed;
+                return normalizeLength(seed); // Rolia - a short/long stored seed must not reach System.arraycopy
             }
         }
         return createRandomWorldSeed();
@@ -146,24 +218,43 @@ public class Globals {
         return RoliaConfig.salt();
     }
 
+    /**
+     * Rolia - domain separators for the secure RNG.
+     *
+     * <p><b>DO NOT REORDER, RENUMBER OR DELETE ANY CONSTANT.</b> The {@code id} below is mixed into
+     * every generated chunk's random stream, so changing one silently reshuffles every structure,
+     * decoration and slime chunk in every existing world - with no error and no migration path.
+     * The ids were originally {@code ordinal()}; they are now explicit precisely so that a future
+     * reordering (or a tidy-up of the currently-unused constants) cannot corrupt live worlds.
+     * New domains must be appended with the next free id.</p>
+     */
     public enum Salt {
-        UNDEFINED,
-        BASTION_FEATURE,
-        WOODLAND_MANSION_FEATURE,
-        MINESHAFT_FEATURE,
-        BURIED_TREASURE_FEATURE,
-        NETHER_FORTRESS_FEATURE,
-        PILLAGER_OUTPOST_FEATURE,
-        GEODE_FEATURE,
-        NETHER_FOSSIL_FEATURE,
-        OCEAN_MONUMENT_FEATURE,
-        RUINED_PORTAL_FEATURE,
-        POTENTIONAL_FEATURE,
-        GENERATE_FEATURE,
-        JIGSAW_PLACEMENT,
-        STRONGHOLDS,
-        POPULATION,
-        DECORATION,
-        SLIME_CHUNK
+        UNDEFINED(0),
+        // Reserved: kept for id stability, not currently referenced by any patch. Do not delete.
+        BASTION_FEATURE(1),
+        WOODLAND_MANSION_FEATURE(2),
+        MINESHAFT_FEATURE(3),
+        BURIED_TREASURE_FEATURE(4),
+        NETHER_FORTRESS_FEATURE(5),
+        PILLAGER_OUTPOST_FEATURE(6),
+        GEODE_FEATURE(7),
+        NETHER_FOSSIL_FEATURE(8),
+        OCEAN_MONUMENT_FEATURE(9),
+        RUINED_PORTAL_FEATURE(10),
+        POTENTIONAL_FEATURE(11),
+        GENERATE_FEATURE(12),
+        JIGSAW_PLACEMENT(13),
+        STRONGHOLDS(14),
+        POPULATION(15),
+        DECORATION(16),
+        SLIME_CHUNK(17),
+        // Rolia - build 38: cave/ravine carvers, previously left on the public 64-bit level seed.
+        CARVER(18);
+
+        public final int id;
+
+        Salt(final int id) {
+            this.id = id;
+        }
     }
 }

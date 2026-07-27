@@ -7,15 +7,27 @@ on:
       - '**.md'
       - 'docs/**'
       - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# Rolia - one build per ref; never cancel a running build (it may already be
+# half-way through publishing ci-output / a release).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     defaults:
       run:
         shell: bash
@@ -56,7 +68,7 @@ jobs:
       - name: Dump reference sources
         run: |
           mkdir -p /tmp/out/refsrc
-          for f in net/minecraft/world/RandomSequences.java net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java net/minecraft/world/entity/Mob.java net/minecraft/world/entity/ai/Brain.java net/minecraft/world/entity/npc/villager/Villager.java net/minecraft/world/entity/LivingEntity.java net/minecraft/world/entity/Entity.java net/minecraft/world/entity/ai/goal/GoalSelector.java net/minecraft/world/entity/ai/goal/Goal.java net/minecraft/world/entity/ai/goal/WrappedGoal.java net/minecraft/world/entity/ai/sensing/Sensor.java net/minecraft/network/FriendlyByteBuf.java net/minecraft/network/VarInt.java net/minecraft/network/VarLong.java net/minecraft/network/syncher/SynchedEntityData.java net/minecraft/network/protocol/game/ClientboundLightUpdatePacketData.java net/minecraft/world/phys/shapes/Shapes.java net/minecraft/world/phys/shapes/CollisionContext.java net/minecraft/core/MappedRegistry.java net/minecraft/core/Holder.java net/minecraft/core/Registry.java net/minecraft/world/level/chunk/PalettedContainer.java net/minecraft/util/RandomSource.java net/minecraft/util/Mth.java net/minecraft/world/level/levelgen/RandomState.java net/minecraft/world/level/chunk/ChunkGenerator.java net/minecraft/world/entity/projectile/ThrownEnderpearl.java net/minecraft/world/entity/TamableAnimal.java net/minecraft/world/entity/Leashable.java net/minecraft/nbt/CompoundTag.java net/minecraft/world/entity/raid/Raid.java net/minecraft/world/level/chunk/storage/RegionFile.java net/minecraft/world/level/chunk/storage/RegionFileStorage.java net/minecraft/world/level/Level.java net/minecraft/server/level/ServerLevel.java net/minecraft/server/MinecraftServer.java net/minecraft/server/players/PlayerList.java net/minecraft/world/entity/npc/villager/VillagerTrades.java; do
+          for f in net/minecraft/world/RandomSequences.java net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java net/minecraft/world/entity/Mob.java net/minecraft/world/entity/ai/Brain.java net/minecraft/world/entity/npc/villager/Villager.java net/minecraft/world/entity/LivingEntity.java net/minecraft/world/entity/Entity.java net/minecraft/world/entity/ai/goal/GoalSelector.java net/minecraft/world/entity/ai/goal/Goal.java net/minecraft/world/entity/ai/goal/WrappedGoal.java net/minecraft/world/entity/ai/sensing/Sensor.java net/minecraft/network/FriendlyByteBuf.java net/minecraft/network/VarInt.java net/minecraft/network/VarLong.java net/minecraft/network/syncher/SynchedEntityData.java net/minecraft/network/protocol/game/ClientboundLightUpdatePacketData.java net/minecraft/world/phys/shapes/Shapes.java net/minecraft/world/phys/shapes/CollisionContext.java net/minecraft/core/MappedRegistry.java net/minecraft/core/Holder.java net/minecraft/core/Registry.java net/minecraft/world/level/chunk/PalettedContainer.java net/minecraft/util/RandomSource.java net/minecraft/util/Mth.java net/minecraft/world/level/levelgen/RandomState.java net/minecraft/world/level/chunk/ChunkGenerator.java net/minecraft/world/entity/projectile/ThrownEnderpearl.java net/minecraft/world/entity/TamableAnimal.java net/minecraft/world/entity/Leashable.java net/minecraft/nbt/CompoundTag.java net/minecraft/world/entity/raid/Raid.java net/minecraft/world/level/chunk/storage/RegionFile.java net/minecraft/world/level/chunk/storage/RegionFileStorage.java net/minecraft/world/level/Level.java net/minecraft/server/level/ServerLevel.java net/minecraft/server/MinecraftServer.java net/minecraft/server/players/PlayerList.java net/minecraft/world/entity/npc/villager/VillagerTrades.java net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java net/minecraft/world/level/levelgen/carver/WorldCarver.java; do
             src="canvas-server/src/minecraft/java/$f"
             if [ -f "$src" ]; then cp "$src" "/tmp/out/refsrc/$(basename $f)"; else echo "MISSING $f" >> /tmp/out/refsrc/missing.txt; fi
           done
@@ -69,27 +81,180 @@ jobs:
             grep -rln "RandomSource.create(level.getSeed()\|RandomSource.create(this.getSeed()\|create(worldGenLevel.getSeed()" canvas-server/src/minecraft/java --include=*.java | head -10; } > /tmp/out/endspike.txt || true
           cat /tmp/out/endspike.txt
 
+      - name: Write CI shell helpers
+        run: |
+          set -e -o pipefail
+          cat > /tmp/ci-helpers.sh <<'HELPERS'
+          # Rolia CI helpers - sourced by every step that launches a server or
+          # inspects the built jar. Keep POSIX-ish; sourced under `set -e -o pipefail`.
+
+          # ---------------------------------------------------------------- errors
+          # Paper/Folia route errors through log4j as
+          #     [HH:MM:SS] [Server thread/ERROR]: <message>
+          # followed by bare stack-trace lines. The old detector only looked for
+          # "Exception in thread"/"Caused by:", which misses nearly every real
+          # server error. Match the log-LEVEL field and stack-trace shapes instead.
+          ROLIA_ERR_RE='/(ERROR|FATAL)\]|^[[:space:]]+at [a-zA-Z]|^[a-zA-Z_$][a-zA-Z0-9_.$]*(Exception|Error): |Exception in thread|Caused by:|Failed to start the minecraft server'
+          # Known-benign lines a headless first start legitimately produces.
+          ROLIA_ERR_ALLOW='eula|Advanced terminal|libraries directory'
+
+          scan_errors () {           # scan_errors <tag> <logfile>
+            _tag="$1"; _log="$2"
+            if [ ! -f "$_log" ]; then echo "[$_tag] scan_errors: $_log is missing"; return 1; fi
+            _hits=$(grep -nE "$ROLIA_ERR_RE" "$_log" | grep -vEi "$ROLIA_ERR_ALLOW" || true)
+            if [ -n "$_hits" ]; then
+              echo "[$_tag] ERRORS DETECTED in $_log:"
+              printf '%s\n' "$_hits" | head -60
+              return 1
+            fi
+            echo "[$_tag] no errors in $_log"
+            return 0
+          }
+
+          # ------------------------------------------------------------ exit codes
+          # Every server run writes "exitcode"; most of them used to only test
+          # `[ -f exitcode ]`, so a hung or crashing shutdown was invisible.
+          # wait_exit makes both fatal and dumps the JVM stacks on a hang.
+          wait_exit () {             # wait_exit <tag> <logfile> [tries=36]
+            _tag="$1"; _log="$2"; _tries="${3:-36}"; _i=0
+            while [ "$_i" -lt "$_tries" ]; do
+              if [ -f exitcode ]; then break; fi
+              _i=$((_i + 1)); sleep 5
+            done
+            if [ ! -f exitcode ]; then
+              echo "[$_tag] SHUTDOWN HUNG: no exit code after $((_tries * 5))s"
+              _pid=$(pgrep -f 'rolia\.jar' | head -1 || true)
+              if [ -n "$_pid" ]; then
+                echo "[$_tag] thread dump of server JVM pid $_pid:"
+                if command -v jstack >/dev/null 2>&1; then
+                  jstack -l "$_pid" 2>&1 | head -400 || true
+                elif command -v jcmd >/dev/null 2>&1; then
+                  jcmd "$_pid" Thread.print 2>&1 | head -400 || true
+                else
+                  kill -QUIT "$_pid" 2>/dev/null || true; sleep 3
+                fi
+                kill -9 "$_pid" 2>/dev/null || true
+              else
+                echo "[$_tag] no server JVM found (pgrep -f rolia.jar)"
+              fi
+              echo "[$_tag] last 80 lines of $_log:"; tail -80 "$_log" 2>/dev/null || true
+              exit 1
+            fi
+            _ec=$(cat exitcode 2>/dev/null || echo 1)
+            if [ "$_ec" != "0" ]; then
+              echo "[$_tag] non-zero JVM exit ($_ec)"; tail -80 "$_log" 2>/dev/null || true
+              exit 1
+            fi
+            echo "[$_tag] clean JVM exit (0)"
+          }
+
+          # -------------------------------------------------------------- manifest
+          # Print the paperclip manifest plus the manifests of any server jars it
+          # bundles (paperclip does not necessarily propagate the server manifest).
+          jar_manifest () {          # jar_manifest <jar>
+            _jar="$1"
+            { unzip -p "$_jar" META-INF/MANIFEST.MF 2>/dev/null | tr -d '\r' || true; }
+            for _inner in $(unzip -Z1 "$_jar" 'META-INF/versions/*.jar' 2>/dev/null || true); do
+              { unzip -p "$_jar" "$_inner" > /tmp/_inner.jar 2>/dev/null || continue; }
+              echo "# --- bundled: $_inner"
+              { unzip -p /tmp/_inner.jar META-INF/MANIFEST.MF 2>/dev/null | tr -d '\r' || true; }
+            done
+            rm -f /tmp/_inner.jar
+            return 0
+          }
+
+          manifest_attr () {         # manifest_attr <jar> <Attribute-Name>
+            jar_manifest "$1" | grep -E "^$2:" | head -1 | sed -E "s/^$2:[[:space:]]*//" || true
+          }
+          HELPERS
+          bash -n /tmp/ci-helpers.sh
+          echo "CI helpers written to /tmp/ci-helpers.sh"
+
       - name: Apply Rolia DAB source hooks
         run: python3 scripts/apply_dab_hooks.py
 
       - name: Build paperclip jar
+        timeout-minutes: 90
         env:
-          BUILD_NUMBER: 37
-        run: (./gradlew createMojmapPaperclipJar --stacktrace || ./gradlew createPaperclipJar --stacktrace) 2>&1 | tee build.log
+          BUILD_NUMBER: 38
+        run: |
+          set -e -o pipefail
+          source /tmp/ci-helpers.sh
+          # Rolia - NO "|| ./gradlew createPaperclipJar" fallback: the fallback
+          # produces a differently-mapped artifact that passes every check and
+          # ships. A build failure must be a build failure.
+          ./gradlew createMojmapPaperclipJar --stacktrace 2>&1 | tee build.log
+          # Rolia - exactly ONE paperclip jar may exist, otherwise the jar we test
+          # and the jar we release can differ (find|head -1 vs ls|head -1 ordering).
+          mapfile -t JARS < <(find . -name '*paperclip*.jar' -not -path './testrun/*' | sort)
+          if [ "${#JARS[@]}" -ne 1 ]; then
+            echo "FAIL: expected exactly one *paperclip*.jar, found ${#JARS[@]}:"
+            printf '  %s\n' "${JARS[@]}"
+            exit 1
+          fi
+          cp "${JARS[0]}" /tmp/rolia.jar
+          echo "=== built jar: ${JARS[0]} -> /tmp/rolia.jar ==="
+          ls -l /tmp/rolia.jar
+          sha256sum /tmp/rolia.jar | tee /tmp/rolia.jar.sha256
+          echo "=== MANIFEST(s) ==="
+          jar_manifest /tmp/rolia.jar | tee /tmp/rolia-manifest.txt
+          # Rolia - branding asserted on the artifact we ship. The old
+          # `grep -qi rolia "$log"` was satisfied by a log line the server prints
+          # unconditionally, so it could never fail.
+          BRAND_NAME=$(manifest_attr /tmp/rolia.jar 'Brand-Name')
+          BRAND_ID=$(manifest_attr /tmp/rolia.jar 'Brand-Id')
+          IMPL_TITLE=$(manifest_attr /tmp/rolia.jar 'Implementation-Title')
+          echo "Brand-Name='$BRAND_NAME' Brand-Id='$BRAND_ID' Implementation-Title='$IMPL_TITLE'"
+          case "$BRAND_NAME|$BRAND_ID|$IMPL_TITLE" in
+            *[Rr]olia*) echo "OK: jar manifest carries the Rolia brand" ;;
+            *) echo "FAIL: built jar carries no Rolia brand attribute (Brand-Name/Brand-Id/Implementation-Title)"
+               cat /tmp/rolia-manifest.txt; exit 1 ;;
+          esac
+          echo "manifest Build-Number=$(manifest_attr /tmp/rolia.jar 'Build-Number') (expected $BUILD_NUMBER)"
+
+      - name: Run test suite
+        timeout-minutes: 60
+        # Rolia - build 38 introduces this step; the Paper/Canvas suites in the tree have never been
+        # run by this pipeline, so their current pass/fail state is unknown. Report-only for ONE build
+        # so a pre-existing upstream test failure cannot block the release, then flip to a hard gate
+        # in build 39 once we have seen a clean run. `set +e` is deliberate and scoped to this step.
+        continue-on-error: true
+        env:
+          BUILD_NUMBER: 38
+        run: |
+          set +e
+          ./gradlew test --stacktrace 2>&1 | tee test.log
+          rc=${PIPESTATUS[0]}
+          echo "===== TEST SUITE EXIT: $rc ====="
+          if [ "$rc" != "0" ]; then
+            echo "NOTE: test failures above are REPORT-ONLY in build 38. Review them, then remove"
+            echo "      continue-on-error + restore 'set -e -o pipefail' to make this a real gate."
+            grep -nE 'FAILED|tests? (completed|failed)' test.log | head -40
+          fi
+          cp -r canvas-server/build/reports/tests /tmp/out/test-reports 2>/dev/null || true
+          exit 0
 
       - name: Smoke test server (run twice)
+        timeout-minutes: 50
         run: |
+          set -e -o pipefail
           set -x
-          JAR=$(find . -name '*paperclip*.jar' -not -path './testrun/*' | head -1)
-          cp "$JAR" /tmp/rolia.jar
+          source /tmp/ci-helpers.sh
+          # Rolia - always the jar the build step verified; never re-search for one.
+          [ -f /tmp/rolia.jar ] || { echo "FAIL: /tmp/rolia.jar missing (build step did not produce it)"; exit 1; }
           mkdir -p testrun && cd testrun
           echo "eula=true" > eula.txt
 
+          # Rolia - the exact flag set start.sh ships with, so the configuration
+          # users actually run is the one CI exercises.
+          START_SH_FLAGS="-Xmx4G --add-modules=jdk.incubator.vector --sun-misc-unsafe-memory-access=allow"
+
           run_server () {
-            tag="$1"; log="server_${tag}.log"
+            tag="$1"; shift
+            log="server_${tag}.log"
             rm -f input exitcode
             mkfifo input
-            (java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "$log" 2>&1; echo $? > exitcode) &
+            (set +e; java "$@" -jar /tmp/rolia.jar --nogui < input > "$log" 2>&1; echo $? > exitcode) &   # Rolia - set +e: the subshell must record a non-zero JVM exit, not die on it
             exec 3>input
             ok=""
             for i in $(seq 1 180); do
@@ -98,42 +263,47 @@ jobs:
               sleep 5
             done
             if [ -z "$ok" ]; then echo "[$tag] SERVER FAILED TO START"; tail -120 "$log"; exec 3>&- || true; exit 1; fi
-            sleep 5; echo "version" >&3
-            sleep 6; echo "seed" >&3
-            sleep 5; echo "stop" >&3
-            for i in $(seq 1 36); do [ -f exitcode ] && break; sleep 5; done
+            sleep 5; echo "version" >&3 || true
+            sleep 6; echo "seed" >&3 || true
+            sleep 5; echo "stop" >&3 || true
+            wait_exit "$tag" "$log"
             exec 3>&- || true
             echo "=== [$tag] branding + seed lines ==="
-            grep -iE 'running rolia|feature seed' "$log" | head
+            grep -iE 'this server is running|feature seed' "$log" | head || true
             echo "=== [$tag] /version output (brand must say Rolia) ==="
-            grep -iE 'checking version|\[Rolia\]|\| STABLE|made by' "$log" | head
-            grep -qi 'rolia' "$log" || { echo "[$tag] NO ROLIA BRANDING"; exit 1; }
-            grep -qi 'feature seed' "$log" || { echo "[$tag] NO FEATURE SEED"; exit 1; }
-            if grep -Eq 'Exception in thread|Caused by:|Failed to start the minecraft server' "$log"; then
-              echo "[$tag] FATAL ERRORS DETECTED"; grep -nE 'Exception in thread|Caused by:' "$log" | head; exit 1
-            fi
-            ec=$(cat exitcode 2>/dev/null || echo 1)
-            [ "$ec" = "0" ] || { echo "[$tag] non-zero exit ($ec)"; tail -60 "$log"; exit 1; }
+            grep -iE 'checking version|\[Rolia\]|\| STABLE|made by' "$log" | head || true
+            # Rolia - anchored to the log-level field, so an unrelated line that
+            # merely contains "rolia" (e.g. the config line) cannot satisfy it.
+            grep -qE '/INFO\]:[[:space:]]*(This server is running Rolia |\[Rolia\])' "$log" || {
+              echo "[$tag] NO ROLIA BRANDING on the startup/version banner"; exit 1; }
+            grep -qE 'Feature seed fp: [0-9a-f]{16}' "$log" || { echo "[$tag] NO FEATURE SEED FINGERPRINT"; exit 1; }
+            scan_errors "$tag" "$log" || exit 1
           }
 
-          run_server first     # fresh world: generates world + rolia.yml
+          run_server first $START_SH_FLAGS   # fresh world, shipped start.sh flags
           echo "=== F3 server brand (serverModName -> minecraft:brand payload) ==="
           grep -i 'serverModName' canvas-server.yml 2>/dev/null || echo "(canvas-server.yml not persisted on first run; F3 brand = brandName() = Rolia)"
-          run_server second    # restart on same world: must load cleanly, identical feature seed
+          run_server second -Xmx3G           # restart on same world: must load cleanly, identical feature seed
 
-          FS1=$(grep -oiE 'feature seed: \[[0-9]+\]' server_first.log  | grep -oE '[0-9]+' | head -1)
-          FS2=$(grep -oiE 'feature seed: \[[0-9]+\]' server_second.log | grep -oE '[0-9]+' | head -1)
-          echo "run1 feature seed: $FS1"
-          echo "run2 feature seed: $FS2"
-          [ -n "$FS1" ] || { echo "feature seed not printed"; exit 1; }
-          [ "${#FS1}" -ge 20 ] || { echo "feature seed too short (not 1024-bit?): $FS1"; exit 1; }
+          FS1=$(grep -oE 'Feature seed fp: [0-9a-f]{16}' server_first.log  | sed 's/.*fp: //' | head -1 || true)
+          FS2=$(grep -oE 'Feature seed fp: [0-9a-f]{16}' server_second.log | sed 's/.*fp: //' | head -1 || true)
+          echo "run1 feature seed fp: $FS1"
+          echo "run2 feature seed fp: $FS2"
+          [ -n "$FS1" ] || { echo "feature seed fingerprint not printed"; exit 1; }
+          [ "${#FS1}" -eq 16 ] || { echo "malformed feature seed fingerprint: $FS1"; exit 1; }
           [ "$FS1" = "$FS2" ] || { echo "feature seed changed across restart: $FS1 vs $FS2"; exit 1; }
           echo "SMOKE TEST OK: two clean starts, stable 1024-bit feature seed, no fatal errors"
 
       - name: Determinism + seed-split test
+        timeout-minutes: 70
         run: |
+          # Rolia - a real gate again: `set +e +o pipefail` made this step
+          # unfailable (it ends in an `echo ... OK`). Every diagnostic grep /
+          # command substitution below that may legitimately match nothing is
+          # neutralised explicitly with `|| true` instead.
+          set -e -o pipefail
           set -x
-          set +e +o pipefail   # assertions are explicit; empty greps must not abort
+          source /tmp/ci-helpers.sh
           cd testrun
           SALT="DETERMINISMSALT_DETERMINISMSALT_DETERMINISMSALT_DETERMINISM_0123"
           FSEED="12345678901234567890123456789012345678901234567890"
@@ -144,20 +314,21 @@ jobs:
             printf 'secure-seed:\n  salt: "%s"\n' "$SALT" > rolia.yml
             printf 'level-seed=roliadettest\nfeature-level-seed=%s\nonline-mode=false\n' "$fs" > server.properties
             rm -f input exitcode; mkfifo input
-            (java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "det_$tag.log" 2>&1; echo $? > exitcode) &
+            (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "det_$tag.log" 2>&1; echo $? > exitcode) &   # Rolia - set +e: record the exit code instead of dying on it
             exec 3>input
             for i in $(seq 1 180); do grep -q 'Done (' "det_$tag.log" 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
-            sleep 4; echo "seed" >&3
-            sleep 4; echo "locate structure minecraft:mineshaft" >&3
-            sleep 5; echo "locate structure minecraft:stronghold" >&3
-            sleep 5; echo "stop" >&3
-            for i in $(seq 1 36); do [ -f exitcode ] && break; sleep 5; done
+            sleep 4; echo "seed" >&3 || true
+            sleep 4; echo "locate structure minecraft:mineshaft" >&3 || true
+            sleep 5; echo "locate structure minecraft:stronghold" >&3 || true
+            sleep 5; echo "stop" >&3 || true
+            wait_exit "det_$tag" "det_$tag.log"
             exec 3>&- 2>/dev/null || true
+            scan_errors "det_$tag" "det_$tag.log" || exit 1
           }
           locate_run a "$FSEED"    # level L, feature F1
           locate_run b "$FSEED"    # level L, feature F1  -> must be IDENTICAL (determinism)
           locate_run c "$FSEED2"   # level L, feature F2  -> structures must MOVE (secured by feature seed)
-          coords () { grep -oE '\[-?[0-9]+, ~, -?[0-9]+\]' "det_$1.log" | tr '\n' ' '; }
+          coords () { grep -oE '\[-?[0-9]+, ~, -?[0-9]+\]' "det_$1.log" | tr '\n' ' ' || true; }
           CA=$(coords a); CB=$(coords b); CC=$(coords c)
           echo "A (L,F1): $CA"; echo "B (L,F1): $CB"; echo "C (L,F2): $CC"
           if [ -z "$CA" ] || [ -z "$CB" ] || [ -z "$CC" ]; then echo "FAIL: locate produced no coords - cannot verify determinism/seed-split"; exit 1; fi
@@ -166,74 +337,121 @@ jobs:
           echo "OK: determinism (A==B) + seed-split (structures move with feature seed, A!=C) verified"
 
       - name: DAB enabled smoke
+        timeout-minutes: 30
         run: |
+          # Rolia - real gate (was `set +e +o pipefail`, which made the step
+          # unfailable); diagnostics below are neutralised individually.
+          set -e -o pipefail
           set -x
-          set +e +o pipefail
+          source /tmp/ci-helpers.sh
           cd testrun
           rm -rf world world_nether world_the_end
-          printf 'secure-seed:\n  salt: "DABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKE01"\ndab:\n  enabled: true\n  start-distance: 8\n  max-tick-interval: 20\n  blacklist: []\n' > rolia.yml
+          # Rolia - RoliaConfig reads optimizations.dab first and only falls back
+          # to a top-level dab: block, so the smoke test must use the nested,
+          # documented form - otherwise it only ever exercised the back-compat path.
+          printf 'secure-seed:\n  salt: "DABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKE01"\noptimizations:\n  dab:\n    enabled: true\n    start-distance: 8\n    max-tick-interval: 20\n    blacklist: []\n' > rolia.yml
           printf 'level-seed=dabtest\nonline-mode=false\n' > server.properties
           rm -f input exitcode; mkfifo input
-          (java -Xmx3G -jar /tmp/rolia.jar --nogui < input > dab.log 2>&1; echo $? > exitcode) &
+          (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > dab.log 2>&1; echo $? > exitcode) &   # Rolia - set +e: record the exit code instead of dying on it
           exec 3>input
           for i in $(seq 1 180); do grep -q 'Done (' dab.log 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
-          sleep 8; echo "stop" >&3
-          for i in $(seq 1 36); do [ -f exitcode ] && break; sleep 5; done
+          sleep 8; echo "stop" >&3 || true
+          wait_exit dab dab.log
           exec 3>&- 2>/dev/null || true
           echo "=== DAB run: config + startup ==="
-          grep -iE 'config loaded|DAB (ON|off)|secure seed active|Generating a new' dab.log | head
+          grep -iE 'config loaded|DAB (ON|off)|secure seed|Generating a new' dab.log | head || true
           grep -q 'Done (' dab.log || { echo "FAIL: DAB run did not start"; tail -100 dab.log; exit 1; }
-          if grep -Eq 'Exception in thread|Caused by:' dab.log; then echo "FAIL: exceptions with DAB on"; grep -nE 'Exception in thread|Caused by:' dab.log | head; exit 1; fi
-          echo "DAB ENABLED SMOKE OK: clean startup with dab.enabled=true"
+          # Rolia - assert DAB is actually ON. The old diagnostic matched
+          # "DAB off" just as happily as "DAB ON".
+          grep -qE 'config loaded .*secure seed ACTIVE fp=[0-9a-f]{16}; DAB ON' dab.log || {
+            echo "FAIL: DAB is not ON - optimizations.dab.enabled=true was not honoured"
+            grep -i 'config loaded' dab.log | head || true
+            exit 1
+          }
+          scan_errors dab dab.log || exit 1
+          echo "DAB ENABLED SMOKE OK: clean startup with optimizations.dab.enabled=true and DAB ON"
 
       - name: Auto-random seed test (fresh server => unique 1024-bit seed)
+        timeout-minutes: 50
         run: |
+          # Rolia - real gate (was `set +e +o pipefail`); diagnostics neutralised individually.
+          set -e -o pipefail
           set -x
-          set +e +o pipefail
+          source /tmp/ci-helpers.sh
           cd testrun
           fresh_run () {
             tag="$1"
             rm -rf world world_nether world_the_end rolia.yml rolia-seed.properties
             printf 'level-seed=samelevel\nonline-mode=false\n' > server.properties
             rm -f input exitcode; mkfifo input
-            (java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "auto_$tag.log" 2>&1; echo $? > exitcode) &
+            (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "auto_$tag.log" 2>&1; echo $? > exitcode) &   # Rolia - set +e: record the exit code instead of dying on it
             exec 3>input
             for i in $(seq 1 180); do grep -q 'Done (' "auto_$tag.log" 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
-            sleep 4; echo "seed" >&3
-            sleep 4; echo "stop" >&3
-            for i in $(seq 1 36); do [ -f exitcode ] && break; sleep 5; done
+            sleep 4; echo "seed" >&3 || true
+            sleep 4; echo "stop" >&3 || true
+            wait_exit "auto_$tag" "auto_$tag.log"
             exec 3>&- 2>/dev/null || true
+            scan_errors "auto_$tag" "auto_$tag.log" || exit 1
           }
           fresh_run a
           fresh_run b
-          FA=$(grep -oiE 'feature seed: \[[0-9]+\]' auto_a.log | head -1)
-          FB=$(grep -oiE 'feature seed: \[[0-9]+\]' auto_b.log | head -1)
-          echo "A feature seed: $FA"
-          echo "B feature seed: $FB"
+          FA=$(grep -oE 'Feature seed fp: [0-9a-f]{16}' auto_a.log | sed 's/.*fp: //' | head -1 || true)
+          FB=$(grep -oE 'Feature seed fp: [0-9a-f]{16}' auto_b.log | sed 's/.*fp: //' | head -1 || true)
+          echo "A feature seed fp: $FA"
+          echo "B feature seed fp: $FB"
           [ -n "$FA" ] && [ -n "$FB" ] || { echo "FAIL: feature seed not auto-generated on fresh start"; exit 1; }
           [ "$FA" != "$FB" ] || { echo "FAIL: two fresh servers got the SAME feature seed"; exit 1; }
-          grep -qi 'secure seed active' auto_a.log || { echo "FAIL: secure seed not active on fresh start"; exit 1; }
-          echo "AUTO-RANDOM OK: fresh servers get DIFFERENT 1024-bit feature seeds; secure seed always active"
+          # Rolia - the startup line must carry a real per-server fingerprint of the
+          # 1024-bit seed. The old check grepped the hardcoded literal
+          # "secure seed active", which the server logs unconditionally, so it could
+          # never fail. Format: "config loaded (secure seed ACTIVE fp=<16 hex>; DAB ...)".
+          for t in a b; do
+            grep -qE 'secure seed ACTIVE fp=[0-9a-f]{16}' "auto_$t.log" || {
+              echo "FAIL: no 'secure seed ACTIVE fp=<16 hex>' line in auto_$t.log"
+              grep -i 'config loaded' "auto_$t.log" | head || true
+              exit 1
+            }
+          done
+          FPA=$(grep -oE 'secure seed ACTIVE fp=[0-9a-f]{16}' auto_a.log | head -1 | sed 's/.*fp=//' || true)
+          FPB=$(grep -oE 'secure seed ACTIVE fp=[0-9a-f]{16}' auto_b.log | head -1 | sed 's/.*fp=//' || true)
+          echo "A secure seed fingerprint: $FPA"
+          echo "B secure seed fingerprint: $FPB"
+          [ -n "$FPA" ] && [ -n "$FPB" ] || { echo "FAIL: could not extract the secure seed fingerprints"; exit 1; }
+          [ "$FPA" != "$FPB" ] || { echo "FAIL: two fresh servers derived the SAME secure seed (fp=$FPA)"; exit 1; }
+          echo "AUTO-RANDOM OK: fresh servers get DIFFERENT 1024-bit feature seeds and DIFFERENT secure seed fingerprints"
 
       - name: Publish result to ci-output branch
-        if: always()
+        # Rolia - PR builds must not push to ci-output (fork tokens are read-only).
+        if: always() && github.event_name != 'pull_request'
         run: |
           set -x
           set +e +o pipefail  # Rolia - never let an empty glob/grep abort the publish before the git push
           mkdir -p /tmp/out
-          find . -name '*paperclip*.jar' -not -path './testrun/*' -exec cp {} /tmp/out/ \; 2>/dev/null || true
+          # Rolia - a failed build must NOT publish a jar under the canonical
+          # filename users are told to download.
+          if [ "${{ job.status }}" = "success" ]; then
+            RELNAME="rolia-paperclip-26.1.2.jar"
+          else
+            RELNAME="FAILED-BUILD-DO-NOT-USE-$(printf '%s' "$GITHUB_SHA" | cut -c1-7).jar"
+          fi
+          echo "publishing jar as: $RELNAME (job.status=${{ job.status }})"
+          # Rolia - exactly the jar the build step verified; no re-searching (find|head
+          # and ls|head used different orderings and could pick different files).
+          [ -f /tmp/rolia.jar ] && cp /tmp/rolia.jar "/tmp/out/$RELNAME"
+          cp /tmp/rolia.jar.sha256 /tmp/out/built-jar.sha256 2>/dev/null || true
+          cp /tmp/rolia-manifest.txt /tmp/out/ 2>/dev/null || true
           cp testrun/server_*.log /tmp/out/ 2>/dev/null || true
           cp testrun/det_*.log /tmp/out/ 2>/dev/null || true
           cp testrun/dab.log /tmp/out/ 2>/dev/null || true
           cp testrun/auto_*.log /tmp/out/ 2>/dev/null || true
-          cp apply.log build.log /tmp/out/ 2>/dev/null || true
+          cp apply.log build.log test.log /tmp/out/ 2>/dev/null || true
           cd /tmp/out
-          f=$(ls *paperclip*.jar 2>/dev/null | head -1); if [ -n "$f" ] && [ "$f" != "rolia-paperclip-26.1.2.jar" ]; then mv "$f" rolia-paperclip-26.1.2.jar; fi
           for f in *.jar; do [ -f "$f" ] && sha256sum "$f" > "$f.sha256"; done
           # Rolia - GitHub 500s on a >50MB single blob pushed to ci-output; commit the jar in <50MB parts instead.
           # Keep the full jar in /tmp/out for the Release step (which handles large assets fine).
-          if [ -f rolia-paperclip-26.1.2.jar ]; then split -b 40m rolia-paperclip-26.1.2.jar rolia-paperclip-26.1.2.jar.part.; printf 'rolia-paperclip-26.1.2.jar\n' > .gitignore; fi
+          if [ -f "$RELNAME" ]; then split -b 40m "$RELNAME" "$RELNAME.part."; printf '%s\n' "$RELNAME" > .gitignore; fi
           echo "status=${{ job.status }}" > status.txt
+          echo "jar=$RELNAME" >> status.txt
           echo "commit=$GITHUB_SHA" >> status.txt
           # truncate big logs
           for f in apply.log build.log; do [ -f "$f" ] && tail -c 500000 "$f" > "$f.tail" && mv "$f.tail" "$f"; done
@@ -250,8 +468,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v26.1.2-build.37"
+          set -e -o pipefail
+          source /tmp/ci-helpers.sh
+          BUILD_NUMBER=38
+          TAG="v26.1.2-build.$BUILD_NUMBER"
           JAR=/tmp/out/rolia-paperclip-26.1.2.jar
+          [ -f "$JAR" ] || { echo "FAIL: $JAR not found - the publish step did not produce a release jar"; ls -la /tmp/out; exit 1; }
+          # Rolia - the tag and the jar's build number can never drift silently again.
+          MB=$(manifest_attr "$JAR" 'Build-Number')
+          if [ -z "$MB" ]; then
+            IV=$(manifest_attr "$JAR" 'Implementation-Version')   # <mcVersion>-<build>-<gitHash>
+            MB=$(printf '%s' "$IV" | awk -F- '{print $2}')
+            echo "Build-Number attribute absent; derived from Implementation-Version='$IV' -> '$MB'"
+          fi
+          echo "tag=$TAG  expected build=$BUILD_NUMBER  jar manifest build=$MB"
+          [ "$MB" = "$BUILD_NUMBER" ] || {
+            echo "FAIL: jar build number ($MB) does not match the release tag ($TAG)"
+            jar_manifest "$JAR"; exit 1; }
           SHA=$(sha256sum "$JAR" | awk '{print $1}')
           cat > /tmp/relnotes.md << NOTES
           ## Rolia 26.1.2
@@ -262,7 +495,7 @@ jobs:
           - Вся производительность Canvas: региональная многопоточность (Folia), оптимизации тиков, чанков и сущностей.
           - **1024-битный защищённый сид (всегда включён)**: структуры, данжи, руды-фичи, жеоды и слизневые чанки генерируются от секретного 1024-битного сида — подбор по миру практически невозможен. Рельеф и биомы — от обычного level-seed (мир воспроизводим). На каждом новом сервере сид генерируется свой, случайный.
           - Секретная соль в \`rolia.yml\` (права 0600) — мастер-ключ защиты. Единый конфиг rolia.yml; опциональный DAB (троттлинг ИИ дальних мобов, по умолчанию выключен).
-          - Команда \`/seed\` показывает и ванильный сид, и feature seed.
+          - Команда \`/seed\` показывает ванильный сид и *отпечаток* feature-сида (сам секрет больше не печатается).
           - Параметр \`feature-level-seed\` в \`server.properties\` для задания своего 1024-битного сида.
 
           ### Запуск
@@ -276,6 +509,6 @@ jobs:
           NOTES
           gh release create "$TAG" "$JAR" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Rolia 26.1.2 (build 37)" \
+            --title "Rolia 26.1.2 (build $BUILD_NUMBER)" \
             --notes-file /tmp/relnotes.md \
             --latest

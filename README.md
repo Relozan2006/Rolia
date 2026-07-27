@@ -33,7 +33,7 @@ Rolia разделяет генерацию на два независимых �
 
 | Что генерируется | Источник | Поведение |
 | --- | --- | --- |
-| Рельеф, биомы, пещеры, аквиферы, острова Энда | Секретный сид + соль | Под защитой — по публичному сиду не вычислить (Seed V2) |
+| Рельеф, биомы, пещеры, овраги, аквиферы, острова Энда | Секретный сид + соль | Под защитой — по публичному сиду не вычислить (Seed V2) |
 | Структуры, данжи, деревни, декорации, добываемые руды, жеоды, слизнёвые чанки | Секретный `feature-seed` (1024 бита) + соль | Расположение практически невозможно вычислить или подобрать |
 
 Ключ защиты — секретная **соль** в `rolia.yml`. Пока она в тайне, восстановить расположение структур и руд по миру нельзя.
@@ -41,10 +41,10 @@ Rolia разделяет генерацию на два независимых �
 ### Возможности
 
 - Вся производительность Canvas и Folia: регионная многопоточность, оптимизации тиков, чанков и сущностей.
-- 1024-битный секретный feature-сид на настоящем **BLAKE2b** (RFC 7693).
+- 1024-битный секретный feature-сид на настоящем **BLAKE2b** (RFC 7693) — та же хеш-функция, что в оригинальном [SecureSeed](https://github.com/Earthcomputer/SecureSeed). BLAKE3 здесь не нужен: он быстрее, но не «сильнее», а стойкость BLAKE2b не поставлена под сомнение.
 - Секретная соль хранится в `rolia.yml` с правами доступа только для владельца.
 - Детерминированная генерация: один и тот же `level-seed` + `feature-seed` + соль всегда дают идентичный мир.
-- Оптимизация запертых торговцев (лоботомия): торговец в 1×1 не тратит такты на пасфайндинг, но **исправно пополняет сделки** — торговые залы работают как в ванилле.
+- Оптимизация запертых торговцев (лоботомия, **включена по умолчанию**): торговец в 1×1 не тикает мозг, но **исправно пополняет сделки** — торговые залы работают как в ванилле. Учтите: лоботомированный торговец также не видит враждебных мобов, не спит, не сплетничает, не размножается и **не участвует в спавне железных големов** — выключите опцию, если у вас железные фермы на торговцах.
 - Ускоренная сериализация чанковых данных (bulk-запись длинных массивов) — байты на проводе идентичны, просто быстрее.
 
 ### Требования
@@ -71,11 +71,13 @@ bash start.sh
 | `feature-level-seed` | `server.properties` | 1024-битный feature-сид (десятичное число). Если пусто — генерируется криптостойкий случайный. |
 | `secure-seed.salt` | `rolia.yml` | Секретная соль (64+ символа). Создаётся автоматически с правами `0600`. |
 
-Команда `/seed` показывает и обычный сид, и feature-сид.
+Команда `/seed` показывает обычный сид и **отпечаток** feature-сида (`Feature seed fp:`) — 16 hex-символов, односторонняя свёртка от «сид + соль». Сам секрет не печатается ни в чат, ни в `latest.log`: отпечаток нужен только чтобы убедиться, что сид не поменялся.
 
 ### Важно: сохраните соль
 
-`rolia.yml` содержит секретную соль. От неё зависит расположение всех структур и руд. Если файл потерять, в уже существующем мире новые структуры и руды перестанут совпадать со старыми (рельеф совпадёт — он привязан к `level-seed`). Держите файл в секрете и в бэкапе вместе с миром — именно соль делает вычисление сида невозможным.
+`rolia.yml` содержит секретную соль. **Начиная с Seed V2 от неё зависит весь мир, а не только структуры.** Если файл потерять, в уже существующем мире каждый новый чанк получит другой рельеф, биомы, пещеры, руды и структуры — на границе исследованной территории будет виден шов, и починить это нельзя. Держите файл в секрете и в бэкапе **вместе с миром**.
+
+Сервер логирует абсолютный путь к используемому `rolia.yml` строкой `Rolia: using config ...` — проверьте её, если запускаете сервер не из папки с миром. Если файл существует, но не читается, сервер **не стартует**: это сделано намеренно, потому что молча сгенерировать новую соль означало бы переписать мир.
 
 Примечание: слизнёвые чанки управляются секретным сидом, поэтому опция `slime-seed` из `spigot.yml` на Rolia не действует.
 
@@ -111,7 +113,7 @@ Rolia splits world generation into two independent sources of randomness:
 
 | What is generated | Source | Behaviour |
 | --- | --- | --- |
-| Terrain, biomes, caves, aquifers, End islands | Secret seed + salt | Protected — cannot be reversed from the public seed (Seed V2) |
+| Terrain, biomes, caves, ravines, aquifers, End islands | Secret seed + salt | Protected — cannot be reversed from the public seed (Seed V2) |
 | Structures, dungeons, villages, decorations, mineable ores, geodes, slime chunks | Secret `feature-seed` (1024-bit) + salt | Placement is practically impossible to reverse or brute-force |
 
 The protection key is the secret **salt** in `rolia.yml`. As long as it stays secret, the location of structures and ores cannot be recovered from the world.
@@ -122,7 +124,8 @@ The protection key is the secret **salt** in `rolia.yml`. As long as it stays se
 - 1024-bit secret feature seed backed by real **BLAKE2b** (RFC 7693).
 - The secret salt is stored in `rolia.yml` with owner-only permissions.
 - Deterministic generation: the same `level-seed` + `feature-seed` + salt always produce an identical world.
-- Stuck-villager optimization (lobotomize): a villager in a 1×1 skips wasted pathfinding but **still restocks trades** — trading halls behave exactly like vanilla.
+- Hashing is real **BLAKE2b** (RFC 7693) — the same hash the original [SecureSeed](https://github.com/Earthcomputer/SecureSeed) uses. BLAKE3 would be faster, not stronger; BLAKE2b's security is not in question.
+- Stuck-villager optimization (lobotomize, **on by default**): a villager in a 1×1 skips its brain tick but **still restocks trades** — trading halls behave like vanilla. Note that a lobotomized villager also does not detect hostiles, sleep, gossip, breed, or **contribute to iron-golem spawning** — turn it off if you run villager-based iron farms.
 - Faster chunk-data serialization (bulk long-array writes) — the bytes on the wire are identical, just faster.
 
 ### Requirements
@@ -149,11 +152,13 @@ bash start.sh
 | `feature-level-seed` | `server.properties` | 1024-bit feature seed (decimal number). If empty, a cryptographically secure random one is generated. |
 | `secure-seed.salt` | `rolia.yml` | Secret salt (64+ chars). Created automatically with `0600` permissions. |
 
-The `/seed` command shows both the ordinary seed and the feature seed.
+The `/seed` command shows the ordinary seed and a **fingerprint** of the feature seed (`Feature seed fp:`) — 16 hex chars, a one-way digest of seed + salt. The secret itself is never printed to chat or to `latest.log`; the fingerprint exists only so you can confirm the seed has not changed.
 
 ### Important: back up your salt
 
-`rolia.yml` holds the secret salt. The location of every structure and ore depends on it. If the file is lost, newly generated structures and ores in an existing world will no longer match the old ones (terrain will still match — it is tied to `level-seed`). Keep the file secret and backed up together with your world — the salt is what makes seed reversal impossible.
+`rolia.yml` holds the secret salt. **Since Seed V2 the entire world depends on it, not just structures.** If the file is lost, every newly generated chunk in an existing world gets different terrain, biomes, caves, ores and structures — you will see a hard seam at the edge of explored territory, and it cannot be repaired. Keep the file secret and backed up **together with your world**.
+
+The server logs the absolute path of the `rolia.yml` it actually used (`Rolia: using config ...`) — check it if you start the server from a directory other than the world folder. If the file exists but cannot be parsed, the server **refuses to start**: silently generating a new salt would rewrite the world.
 
 Note: slime chunks are driven by the secret seed, so the `slime-seed` option from `spigot.yml` has no effect on Rolia.
 

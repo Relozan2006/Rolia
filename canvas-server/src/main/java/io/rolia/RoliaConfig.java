@@ -6,7 +6,6 @@ import org.yaml.snakeyaml.Yaml;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileWriter;
 import java.io.InputStream;
 import java.security.SecureRandom;
 import java.util.ArrayList;
@@ -56,10 +55,20 @@ public final class RoliaConfig {
     public static boolean lobotomizeWaitUntilTradeLocked() { load(); return lobotomizeWaitUntilTradeLocked; }
     public static boolean fasterNetwork() { load(); return fasterNetwork; }
 
-    @SuppressWarnings("unchecked")
-    private static synchronized void load() {
+    // Rolia - fast path: a volatile read, no monitor. This method is on the hottest paths in the
+    // server (DAB per mob per tick, faster-network per long[] on Netty threads); the previous
+    // `private static synchronized void load()` took a global monitor on every single call, even
+    // after loading finished and even with every feature disabled. Java 25 has no biased locking,
+    // so that was a real CAS on one shared mark word from every region thread at once.
+    private static void load() {
         if (loaded) return;
-        File file = new File(FILE_NAME);
+        loadSlow();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static synchronized void loadSlow() {
+        if (loaded) return;
+        File file = new File(FILE_NAME).getAbsoluteFile();
         Map<String, Object> root = null;
         String legacySalt = null;
 
@@ -70,7 +79,12 @@ public final class RoliaConfig {
                     root = (Map<String, Object>) parsed;
                 }
             } catch (Exception e) {
-                LOGGER.warn("Rolia: failed to read {}, using defaults", FILE_NAME, e);
+                LOGGER.error("Rolia: {} exists but could not be parsed.", file, e);
+                LOGGER.error("Rolia: refusing to start. Fix the YAML (or restore it from backup) and retry.");
+                LOGGER.error("Rolia: continuing would generate a NEW secret salt and overwrite this file,");
+                LOGGER.error("Rolia: which under Seed V2 re-generates terrain, biomes, caves, ores and structures");
+                LOGGER.error("Rolia: for every newly loaded chunk - and destroys the only copy of the old secret.");
+                throw new IllegalStateException("Rolia: unreadable " + FILE_NAME + " - refusing to start", e);
             }
         } else {
             // migration: import the secret salt from the legacy rolia-seed.properties so an existing
@@ -103,14 +117,17 @@ public final class RoliaConfig {
             cfgSalt = legacySalt;
         }
         boolean firstGen = !file.isFile();
-        if (cfgSalt.length() < 64) {
-            if (!cfgSalt.isEmpty()) {
-                LOGGER.warn("Rolia: configured secure seed salt is too short (< 64 chars), regenerating.");
-            } else {
-                LOGGER.info("Rolia: no secure seed salt found. Generating a new cryptographically secure salt...");
-            }
+        if (!cfgSalt.isEmpty() && cfgSalt.length() < 64) {
+            // Never silently replace a salt the operator actually set - that would re-generate the world.
+            LOGGER.error("Rolia: the configured secure-seed.salt in {} is only {} chars; 64+ are required.", file, cfgSalt.length());
+            LOGGER.error("Rolia: refusing to start rather than replacing it, which would re-generate the world.");
+            throw new IllegalStateException("Rolia: secure-seed.salt too short (" + cfgSalt.length() + " < 64)");
+        }
+        if (cfgSalt.isEmpty()) {
+            LOGGER.info("Rolia: no secure seed salt found. Generating a new cryptographically secure salt...");
             cfgSalt = generateSecureSalt(64);
             firstGen = true;
+            warnIfWorldAlreadyExists(file);
         }
         salt = cfgSalt;
 
@@ -126,18 +143,65 @@ public final class RoliaConfig {
         lobotomizeWaitUntilTradeLocked = bool(villagerLobo.get("wait-until-trade-locked"), true);
         fasterNetwork = bool(section(optimizations, "faster-network").get("enabled"), true);
 
+        if (!firstGen) {
+            if (villagerLobo.isEmpty()) {
+                LOGGER.warn("Rolia: '{}' has no optimizations.villager-lobotomize section; defaulting enabled=true.", FILE_NAME);
+                LOGGER.warn("Rolia: lobotomized villagers do not detect hostiles, sleep, gossip, breed or contribute");
+                LOGGER.warn("Rolia: to iron-golem spawning. Trades and restocking are unaffected. Set enabled: false");
+                LOGGER.warn("Rolia: if you run villager-based iron farms.");
+            }
+            if (section(optimizations, "faster-network").isEmpty()) {
+                LOGGER.warn("Rolia: '{}' has no optimizations.faster-network section; defaulting enabled=true.", FILE_NAME);
+            }
+        }
+
         // Only (re)write the file on first generation / migration - never clobber a user-edited file.
         if (firstGen) {
             createPrivate(file); // Rolia - create the file owner-only (0600) BEFORE the secret salt is written
             writeConfig(file);
-            LOGGER.info("Rolia: settings saved to {}", FILE_NAME);
+            LOGGER.info("Rolia: settings saved to {}", file);
             LOGGER.warn("Rolia: [IMPORTANT] {} holds the secret salt. Keep it secret and back it up with your world!", FILE_NAME);
         }
         if (file.isFile()) {
             restrictPermissions(file);
         }
-        loaded = true;
-        LOGGER.info("Rolia: config loaded (secure seed active; DAB {}).", dabEnabled ? "ON" : "off");
+        // Rolia - always log the ABSOLUTE path actually used. rolia.yml is resolved against the process
+        // working directory (exactly as vanilla resolves server.properties), so a service unit or panel
+        // that starts the JVM from a different directory would otherwise silently pick up a different
+        // file - and a missing salt means a re-generated world. Now it is visible in the log.
+        LOGGER.info("Rolia: using config {}", file);
+        loaded = true; // Rolia - MUST stay the last write: publishes every field above to the lock-free fast path
+        // The authoritative "config loaded (secure seed ...)" line is emitted by
+        // io.rolia.secureseed.Globals#setupGlobals, where the real seed state is known.
+    }
+
+    /**
+     * Rolia - generating a brand-new salt is correct on a fresh server and catastrophic on an existing
+     * one: under Seed V2 the salt keys terrain, biomes, caves, aquifers and ore noise, so newly loaded
+     * chunks stop matching the ones already on disk. If a world folder is already present, say so loudly
+     * instead of proceeding in silence.
+     */
+    private static void warnIfWorldAlreadyExists(File configFile) {
+        try {
+            File dir = configFile.getParentFile();
+            if (dir == null) return;
+            File[] candidates = dir.listFiles();
+            if (candidates == null) return;
+            for (File c : candidates) {
+                if (c.isDirectory() && new File(c, "level.dat").isFile()) {
+                    LOGGER.warn("Rolia: ############################################################");
+                    LOGGER.warn("Rolia: A NEW secret salt was just generated, but the world '{}' already exists.", c.getName());
+                    LOGGER.warn("Rolia: If this world was generated with a DIFFERENT salt, every newly loaded");
+                    LOGGER.warn("Rolia: chunk will have different terrain, biomes, caves, ores and structures");
+                    LOGGER.warn("Rolia: than the chunks already on disk - you will see hard seams at the border.");
+                    LOGGER.warn("Rolia: Stop the server NOW and restore the original {} from backup if you have it.", FILE_NAME);
+                    LOGGER.warn("Rolia: ############################################################");
+                    return;
+                }
+            }
+        } catch (Exception ignored) {
+            // best-effort diagnostic only
+        }
     }
 
     private static void writeConfig(File file) {
@@ -153,8 +217,9 @@ public final class RoliaConfig {
             + "  # 64+ char secret salt, auto-generated on first run. The master key of the 1024-bit seed protection.\n"
             + "  salt: \"" + salt + "\"\n"
             + "\n"
-            + "# Optimizations - Folia-safe, vanilla-preserving performance toggles.\n"
-            + "# Everything here is OFF by default, so the server behaves exactly like vanilla Canvas until you opt in.\n"
+            + "# Optimizations - Folia-safe performance toggles.\n"
+            + "# NOTE: dab is OFF by default; villager-lobotomize and faster-network are ON by default.\n"
+            + "# Only faster-network is fully behaviour-neutral - see the notes on each option below.\n"
             + "optimizations:\n"
             + "  # Dynamic Activation of Brain (DAB): throttles the AI of mobs far from ANY player\n"
             + "  # (villagers/piglins/zombies/skeletons etc.). Mobs near players always tick full AI every\n"
@@ -167,9 +232,12 @@ public final class RoliaConfig {
             + "    max-tick-interval: " + dabMaxTickInterval + "\n"
             + "    # Entity type ids never throttled (useful for mob farms), e.g. [\"minecraft:villager\"].\n"
             + "    blacklist: []\n"
-            + "  # Lobotomize stuck villagers: a villager boxed in a 1x1 cell (a trading hall) cannot path\n"
-            + "  # anywhere, so its expensive AI/pathfinding tick is skipped. It STILL restocks trades, so\n"
-            + "  # trading halls behave exactly like vanilla - only wasted pathfinding is removed.\n"
+            + "  # Lobotomize stuck villagers: a villager boxed in a 1x1 cell cannot path anywhere, so its\n"
+            + "  # whole brain tick is skipped. Trades and RESTOCKING are preserved, so pure trading halls\n"
+            + "  # behave like vanilla.\n"
+            + "  # BUT skipping the brain also skips every sensor and behaviour: a lobotomized villager does\n"
+            + "  # NOT detect hostiles, panic, sleep, gossip, breed, or contribute to IRON GOLEM spawning.\n"
+            + "  # Set enabled: false if you run villager-based iron farms.\n"
             + "  villager-lobotomize:\n"
             + "    enabled: " + lobotomizeEnabled + "\n"
             + "    # Keep full AI for villagers that have not been traded with yet (0 xp) so they can still\n"
@@ -180,10 +248,32 @@ public final class RoliaConfig {
             + "  faster-network:\n"
             + "    enabled: " + fasterNetwork + "\n";
 
-        try (FileWriter w = new FileWriter(file)) {
-            w.write(yaml);
+        // Rolia - write atomically via a temp file, and never replace an existing config without
+        // first copying it aside. A half-written or clobbered rolia.yml means a lost secret.
+        try {
+            java.nio.file.Path target = file.toPath();
+            if (java.nio.file.Files.exists(target)) {
+                java.nio.file.Path backup = target.resolveSibling(FILE_NAME + ".bak." + System.currentTimeMillis());
+                try {
+                    java.nio.file.Files.copy(target, backup, java.nio.file.StandardCopyOption.COPY_ATTRIBUTES);
+                    LOGGER.warn("Rolia: previous {} backed up to {}", FILE_NAME, backup.getFileName());
+                } catch (Exception e) {
+                    LOGGER.warn("Rolia: could not back up the existing {} before rewriting it", FILE_NAME, e);
+                }
+            }
+            java.nio.file.Path tmp = target.resolveSibling(FILE_NAME + ".tmp");
+            java.nio.file.Files.deleteIfExists(tmp);
+            createPrivate(tmp.toFile()); // owner-only before the secret is written into it
+            java.nio.file.Files.writeString(tmp, yaml, java.nio.charset.StandardCharsets.UTF_8);
+            restrictPermissions(tmp.toFile());
+            try {
+                java.nio.file.Files.move(tmp, target,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                java.nio.file.Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (Exception e) {
-            LOGGER.error("Rolia: failed to save {}", FILE_NAME, e);
+            LOGGER.error("Rolia: failed to save {}", file, e);
         }
     }
 

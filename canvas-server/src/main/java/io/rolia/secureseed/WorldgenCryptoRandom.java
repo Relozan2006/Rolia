@@ -23,6 +23,7 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
     private final long[] keyedMessage = new long[16]; // Rolia - reused keying buffer
     private int randomBitIndex;
     private long counter;
+    private Globals.Salt typeSalt = Globals.Salt.UNDEFINED; // Rolia - remembered so setSeed() stays in-domain
 
     public WorldgenCryptoRandom(int x, int z, Globals.Salt typeSalt, long salt) {
         super(new LegacyRandomSource(0L));
@@ -39,10 +40,14 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
     }
 
     public void setSecureSeed(int x, int z, Globals.Salt typeSalt, long salt) {
-        System.arraycopy(Globals.worldSeed, 0, this.worldSeed, 0, Globals.WORLD_SEED_LONGS);
+        // Rolia - go through publishedWorldSeed(): its volatile read establishes happens-before with
+        // the seed publication in Globals.setupGlobals, so this thread cannot observe a partially
+        // written (or stale all-zero) seed on weakly-ordered hardware.
+        System.arraycopy(Globals.publishedWorldSeed(), 0, this.worldSeed, 0, Globals.WORLD_SEED_LONGS);
+        this.typeSalt = typeSalt;
         message[0] = ((long) x << 32) | ((long) z & 0xffffffffL);
         message[1] = ((long) Globals.dimension.get() << 32) | ((long) salt & 0xffffffffL);
-        message[2] = typeSalt.ordinal();
+        message[2] = typeSalt.id; // Rolia - explicit persistent id (see Globals.Salt), never ordinal()
         message[3] = counter = 0;
         randomBitIndex = MAX_RANDOM_BIT_INDEX;
     }
@@ -111,6 +116,7 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
         System.arraycopy(this.randomBits, 0, fork.randomBits, 0, this.randomBits.length); // Rolia - fix fork() losing the random bit buffer
         fork.randomBitIndex = this.randomBitIndex;
         fork.counter = this.counter;
+        fork.typeSalt = this.typeSalt;
 
         return fork;
     }
@@ -147,6 +153,12 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public int nextInt(int bound) {
+        // Rolia - match vanilla BitRandomSource: a non-positive bound is a programming error, not a hang.
+        // Mth.ceillog2(0) is 0, so getBits(0) returns 0 forever and the rejection loop below would spin
+        // a worldgen/region thread indefinitely (reachable from a datapack structure-set probability > 1).
+        if (bound <= 0) {
+            throw new IllegalArgumentException("Bound must be positive");
+        }
         int bits = Mth.ceillog2(bound);
         int result;
         do {
@@ -164,6 +176,17 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
     @Override
     public double nextDouble() {
         return getBits(53) * 0x1.0p-53;
+    }
+
+    // Rolia - WorldgenCryptoRandom draws every bit from its own stream, so an un-overridden setSeed()
+    // would reseed only the inert LegacyRandomSource(0L) delegate handed to super() and do nothing at all
+    // (this is why Paper's stronghold-seed config was silently ignored). Honour the reseed inside the
+    // secure stream instead, keeping the current domain.
+    // NOTE when updating Minecraft: every RandomSource/WorldgenRandom mutator must be overridden here,
+    // or it will compile, run, and silently have no effect.
+    @Override
+    public void setSeed(long seed) {
+        setSecureSeed((int) (seed >>> 32), (int) seed, this.typeSalt, 0);
     }
 
     @Override

@@ -33,7 +33,7 @@
 -    public WorldOptions(final long seed, final boolean generateStructures, final boolean generateBonusChest) {
 -        this(seed, generateStructures, generateBonusChest, Optional.empty());
 +    public WorldOptions(long seed, boolean generateStructures, boolean bonusChest) {
-+        this(seed, Globals.worldSeed, generateStructures, bonusChest, Optional.empty());
++        this(seed, Globals.worldSeed.clone(), generateStructures, bonusChest, Optional.empty()); // Rolia - copy, never alias the shared static
 +    }
 +
 +    private WorldOptions(long seed, String featureSeedJson, boolean generateStructures, boolean bonusChest, Optional<String> legacyCustomOptions) {
@@ -43,7 +43,7 @@
 +    private static long[] parseFeatureSeedJson(final String json, final long levelSeed) {
 +        try {
 +            final long[] parsed = gson.fromJson(json, long[].class);
-+            if (parsed != null && parsed.length > 0) return parsed;
++            if (parsed != null && parsed.length == Globals.WORLD_SEED_LONGS) return parsed; // Rolia - exact width or fall through
 +        } catch (final Exception ignored) {
 +        }
 +        return io.rolia.secureseed.Globals.deriveFeatureSeedFromLevel(levelSeed);
@@ -88,7 +88,7 @@
  
      public WorldOptions withSeed(final OptionalLong seed) {
 -        return new WorldOptions(seed.orElse(randomSeed()), this.generateStructures, this.generateBonusChest, this.legacyCustomOptions);
-+        return new WorldOptions(seed.orElse(randomSeed()), Globals.createRandomWorldSeed(), this.generateStructures, this.generateBonusChest, this.legacyCustomOptions);
++        return new WorldOptions(seed.orElse(randomSeed()), this.featureSeed, this.generateStructures, this.generateBonusChest, this.legacyCustomOptions); // Rolia - keep the feature seed, like withBonusChest/withStructures
      }
  
      public static OptionalLong parseSeed(String seedString) {
