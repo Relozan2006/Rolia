@@ -180,10 +180,21 @@ jobs:
         run: |
           set -e -o pipefail
           source /tmp/ci-helpers.sh
-          # Rolia - NO "|| ./gradlew createPaperclipJar" fallback: the fallback
-          # produces a differently-mapped artifact that passes every check and
-          # ships. A build failure must be a build failure.
-          ./gradlew createMojmapPaperclipJar --stacktrace 2>&1 | tee build.log
+          # Rolia - ONE task, no "|| other-task" fallback: a fallback can produce a
+          # differently-mapped artifact that passes every check and ships. A build
+          # failure must be a build failure.
+          # The task is createPaperclipJar. Builds 24-37 ran
+          # "createMojmapPaperclipJar || createPaperclipJar" and every one of them
+          # silently took the second branch, because Canvas's weaver-patcher does not
+          # define a Mojmap-prefixed task at all - the fallback was doing 100% of the
+          # work while the logs implied otherwise. Named explicitly now.
+          PAPERCLIP_TASK=createPaperclipJar
+          echo "=== paperclip task: $PAPERCLIP_TASK ==="
+          if ! ./gradlew "$PAPERCLIP_TASK" --stacktrace 2>&1 | tee build.log; then
+            echo "=== FAILED. Paperclip-ish tasks this project actually defines: ==="
+            ./gradlew tasks --all 2>/dev/null | grep -iE 'paperclip|reobf|mojmap' || echo "  (none found)"
+            exit 1
+          fi
           # Rolia - exactly ONE paperclip jar may exist, otherwise the jar we test
           # and the jar we release can differ (find|head -1 vs ls|head -1 ordering).
           mapfile -t JARS < <(find . -name '*paperclip*.jar' -not -path './testrun/*' | sort)

@@ -85,7 +85,7 @@ bash start.sh
 
 ```bash
 ./gradlew applyAllPatches
-./gradlew createMojmapPaperclipJar
+./gradlew createPaperclipJar
 ```
 
 Готовый jar появится в `canvas-server/build/libs/`.
@@ -166,7 +166,7 @@ Note: slime chunks are driven by the secret seed, so the `slime-seed` option fro
 
 ```bash
 ./gradlew applyAllPatches
-./gradlew createMojmapPaperclipJar
+./gradlew createPaperclipJar
 ```
 
 The server jar is produced in `canvas-server/build/libs/`.
