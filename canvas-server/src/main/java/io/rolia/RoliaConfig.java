@@ -366,8 +366,18 @@ public final class RoliaConfig {
                     LOGGER.error("Rolia: Restore the original {} from backup, or delete {} to accept the change.",
                         FILE_NAME, fp.getName());
                     LOGGER.error("Rolia: ############################################################");
-                    throw new IllegalStateException("Rolia: world '" + world.getName()
-                        + "' fingerprint mismatch - refusing to start");
+                    // Rolia - halt rather than throw. This runs inside ServerLevel's constructor, so an
+                    // exception here leaves the server half-initialised: Minecraft writes a crash report
+                    // and then hangs in stopServer() on a world that was never finished. The operator
+                    // would see the message above and then a process that never exits, and CI had to
+                    // SIGKILL it. Give the async log appender a moment to flush, then halt(1) - skipping
+                    // shutdown hooks is the point, since it is those hooks that hang.
+                    try {
+                        Thread.sleep(500L);
+                    } catch (final InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                    Runtime.getRuntime().halt(1);
                 }
             }
         } catch (final IllegalStateException e) {
