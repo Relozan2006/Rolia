@@ -8,7 +8,7 @@
  
          this.cooldownTime = input.getIntOr("TransferCooldown", -1);
      }
-@@ -117,7 +_,11 @@
+@@ -117,7 +_,25 @@
      @Override
      public ItemStack removeItem(final int slot, final int count) {
          this.unpackLootTable(null);
@@ -19,6 +19,20 @@
 +        return retVal;
 +        // Canvas end - optimize hoppers
      }
++    // Rolia start - keep the cached fullState correct on removeItemNoUpdate
++    // HopperBlockEntity does not override removeItemNoUpdate, so Canvas's cache sweep
++    // (loadAdditional / removeItem / setItem / setBlockState / clearContent / setChanged /
++    // setItems) missed it. Anything draining a hopper through this Container method left a
++    // stale HOPPER_IS_FULL or HOPPER_EMPTY value behind, and the hopper silently stopped
++    // pushing or pulling until the chunk was reloaded.
++
++    @Override
++    public ItemStack removeItemNoUpdate(final int slot) {
++        final ItemStack removed = super.removeItemNoUpdate(slot);
++        canvas$recomputeFullState(this);
++        return removed;
++    }
++    // Rolia end - keep the cached fullState correct on removeItemNoUpdate
  
      @Override
 @@ -125,13 +_,24 @@

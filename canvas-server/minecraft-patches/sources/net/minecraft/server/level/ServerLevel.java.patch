@@ -140,31 +140,36 @@
              BlockPos pos = this.findLightningTargetAround(this.getBlockRandomPos(minX, 0, minZ, 15));
              if (this.isRainingAt(pos)) {
                  DifficultyInstance difficulty = this.getCurrentDifficultyAt(pos);
-@@ -1142,6 +_,17 @@
+@@ -1142,6 +_,13 @@
      public void tickPrecipitation(final BlockPos pos) {
          BlockPos topPos = this.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, pos);
          BlockPos belowPos = topPos.below();
-+        // Canvas start - optimize precipitation
-+        BlockState heighestBlockState = this.getBlockState(belowPos);
-+        if (
-+            !(
-+                (heighestBlockState.tagFlag & io.canvasmc.canvas.world.block.BlockTags.WATER) != 0 ||
-+                (heighestBlockState.tagFlag & io.canvasmc.canvas.world.block.BlockTags.INTERACTS_WITH_PRECIPITATION) != 0
-+            )
-+        ) {
-+            return;
-+        }
-+        // Canvas end - optimize precipitation
++        // Rolia start - Canvas's precipitation fast-out moved down to the handlePrecipitation tail
++        // Canvas returned here unless the block below the heightmap top was water / a cauldron / a liquid.
++        // On normal terrain that block is grass, stone or dirt, so this ALWAYS returned early: ice never
++        // formed and snow layers never formed or deepened anywhere, making the maxSnowAccumulationHeight
++        // gamerule inert server-wide. The block state read is also no longer hoisted here, because the ice
++        // handleBlockFormEvent below can replace belowPos - vanilla re-reads it at the point of use.
++        // Rolia end - precipitation fast-out moved
          Biome biome = this.getBiome(topPos).value();
          if (biome.shouldFreeze(this, belowPos)) {
              org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockFormEvent(this, belowPos, Blocks.ICE.defaultBlockState(), Block.UPDATE_ALL, null); // CraftBukkit
-@@ -1165,8 +_,7 @@
+@@ -1165,8 +_,18 @@
  
              Biome.Precipitation precipitation = biome.getPrecipitationAt(belowPos, this.getSeaLevel());
              if (precipitation != Biome.Precipitation.NONE) {
--                BlockState belowState = this.getBlockState(belowPos);
--                belowState.getBlock().handlePrecipitation(belowState, this, belowPos, precipitation);
-+                heighestBlockState.getBlock().handlePrecipitation(heighestBlockState, this, belowPos, precipitation); // Canvas - optimize precipitation
+                 BlockState belowState = this.getBlockState(belowPos);
++                // Rolia start - Canvas's precipitation fast-out, narrowed to guard only this call
++                // Identical condition to the one Canvas used to gate the whole method, so every block that
++                // reached handlePrecipitation under Canvas still reaches it; it simply no longer swallows
++                // the ice and snow logic above. INTERACTS_WITH_PRECIPITATION is cauldrons + liquids, i.e.
++                // the blocks that actually override Block#handlePrecipitation.
++                if (
++                    (belowState.tagFlag & io.canvasmc.canvas.world.block.BlockTags.WATER) != 0 ||
++                    (belowState.tagFlag & io.canvasmc.canvas.world.block.BlockTags.INTERACTS_WITH_PRECIPITATION) != 0
++                ) {
+                 belowState.getBlock().handlePrecipitation(belowState, this, belowPos, precipitation);
++                } // Rolia end - precipitation fast-out
              }
          }
      }

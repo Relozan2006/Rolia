@@ -118,36 +118,33 @@
      }
  
      private static Biome getRoughBiome(final BlockPos pos, final ChunkAccess chunk) {
-@@ -160,6 +_,11 @@
+@@ -160,6 +_,13 @@
      public static void spawnForChunk(
          final ServerLevel level, final LevelChunk chunk, final NaturalSpawner.SpawnState state, final List<MobCategory> spawningCategories
      ) {
 +        // Canvas start - optimize natural spawning
 +        final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> inRange =
 +            level.moonrise$getNearbyPlayers().getPlayers(chunk.getPos(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE);
-+        net.minecraft.server.level.ServerPlayer closestPlayer = null;
 +        // Canvas end - optimize natural spawning
++        // Rolia - Canvas also cached a "closestPlayer" here: an argmin over mob-cap headroom, not over
++        // Rolia - distance, and declared outside this loop so the pick leaked between MobCategories. Removed.
++        // Rolia - The nearby set is passed down instead and the true nearest is picked per candidate position.
          for (MobCategory mobCategory : spawningCategories) {
              // Paper start - Optional per player mob spawns
              final boolean canSpawn;
-@@ -174,12 +_,17 @@
+@@ -174,12 +_,13 @@
  
                  // Apply per-player limit
                  int minDiff = Integer.MAX_VALUE;
 -                final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> inRange =
 -                    level.moonrise$getNearbyPlayers().getPlayers(chunk.getPos(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE);
 +                // Canvas - move up
++                // Rolia - this loop is the MOB-CAP decision only; Canvas piggybacked a "closest player" pick
++                // Rolia - on it, which is an argmin over cap headroom rather than distance. Back to Paper's.
                  if (inRange != null) {
                      final net.minecraft.server.level.ServerPlayer[] backingSet = inRange.getRawDataUnchecked();
                      for (int k = 0, len = inRange.size(); k < len; k++) {
--                        minDiff = Math.min(limit - level.getChunkSource().chunkMap.getMobCountNear(backingSet[k], mobCategory), minDiff);
-+                        // Canvas start - optimize natural spawning
-+                        int diff = limit - level.getChunkSource().chunkMap.getMobCountNear(backingSet[k], mobCategory);
-+                        if (diff < minDiff) {
-+                            minDiff = diff;
-+                            closestPlayer = backingSet[k];
-+                        }
-+                        // Canvas end - optimize natural spawning
+                         minDiff = Math.min(limit - level.getChunkSource().chunkMap.getMobCountNear(backingSet[k], mobCategory), minDiff);
                      }
                  }
  
@@ -159,7 +156,7 @@
 -                    maxSpawns, level.paperConfig().entities.spawning.perPlayerMobSpawns ? level.getChunkSource().chunkMap::updatePlayerMobTypeMap : null);
 +                // Canvas start - optimize natural spawning
 +                spawnCategoryForChunk(mobCategory, state, chunk, state::canSpawn, state::afterSpawn,
-+                    maxSpawns, level.paperConfig().entities.spawning.perPlayerMobSpawns ? level.getChunkSource().chunkMap::updatePlayerMobTypeMap : null, closestPlayer);
++                    maxSpawns, level.paperConfig().entities.spawning.perPlayerMobSpawns ? level.getChunkSource().chunkMap::updatePlayerMobTypeMap : null, inRange); // Rolia - pass the nearby-player set, not a cap-based pick
 +                // Canvas end - optimize natural spawning
                  // Paper end - Optional per player mob spawns
              }
@@ -190,7 +187,7 @@
          final NaturalSpawner.AfterSpawnCallback spawnCallback,
          final int maxSpawns,
 -        final Consumer<Entity> trackEntity
-+        final Consumer<Entity> trackEntity, final Player closestPlayer
++        final Consumer<Entity> trackEntity, final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> nearbyPlayers // Rolia - take the nearby-player set so the true nearest can be picked per position
      ) {
 -        // Paper end - Optional per player mob spawns
 -        BlockPos start = getRandomPosWithin(level, chunk);
@@ -210,14 +207,14 @@
 +
 +        BlockPos start = new BlockPos(randomX, randomY, randomZ);
 +        if (start.getY() >= world.getMinY() + 1) {
-+            spawnCategoryForPosition(mobCategory, spawnState, chunk, start, extraTest, spawnCallback, maxSpawns, trackEntity, closestPlayer); // Paper - Optional per player mob spawns
++            spawnCategoryForPosition(mobCategory, spawnState, chunk, start, extraTest, spawnCallback, maxSpawns, trackEntity, nearbyPlayers); // Paper - Optional per player mob spawns // Rolia - forward the nearby-player set
          }
      }
 +    // Canvas end - optimize natural spawning
  
      @VisibleForDebug
      public static void spawnCategoryForPosition(final MobCategory mobCategory, final ServerLevel level, final BlockPos start) {
-@@ -245,61 +_,94 @@
+@@ -245,61 +_,115 @@
          final NaturalSpawner.SpawnPredicate extraTest,
          final NaturalSpawner.AfterSpawnCallback spawnCallback
      ) {
@@ -243,7 +240,7 @@
          final NaturalSpawner.AfterSpawnCallback spawnCallback,
          final int maxSpawns,
 -        final @Nullable Consumer<Entity> trackEntity
-+        final @Nullable Consumer<Entity> trackEntity, final Player closestPlayer // Canvas - pass player
++        final @Nullable Consumer<Entity> trackEntity, final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> nearbyPlayers // Canvas - pass player // Rolia - pass the whole nearby set
      ) {
          // Paper end - Optional per player mob spawns
 +        final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = spawnState.regionizedWorldData;
@@ -303,9 +300,30 @@
                      double xx = x + 0.5;
                      double zz = z + 0.5;
 -                    Player nearestPlayer = level.getNearestPlayer(xx, yStart, zz, -1.0, false);
-+                    // we run through an inRange set already, so why not try and use those results to help us out?
-+                    // the biggest difference we would face here is like... 16 blocks max?
-+                    Player nearestPlayer = closestPlayer == null ? level.getNearestPlayer(xx, yStart, zz, -1.0, false) : closestPlayer; // Canvas - optimize natural spawning
++                    // Rolia start - use the TRUE nearest player, not the one furthest from its own mob cap
++                    // Canvas substituted an argmin over "limit - getMobCountNear(player)" for
++                    // level.getNearestPlayer(). That value drives all three vanilla distance gates,
++                    // including the 24-block no-spawn radius, so mobs spawned right on top of a nearby
++                    // player whenever some other player happened to have fewer mobs. Canvas's cheap
++                    // nearby-player set is kept, but it is now argmin'd by real distance to this position.
++                    Player nearestPlayer = null;
++                    if (nearbyPlayers != null) {
++                        final net.minecraft.server.level.ServerPlayer[] nearbyBacking = nearbyPlayers.getRawDataUnchecked();
++                        double bestDistSqr = Double.MAX_VALUE;
++                        for (int pi = 0, plen = nearbyPlayers.size(); pi < plen; pi++) {
++                            final net.minecraft.server.level.ServerPlayer candidate = nearbyBacking[pi];
++                            // level.getNearestPlayer(..., false) filters with EntitySelector.NO_SPECTATORS
++                            if (candidate == null || candidate.isSpectator()) continue;
++                            final double candidateDistSqr = candidate.distanceToSqr(xx, yStart, zz);
++                            if (candidateDistSqr < bestDistSqr) {
++                                bestDistSqr = candidateDistSqr;
++                                nearestPlayer = candidate;
++                            }
++                        }
++                    }
++                    // empty or spectator-only nearby set: fall back to vanilla's global scan
++                    if (nearestPlayer == null) nearestPlayer = level.getNearestPlayer(xx, yStart, zz, -1.0, false);
++                    // Rolia end - use the TRUE nearest player
                      if (nearestPlayer != null) {
                          double nearestPlayerDistanceSqr = nearestPlayer.distanceToSqr(xx, yStart, zz);
 -                        if (level.isLoadedAndInBounds(pos) && isRightDistanceToPlayerAndSpawnPoint(level, chunk, pos, nearestPlayerDistanceSqr)) { // Paper - don't load chunks for mob spawn

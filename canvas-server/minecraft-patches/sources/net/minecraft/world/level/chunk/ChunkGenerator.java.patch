@@ -27,7 +27,7 @@
 -                seededrandom.setDecorationSeed(level.getSeed(), x, z);
 +                //WorldgenRandom seededrandom = new WorldgenRandom(new net.minecraft.world.level.levelgen.LegacyRandomSource(level.getSeed()));
 +                //seededrandom.setDecorationSeed(level.getSeed(), x, z);
-+                WorldgenCryptoRandom seededrandom = new WorldgenCryptoRandom(x, z, Globals.Salt.UNDEFINED, 0);
++                WorldgenCryptoRandom seededrandom = new WorldgenCryptoRandom(x, z, Globals.Salt.BUKKIT_POPULATOR, 0); // Rolia - own salt domain; UNDEFINED collided exactly with a datapack structure set configured with salt: 0
                  populator.populate(world, new org.bukkit.craftbukkit.util.RandomSourceWrapper.RandomWrapper(seededrandom), x, z, limitedRegion);
              }
              limitedRegion.saveEntities();

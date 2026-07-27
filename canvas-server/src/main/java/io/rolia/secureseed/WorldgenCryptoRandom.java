@@ -24,19 +24,38 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
     private int randomBitIndex;
     private long counter;
     private Globals.Salt typeSalt = Globals.Salt.UNDEFINED; // Rolia - remembered so setSeed() stays in-domain
+    // Rolia - build 40: the dimension separator is now captured ONCE, at construction, instead of being
+    // re-read from the ambient ThreadLocal on every reseed. Call sites outside worldgen (the Bukkit API,
+    // /summon spawn checks, stronghold rings) pass it explicitly - relying on the ambient value there
+    // produced answers that depended on whichever world the calling thread happened to touch last.
+    private final int dimensionId;
 
+    /** Worldgen paths: the dimension comes from the thread that {@code setupGlobals} prepared. */
     public WorldgenCryptoRandom(int x, int z, Globals.Salt typeSalt, long salt) {
+        this(Globals.dimension.get(), x, z, typeSalt, salt);
+    }
+
+    /** Rolia - explicit dimension, for every call site that is NOT on a prepared worldgen thread. */
+    public WorldgenCryptoRandom(int dimensionId, int x, int z, Globals.Salt typeSalt, long salt) {
         super(new LegacyRandomSource(0L));
+        this.dimensionId = dimensionId;
 
         if (typeSalt == null) {
+            // Rolia - fork() fills the state itself; force a refill so an unseeded instance can never
+            // hand out the all-zero initial buffer.
+            this.randomBitIndex = MAX_RANDOM_BIT_INDEX;
             return;
         }
 
         this.setSecureSeed(x, z, typeSalt, salt);
     }
 
-    public static RandomSource seedSlimeChunk(int chunkX, int chunkZ) {
-        return new WorldgenCryptoRandom(chunkX, chunkZ, Globals.Salt.SLIME_CHUNK, 0);
+    /**
+     * Rolia - slime chunks. The dimension MUST be passed explicitly: this is reachable from the Bukkit
+     * API and from spawn checks driven by /summon, neither of which runs on a prepared worldgen thread.
+     */
+    public static RandomSource seedSlimeChunk(int dimensionId, int chunkX, int chunkZ) {
+        return new WorldgenCryptoRandom(dimensionId, chunkX, chunkZ, Globals.Salt.SLIME_CHUNK, 0);
     }
 
     public void setSecureSeed(int x, int z, Globals.Salt typeSalt, long salt) {
@@ -46,7 +65,7 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
         System.arraycopy(Globals.publishedWorldSeed(), 0, this.worldSeed, 0, Globals.WORLD_SEED_LONGS);
         this.typeSalt = typeSalt;
         message[0] = ((long) x << 32) | ((long) z & 0xffffffffL);
-        message[1] = ((long) Globals.dimension.get() << 32) | ((long) salt & 0xffffffffL);
+        message[1] = ((long) this.dimensionId << 32) | ((long) salt & 0xffffffffL);
         message[2] = typeSalt.id; // Rolia - explicit persistent id (see Globals.Salt), never ordinal()
         message[3] = counter = 0;
         randomBitIndex = MAX_RANDOM_BIT_INDEX;
@@ -153,6 +172,13 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
         // Build 39: seed a Xoroshiro factory with 128 bits rather than collapsing everything into a
         // single long for LegacyRandomSource, which keeps only 48 bits of state - so every positional
         // sub-random derived from the secret used to carry <= 48 bits of derived entropy.
+        // Rolia - build 40: consume from the parent, exactly as fork() does and as every vanilla
+        // implementation does (LegacyRandomSource takes one long, Xoroshiro takes two). Without this,
+        // two successive forkPositional() calls returned byte-identical factories and fork() children
+        // collided with each other - so NormalNoise, which builds two PerlinNoise layers from one
+        // source, collapsed both layers onto the same noise.
+        final long pa = this.nextLong();
+        final long pb = this.nextLong();
         final long[] hashed = getHashedWorldSeed();
         long lo = 0x9E3779B97F4A7C15L;
         long hi = 0xBF58476D1CE4E5B9L;
@@ -162,8 +188,8 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
             hi ^= Long.rotateLeft(hashed[i], 32);
             hi = Long.rotateLeft(hi, 29) * 0x94D049BB133111EBL;
         }
-        lo ^= message[0] ^ Long.rotateLeft(message[1], 32) ^ (message[2] * 0x94D049BB133111EBL) ^ counter;
-        hi ^= Long.rotateLeft(message[0], 41) ^ message[1] ^ (message[3] * 0xD6E8FEB86659FD93L);
+        lo ^= message[0] ^ Long.rotateLeft(message[1], 32) ^ (message[2] * 0x94D049BB133111EBL) ^ counter ^ pa ^ message[4];
+        hi ^= Long.rotateLeft(message[0], 41) ^ message[1] ^ (message[3] * 0xD6E8FEB86659FD93L) ^ pb ^ message[5];
         return new net.minecraft.world.level.levelgen.XoroshiroRandomSource(lo, hi).forkPositional();
     }
 
@@ -174,7 +200,19 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public void consumeCount(int count) {
-        randomBitIndex += count;
+        // Rolia - RandomSource#consumeCount skips `count` ROUNDS of nextInt(), i.e. count*32 bits; we
+        // were skipping count bits, a 32x mismatch that broke PerlinNoise.skipOctave's alignment.
+        // The guard matters too: a negative count made randomBitIndex negative, and `>>> 6` then turned
+        // it into a huge positive index -> ArrayIndexOutOfBounds on a chunk-generation thread, which
+        // under Folia can take down a region. Vanilla treats a non-positive count as a no-op.
+        if (count <= 0) {
+            return;
+        }
+        final long skip = (long) count * 32L;
+        if (skip > (long) Integer.MAX_VALUE - MAX_RANDOM_BIT_INDEX * 2L) {
+            return; // absurd request; refuse rather than overflow
+        }
+        randomBitIndex += (int) skip;
         if (randomBitIndex >= MAX_RANDOM_BIT_INDEX * 2) {
             randomBitIndex -= MAX_RANDOM_BIT_INDEX;
             counter += randomBitIndex >>> LOG2_MAX_RANDOM_BIT_INDEX;
@@ -243,8 +281,14 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public void setLargeFeatureSeed(long worldSeed, int chunkX, int chunkZ) {
-        // Rolia - route through the secure stream instead of the raw level seed (was: super)
-        setSecureSeed(chunkX, chunkZ, Globals.Salt.GENERATE_FEATURE, (int) (worldSeed ^ (worldSeed >>> 32)));
+        // Rolia - route through the secure stream instead of the raw level seed (was: super).
+        // Build 40: keep an explicitly chosen domain instead of forcing GENERATE_FEATURE. Carvers are
+        // constructed with Salt.CARVER and then reseeded through here; forcing the structure domain made
+        // carver index 0 produce a stream byte-identical to Structure.makeRandom for the same chunk. A
+        // player can SEE cave shape, so that leaked the leading output of the structure stream - the one
+        // thing the whole design exists to hide.
+        final Globals.Salt domain = this.typeSalt == Globals.Salt.UNDEFINED ? Globals.Salt.GENERATE_FEATURE : this.typeSalt;
+        setSecureSeed(chunkX, chunkZ, domain, (int) (worldSeed ^ (worldSeed >>> 32)));
     }
 
     @Override

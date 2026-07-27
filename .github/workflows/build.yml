@@ -27,7 +27,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240   # Rolia - build 40 adds the terrain, fingerprint-guard and crypto runs
     defaults:
       run:
         shell: bash
@@ -40,6 +40,65 @@ jobs:
           java-version: 25
 
       - uses: gradle/actions/setup-gradle@v4
+
+      - name: BLAKE2b keyed-mode test vectors (expected values)
+        # Rolia - build 40 replaces the homemade H(K xor M) with RFC 7693 keyed BLAKE2b.
+        # This step needs no server and no build, so it runs early and fails fast: it
+        # pins the runner's hashlib to the two PUBLISHED vectors and then derives the
+        # value Hashing.java is required to reproduce. The comparison against Java
+        # happens in "Verify Hashing.java against the BLAKE2b vectors" further down.
+        run: |
+          set -e -o pipefail
+          mkdir -p /tmp/out
+          python3 - <<'BLAKE2B' | tee /tmp/out/blake2b-vectors.txt
+          import hashlib
+          import sys
+
+          # Rolia - PUBLISHED BLAKE2b vectors. These two are the anchors of the whole
+          # check: if the local hashlib cannot reproduce them, nothing computed below is
+          # trustworthy and we stop here rather than validate Java against a broken oracle.
+          #   1) RFC 7693 Appendix A - unkeyed BLAKE2b-512 of "abc"
+          #   2) blake2b-kat.txt line 1 - KEYED BLAKE2b-512 of the empty message
+          #      under the 64-byte key 00 01 02 ... 3f
+          RFC7693_ABC = ("ba80a53f981c4d0d6a2797b69f12f6e94c212f14685ac4b74b12bb6fdbffa2d1"
+                         "7d87c5392aab792dc252d5de4533cc9518d38aa8dbf1925ab92386edd4009923")
+          KAT_KEYED_EMPTY = ("10ebb67700b1868efb4417987acf4690ae9d972fb7a590c2f02871799aaa4786"
+                             "b5e996e8f0f4eb981fc214b005f42d2ff4233499391653df7aefcbc13fc51568")
+
+          KEY = bytes(range(64))          # the blake2b-kat.txt key: 00 01 02 ... 3f
+          MSG = b"abc"                    # the RFC 7693 message
+
+          got_abc = hashlib.blake2b(b"abc", digest_size=64).hexdigest()
+          got_kat = hashlib.blake2b(b"", key=KEY, digest_size=64).hexdigest()
+          ok = True
+          for name, got, want in (("RFC 7693 unkeyed(abc)", got_abc, RFC7693_ABC),
+                                  ("blake2b-kat keyed(empty)", got_kat, KAT_KEYED_EMPTY)):
+              print("%-26s %s" % (name, got))
+              if got != want:
+                  print("   MISMATCH, published value is %s" % want)
+                  ok = False
+          if not ok:
+              print("FAIL: the runner's hashlib does not match the published BLAKE2b vectors.")
+              sys.exit(1)
+
+          # The Rolia self-test contract - see the workflow step that consumes this file.
+          keyed = hashlib.blake2b(MSG, key=KEY, digest_size=64).hexdigest()
+          # The two constructions a "keyed BLAKE2b" is most often faked with. Hashing.java
+          # used to be H(K xor M); if the server ever prints one of these instead of the
+          # real MAC, the keyed-mode claim in the README is false.
+          unkeyed = hashlib.blake2b(MSG, digest_size=64).hexdigest()
+          prefix = hashlib.blake2b(KEY + MSG, digest_size=64).hexdigest()
+          with open("/tmp/blake2b-expected.txt", "w") as f:
+              f.write("KEYED=%s\n" % keyed)
+              f.write("UNKEYED=%s\n" % unkeyed)
+              f.write("PREFIX=%s\n" % prefix)
+          print("")
+          print("Rolia self-test contract: key = 00 01 02 .. 3f (64 bytes), message = \"abc\"")
+          print("  expected keyed MAC : %s" % keyed)
+          print("  (unkeyed would be) : %s" % unkeyed)
+          print("  (K||M would be)    : %s" % prefix)
+          BLAKE2B
+          cp /tmp/blake2b-expected.txt /tmp/out/ 2>/dev/null || true
 
       - name: Configure git
         run: |
@@ -155,6 +214,26 @@ jobs:
             echo "[$_tag] clean JVM exit (0)"
           }
 
+          # ------------------------------------------- exit codes for refusal runs
+          # Some build-40 runs are SUPPOSED to fail (the fingerprint guard boots a
+          # world whose secret no longer matches). wait_exit would call that a red
+          # build, so these use wait_exit_any: any exit is fine, a HANG is not.
+          wait_exit_any () {         # wait_exit_any <tag> <logfile> [tries=36]
+            _tag="$1"; _log="$2"; _tries="${3:-36}"; _i=0
+            while [ "$_i" -lt "$_tries" ]; do
+              if [ -f exitcode ]; then break; fi
+              _i=$((_i + 1)); sleep 5
+            done
+            if [ ! -f exitcode ]; then
+              echo "[$_tag] SHUTDOWN HUNG: no exit code after $((_tries * 5))s"
+              _pid=$(pgrep -f 'rolia\.jar' | head -1 || true)
+              [ -n "$_pid" ] && kill -9 "$_pid" 2>/dev/null || true
+              tail -80 "$_log" 2>/dev/null || true
+              exit 1
+            fi
+            echo "[$_tag] JVM exited with $(cat exitcode)"
+          }
+
           # -------------------------------------------------------------- manifest
           # Print the paperclip manifest plus the manifests of any server jars it
           # bundles (paperclip does not necessarily propagate the server manifest).
@@ -177,13 +256,545 @@ jobs:
           bash -n /tmp/ci-helpers.sh
           echo "CI helpers written to /tmp/ci-helpers.sh"
 
+      - name: Write CI python tools
+        # Rolia - build 40 needs two things bash cannot do honestly:
+        #   terrain_sig.py - read the world the server actually wrote to disk and
+        #                    reduce it to a terrain-shape + biome signature. No
+        #                    client ever connects in CI and no vanilla command
+        #                    reports a column height, so the region files are the
+        #                    only observable that can prove "terrain is public".
+        #   rolia_cfg.py   - inspect/mutate the secrets in rolia.yml now that the
+        #                    1024-bit seed no longer lives in server.properties.
+        run: |
+          set -e -o pipefail
+          cat > /tmp/terrain_sig.py <<'TERRAIN_SIG'
+          #!/usr/bin/env python3
+          # Rolia CI - terrain/biome signature extracted straight from saved region files.
+          #
+          # WHY THIS EXISTS
+          #   Build 40 splits worldgen in two: terrain SHAPE is public (derived from
+          #   level-seed alone) while climate/caves/ores/structures are secret. There is no
+          #   vanilla command that reports a column height, and no client ever connects in
+          #   CI, so the only honest observable is the world the server actually wrote to
+          #   disk. This reads world/region/*.mca directly.
+          #
+          # WHAT IS MEASURED
+          #   h(x,z)     - highest y whose block is a TERRAIN block (see is_terrain).
+          #                Surface rules only ever swap one terrain block for another
+          #                (stone->grass/sand/...), so h is invariant to them; trees,
+          #                plants, snow layers, ice and water are excluded, so h is
+          #                invariant to decoration and to freezing too.
+          #   biome(x,z) - the biome sampled at (x, h, z) from the section biome palette.
+          #
+          #   h is NOT expected to be bit-identical between two worlds that share a
+          #   level-seed: caves, ravines and (rarely) villages are secret and do locally
+          #   break the surface. That is why this reports agreement RATES with a control
+          #   run on a different level-seed, instead of pretending an exact match is due.
+          import sys, os, re, json, gzip, zlib, struct, argparse
+          from collections import Counter
+
+          # ----------------------------------------------------------------- NBT reader
+          TAG_END, TAG_BYTE, TAG_SHORT, TAG_INT, TAG_LONG = 0, 1, 2, 3, 4
+          TAG_FLOAT, TAG_DOUBLE, TAG_BYTE_ARRAY, TAG_STRING = 5, 6, 7, 8
+          TAG_LIST, TAG_COMPOUND, TAG_INT_ARRAY, TAG_LONG_ARRAY = 9, 10, 11, 12
+
+
+          class Reader:
+              __slots__ = ("b", "i")
+
+              def __init__(self, b):
+                  self.b = b
+                  self.i = 0
+
+              def raw(self, n):
+                  i = self.i
+                  self.i = i + n
+                  if self.i > len(self.b):
+                      raise ValueError("NBT truncated")
+                  return self.b[i:self.i]
+
+              def u1(self):
+                  return self.raw(1)[0]
+
+              def i1(self):
+                  return struct.unpack(">b", self.raw(1))[0]
+
+              def i2(self):
+                  return struct.unpack(">h", self.raw(2))[0]
+
+              def u2(self):
+                  return struct.unpack(">H", self.raw(2))[0]
+
+              def i4(self):
+                  return struct.unpack(">i", self.raw(4))[0]
+
+              def i8(self):
+                  return struct.unpack(">q", self.raw(8))[0]
+
+              def f4(self):
+                  return struct.unpack(">f", self.raw(4))[0]
+
+              def f8(self):
+                  return struct.unpack(">d", self.raw(8))[0]
+
+              def string(self):
+                  return self.raw(self.u2()).decode("utf-8", "replace")
+
+              def payload(self, t):
+                  if t == TAG_BYTE:
+                      return self.i1()
+                  if t == TAG_SHORT:
+                      return self.i2()
+                  if t == TAG_INT:
+                      return self.i4()
+                  if t == TAG_LONG:
+                      return self.i8()
+                  if t == TAG_FLOAT:
+                      return self.f4()
+                  if t == TAG_DOUBLE:
+                      return self.f8()
+                  if t == TAG_BYTE_ARRAY:
+                      return self.raw(self.i4())
+                  if t == TAG_STRING:
+                      return self.string()
+                  if t == TAG_LIST:
+                      et = self.u1()
+                      n = self.i4()
+                      if n <= 0:
+                          return []
+                      return [self.payload(et) for _ in range(n)]
+                  if t == TAG_COMPOUND:
+                      out = {}
+                      while True:
+                          ct = self.u1()
+                          if ct == TAG_END:
+                              return out
+                          name = self.string()          # NOTE: must be read BEFORE the payload -
+                          out[name] = self.payload(ct)  # `out[self.string()] = self.payload(ct)` evaluates the RHS first.
+                  if t == TAG_INT_ARRAY:
+                      n = self.i4()
+                      return list(struct.unpack(">%di" % n, self.raw(4 * n)))
+                  if t == TAG_LONG_ARRAY:
+                      n = self.i4()
+                      return list(struct.unpack(">%dq" % n, self.raw(8 * n)))
+                  raise ValueError("unknown NBT tag %d" % t)
+
+
+          def parse_nbt(data):
+              r = Reader(data)
+              t = r.u1()
+              if t != TAG_COMPOUND:
+                  raise ValueError("NBT root is tag %d, expected compound" % t)
+              r.string()
+              return r.payload(TAG_COMPOUND)
+
+
+          # ------------------------------------------------------------- block taxonomy
+          # TERRAIN = anything worldgen can leave as the solid ground column. Deliberately
+          # an allowlist: every surface-rule output must be here (otherwise h would drop to
+          # the block below and a mere biome change would look like a terrain change),
+          # while every decoration must be absent (otherwise a tree would look like a hill).
+          _TERRAIN_EXACT = {
+              "stone", "granite", "diorite", "andesite", "tuff", "calcite", "gravel",
+              "dirt", "coarse_dirt", "rooted_dirt", "podzol", "mycelium", "grass_block",
+              "dirt_path", "farmland", "mud", "packed_mud", "muddy_mangrove_roots",
+              "clay", "sand", "red_sand", "suspicious_sand", "suspicious_gravel",
+              "sandstone", "red_sandstone", "smooth_sandstone", "smooth_red_sandstone",
+              "terracotta", "moss_block", "pale_moss_block", "magma_block", "obsidian",
+              "bedrock", "netherrack", "soul_sand", "soul_soil", "basalt",
+              "smooth_basalt", "blackstone", "crimson_nylium", "warped_nylium",
+              "end_stone", "dripstone_block", "amethyst_block", "budding_amethyst",
+              "sculk", "glowstone", "snow_block",
+          }
+          _TERRAIN_SUBSTR = (
+              "deepslate", "_ore", "raw_iron_block", "raw_copper_block", "raw_gold_block",
+              "_terracotta", "cobblestone", "_concrete",
+          )
+          # Explicitly NOT terrain even though a substring rule above might claim them.
+          _NOT_TERRAIN_EXACT = {
+              "air", "cave_air", "void_air", "water", "lava",
+              # Freezing / snowfall - these are climate (SECRET in build 40) and would make
+              # a snowy world look taller than a temperate one with identical terrain.
+              "snow", "powder_snow", "ice", "packed_ice", "blue_ice", "frosted_ice",
+          }
+
+
+          def is_terrain(name):
+              if name.startswith("minecraft:"):
+                  name = name[10:]
+              if name in _NOT_TERRAIN_EXACT:
+                  return False
+              if name in _TERRAIN_EXACT:
+                  return True
+              for s in _TERRAIN_SUBSTR:
+                  if s in name:
+                      return True
+              return False
+
+
+          # ------------------------------------------------------------ palette unpack
+          def unpack(data, bits, count):
+              """1.16+ packing: entries never span a long."""
+              if bits <= 0:
+                  return [0] * count
+              per = 64 // bits
+              mask = (1 << bits) - 1
+              out = []
+              for i in range(count):
+                  li = i // per
+                  if li >= len(data):
+                      out.append(0)
+                      continue
+                  out.append((data[li] >> ((i % per) * bits)) & mask)
+              return out
+
+
+          def bits_for(n, minimum):
+              b = max(1, (n - 1).bit_length()) if n > 1 else 0
+              return max(b, minimum) if n > 1 else minimum
+
+
+          def read_region(path, want):
+              """Yield (cx, cz, root_nbt) for the chunks in `want` (a set of (cx,cz))."""
+              m = re.search(r"r\.(-?\d+)\.(-?\d+)\.mca$", os.path.basename(path))
+              if not m:
+                  return
+              rx, rz = int(m.group(1)), int(m.group(2))
+              with open(path, "rb") as f:
+                  header = f.read(4096)
+                  if len(header) < 4096:
+                      return
+                  for idx in range(1024):
+                      cx = rx * 32 + (idx % 32)
+                      cz = rz * 32 + (idx // 32)
+                      if (cx, cz) not in want:
+                          continue
+                      off = (header[idx * 4] << 16) | (header[idx * 4 + 1] << 8) | header[idx * 4 + 2]
+                      cnt = header[idx * 4 + 3]
+                      if off == 0 or cnt == 0:
+                          continue
+                      f.seek(off * 4096)
+                      head = f.read(5)
+                      if len(head) < 5:
+                          continue
+                      ln = struct.unpack(">i", head[:4])[0]
+                      comp = head[4]
+                      if ln <= 1:
+                          continue
+                      payload = f.read(ln - 1)
+                      external = bool(comp & 0x80)
+                      comp &= 0x7F
+                      if external:
+                          ext = os.path.join(os.path.dirname(path), "c.%d.%d.mcc" % (cx, cz))
+                          if not os.path.exists(ext):
+                              continue
+                          with open(ext, "rb") as g:
+                              payload = g.read()
+                      try:
+                          if comp == 1:
+                              raw = gzip.decompress(payload)
+                          elif comp == 2:
+                              raw = zlib.decompress(payload)
+                          elif comp == 3:
+                              raw = payload
+                          else:
+                              raise ValueError(
+                                  "unsupported region compression id %d (only gzip/zlib/none are "
+                                  "handled; set the server back to the default region compression)" % comp)
+                          yield cx, cz, parse_nbt(raw)
+                      except Exception as e:  # noqa: BLE001 - a bad chunk must be loud, not silent
+                          print("WARN: chunk %d,%d in %s unreadable: %s" % (cx, cz, os.path.basename(path), e))
+
+
+          def extract(world, x0, z0, x1, z1):
+              want = {(cx, cz) for cx in range(x0, x1 + 1) for cz in range(z0, z1 + 1)}
+              region = os.path.join(world, "region")
+              cols = {}
+              stats = Counter()
+              if not os.path.isdir(region):
+                  print("FAIL: %s does not exist" % region)
+                  return None, stats
+              for fn in sorted(os.listdir(region)):
+                  if not fn.endswith(".mca"):
+                      continue
+                  for cx, cz, root in read_region(os.path.join(region, fn), want):
+                      status = str(root.get("Status", ""))
+                      if status not in ("minecraft:full", "full"):
+                          stats["not_full"] += 1
+                          continue
+                      sections = root.get("sections") or []
+                      if not sections:
+                          stats["no_sections"] += 1
+                          continue
+                      # decode every section once: (secY, block_ids[4096], palette, biome ids, biome palette)
+                      decoded = []
+                      for sec in sections:
+                          bs = sec.get("block_states")
+                          if not isinstance(bs, dict):
+                              continue
+                          pal = [p.get("Name", "minecraft:air") if isinstance(p, dict) else str(p)
+                                 for p in (bs.get("palette") or [])]
+                          if not pal:
+                              continue
+                          data = bs.get("data")
+                          if data is None or len(pal) == 1:
+                              ids = [0] * 4096
+                          else:
+                              ids = unpack(data, bits_for(len(pal), 4), 4096)
+                          bio = sec.get("biomes") if isinstance(sec.get("biomes"), dict) else {}
+                          bpal = [str(p) for p in (bio.get("palette") or [])]
+                          bdata = bio.get("data")
+                          if not bpal:
+                              bids = None
+                          elif bdata is None or len(bpal) == 1:
+                              bids = [0] * 64
+                          else:
+                              bids = unpack(bdata, bits_for(len(bpal), 0), 64)
+                          decoded.append((int(sec.get("Y", 0)), ids, pal, bids, bpal))
+                      if not decoded:
+                          stats["empty"] += 1
+                          continue
+                      decoded.sort(key=lambda s: -s[0])
+                      terrain_cache = {}
+                      for lx in range(16):
+                          for lz in range(16):
+                              h = None
+                              hit = None
+                              for secY, ids, pal, bids, bpal in decoded:
+                                  for ly in range(15, -1, -1):
+                                      pi = ids[(ly << 8) | (lz << 4) | lx]
+                                      name = pal[pi] if pi < len(pal) else "minecraft:air"
+                                      t = terrain_cache.get(name)
+                                      if t is None:
+                                          t = is_terrain(name)
+                                          terrain_cache[name] = t
+                                      if t:
+                                          h = secY * 16 + ly
+                                          b = "?"
+                                          if bids is not None and bpal:
+                                              bi = bids[((ly >> 2) << 4) | ((lz >> 2) << 2) | (lx >> 2)]
+                                              b = bpal[bi] if bi < len(bpal) else "?"
+                                          hit = (h, b, name)
+                                          break
+                                  if hit:
+                                      break
+                              if hit is None:
+                                  stats["void_column"] += 1
+                                  continue
+                              cols["%d,%d" % (cx * 16 + lx, cz * 16 + lz)] = [hit[0], hit[1], hit[2]]
+                      stats["chunks"] += 1
+              return cols, stats
+
+
+          def cmd_extract(a):
+              cols, stats = extract(a.world, a.x0, a.z0, a.x1, a.z1)
+              if cols is None:
+                  return 1
+              with open(a.out, "w") as f:
+                  json.dump({"columns": cols}, f)
+              print("extract: %s -> %s | chunks=%d columns=%d %s"
+                    % (a.world, a.out, stats["chunks"], len(cols),
+                       " ".join("%s=%d" % kv for kv in sorted(stats.items()) if kv[0] != "chunks")))
+              return 0
+
+
+          def cmd_compare(a):
+              A = json.load(open(a.a))["columns"]
+              B = json.load(open(a.b))["columns"]
+              keys = sorted(set(A) & set(B))
+              n = len(keys)
+              if n == 0:
+                  print("FAIL: %s and %s share no columns at all" % (a.a, a.b))
+                  return 1
+              exact = land = bio = 0
+              deltas = []
+              mism = Counter()
+              for k in keys:
+                  ha, ba, na = A[k]
+                  hb, bb, nb = B[k]
+                  d = abs(ha - hb)
+                  deltas.append(d)
+                  if d == 0:
+                      exact += 1
+                  else:
+                      mism[(na, nb, ha - hb)] += 1
+                  if (ha >= a.sea) == (hb >= a.sea):
+                      land += 1
+                  if ba == bb:
+                      bio += 1
+              deltas.sort()
+              out = {
+                  "COMMON": n,
+                  "EXACT_PCT": round(100.0 * exact / n),
+                  "MEAN_ABS_X100": round(100.0 * sum(deltas) / n),
+                  "MEDIAN_ABS": deltas[n // 2],
+                  "P90_ABS": deltas[int(n * 0.9)],
+                  "LAND_PCT": round(100.0 * land / n),
+                  "BIOME_PCT": round(100.0 * bio / n),
+              }
+              print("=== %s vs %s ===" % (a.a, a.b))
+              for k, v in out.items():
+                  print("%s%s=%s" % (a.prefix, k, v))
+              if mism:
+                  print("--- top height mismatches (blockA, blockB, dh) ---")
+                  for (na, nb, dh), c in mism.most_common(8):
+                      print("    %6d x  %-28s %-28s dh=%+d" % (c, na, nb, dh))
+              if a.env:
+                  with open(a.env, "w") as f:
+                      for k, v in out.items():
+                          f.write("%s%s=%s\n" % (a.prefix, k, v))
+              return 0
+
+
+          def main():
+              p = argparse.ArgumentParser()
+              sub = p.add_subparsers(dest="cmd", required=True)
+              e = sub.add_parser("extract")
+              e.add_argument("world")
+              e.add_argument("out")
+              e.add_argument("--x0", type=int, default=0)
+              e.add_argument("--z0", type=int, default=0)
+              e.add_argument("--x1", type=int, default=11)
+              e.add_argument("--z1", type=int, default=11)
+              e.set_defaults(func=cmd_extract)
+              c = sub.add_parser("compare")
+              c.add_argument("a")
+              c.add_argument("b")
+              c.add_argument("--env", default=None)
+              c.add_argument("--prefix", default="")
+              c.add_argument("--sea", type=int, default=62)
+              c.set_defaults(func=cmd_compare)
+              a = p.parse_args()
+              sys.exit(a.func(a))
+
+
+          if __name__ == "__main__":
+              main()
+          TERRAIN_SIG
+          cat > /tmp/rolia_cfg.py <<'ROLIA_CFG'
+          #!/usr/bin/env python3
+          # Rolia CI - inspect and mutate the secrets inside rolia.yml.
+          #
+          # Build 40 moves the 1024-bit feature seed out of server.properties (the
+          # `feature-level-seed` property is gone) and into rolia.yml, so CI can no longer
+          # just write the seed it wants to test with. Hardcoding the new key name here
+          # would be worse than useless: if the seed core settled on a different name the
+          # server would silently generate a random seed instead, every "same seed" run
+          # would differ, and the determinism test would fail for the wrong reason.
+          #
+          # So this DISCOVERS the keys in the file the server itself wrote: `salt:` is the
+          # salt, and the one other scalar that looks like a 1024-bit secret (a >=20 digit
+          # decimal, a >=64 hex string, or a list of longs) is the feature seed. If no such
+          # value exists the caller is told exactly what is missing and the build fails,
+          # instead of quietly testing nothing.
+          import re
+          import sys
+
+          SALT_RE = re.compile(r"^(\s*salt\s*:\s*)(\S.*?)(\s*)$")
+          KEYNAME = r"^(\s*)([A-Za-z0-9_.-]+)(\s*:\s*)"
+          DEC_RE = re.compile(KEYNAME + r"([\"']?)(\d{20,})([\"']?)(\s*)$")
+          HEX_RE = re.compile(KEYNAME + r"([\"']?)([0-9a-fA-F]{64,})([\"']?)(\s*)$")
+          LST_RE = re.compile(KEYNAME + r"(\[)([-0-9,\s]+)(\])(\s*)$")
+          TWEAK = 0x9E3779B97F4A7C15
+
+
+          def find_seed(lines):
+              """-> (index, kind, key, groups) for the line holding the 1024-bit secret."""
+              for i, ln in enumerate(lines):
+                  for kind, rx in (("dec", DEC_RE), ("hex", HEX_RE), ("list", LST_RE)):
+                      m = rx.match(ln.rstrip("\n"))
+                      if m and m.group(2) != "salt":
+                          return i, kind, m.group(2), m
+              return None
+
+
+          def find_salt(lines):
+              for i, ln in enumerate(lines):
+                  m = SALT_RE.match(ln.rstrip("\n"))
+                  if m:
+                      return i, m
+              return None
+
+
+          def bump(kind, m):
+              if kind == "dec":
+                  n = int(m.group(5)) ^ TWEAK
+                  if n == 0:
+                      n = 1
+                  return "%s%s%s%s%s%s%s" % (m.group(1), m.group(2), m.group(3), m.group(4), n, m.group(6), m.group(7))
+              if kind == "hex":
+                  v = m.group(5)
+                  v = v[:-1] + ("1" if v[-1].lower() == "0" else "0")
+                  return "%s%s%s%s%s%s%s" % (m.group(1), m.group(2), m.group(3), m.group(4), v, m.group(6), m.group(7))
+              vals = [int(x) for x in m.group(5).replace(" ", "").split(",") if x != ""]
+              vals[0] ^= TWEAK
+              body = ", ".join(str(v) for v in vals)
+              return "%s%s%s%s%s%s%s" % (m.group(1), m.group(2), m.group(3), m.group(4), body, m.group(6), m.group(7))
+
+
+          def main():
+              if len(sys.argv) < 3:
+                  print("usage: rolia_cfg.py show|set-salt|bump-seed <in> [out] [salt]")
+                  return 2
+              cmd, src = sys.argv[1], sys.argv[2]
+              lines = open(src).read().splitlines(True)
+              s = find_seed(lines)
+              t = find_salt(lines)
+              if cmd == "show":
+                  print("rolia.yml   : %s (%d lines)" % (src, len(lines)))
+                  print("salt key    : %s" % ("salt (present)" if t else "MISSING"))
+                  if s:
+                      i, kind, key, m = s
+                      raw = m.group(5)
+                      print("seed key    : %s  kind=%s  len=%d  value=%s...%s"
+                            % (key, kind, len(raw), raw[:6], raw[-6:]))
+                  else:
+                      print("seed key    : MISSING")
+                      print("")
+                      print("FAIL: no 1024-bit feature seed found in %s." % src)
+                      print("      Build 40 contract: the secret lives ONLY in rolia.yml. The server must")
+                      print("      PERSIST the generated feature seed there (a >=20-digit decimal, a >=64-char")
+                      print("      hex string, or a list of 16 longs) so it survives a restart, and CI can then")
+                      print("      reproduce a world from it. Nothing to test until that is true.")
+                      return 1
+                  return 0
+              out = sys.argv[3]
+              if cmd == "set-salt":
+                  if not t:
+                      print("FAIL: no 'salt:' line in %s" % src)
+                      return 1
+                  i, m = t
+                  lines[i] = "%s\"%s\"\n" % (m.group(1), sys.argv[4])
+              elif cmd == "bump-seed":
+                  if not s:
+                      print("FAIL: no feature seed found in %s (run 'show' for the contract)" % src)
+                      return 1
+                  i, kind, key, m = s
+                  lines[i] = bump(kind, m) + "\n"
+                  print("bump-seed: mutated key '%s' (%s)" % (key, kind))
+              else:
+                  print("unknown command %s" % cmd)
+                  return 2
+              open(out, "w").write("".join(lines))
+              print("%s: %s -> %s" % (cmd, src, out))
+              return 0
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          ROLIA_CFG
+          python3 -m py_compile /tmp/terrain_sig.py /tmp/rolia_cfg.py
+          python3 /tmp/terrain_sig.py --help > /dev/null
+          python3 /tmp/rolia_cfg.py 2>/dev/null | head -1 || true
+          echo "CI python tools written and compiled"
+
       - name: Apply Rolia DAB source hooks
         run: python3 scripts/apply_dab_hooks.py
 
       - name: Build paperclip jar
         timeout-minutes: 90
         env:
-          BUILD_NUMBER: 39
+          BUILD_NUMBER: 40
         run: |
           set -e -o pipefail
           source /tmp/ci-helpers.sh
@@ -246,21 +857,79 @@ jobs:
 
       - name: Run test suite
         timeout-minutes: 60
-        # Rolia - build 38 introduces this step; the Paper/Canvas suites in the tree have never been
-        # run by this pipeline, so their current pass/fail state is unknown. Report-only for ONE build
-        # so a pre-existing upstream test failure cannot block the release, then flip to a hard gate
-        # in build 39 once we have seen a clean run. `set +e` is deliberate and scoped to this step.
+        # Rolia - STILL REPORT-ONLY, deliberately. Build 39 ran this suite for the first time and it
+        # failed on a PRE-EXISTING upstream test (:canvas-api:test > AnnotationTest > testAll()) that
+        # Rolia has not touched, so turning it into a hard gate now would block build 40 on a defect
+        # we did not introduce. What build 40 changes is visibility: the step used to end in a bare
+        # `exit 0` with the counts buried in 50k lines of gradle output. It now prints ONE summary
+        # line (from the JUnit XML, not from grepping the console) and repeats it in the job summary,
+        # and it separates KNOWN pre-existing failures from NEW ones. Flip `continue-on-error` off
+        # once "NEW failures: 0" holds and the known one is fixed upstream.
         continue-on-error: true
         env:
-          BUILD_NUMBER: 39
+          BUILD_NUMBER: 40
         run: |
           set +e
           ./gradlew test --stacktrace 2>&1 | tee test.log
           rc=${PIPESTATUS[0]}
           echo "===== TEST SUITE EXIT: $rc ====="
+          GRADLE_RC="$rc" python3 - <<'TESTSUM' | tee /tmp/out/test-summary.txt
+          import glob
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          # Rolia - the JUnit XML is the only trustworthy source of pass/fail counts;
+          # grepping gradle's console output misses suites and double-counts retries.
+          KNOWN = {"AnnotationTest.testAll"}   # build 39: pre-existing upstream failure in :canvas-api
+
+          total = failed = errored = skipped = 0
+          names = []
+          files = glob.glob("**/build/test-results/**/*.xml", recursive=True)
+          for fn in files:
+              try:
+                  root = ET.parse(fn).getroot()
+              except Exception:
+                  continue
+              for tc in root.iter("testcase"):
+                  total += 1
+                  bad = None
+                  for child in tc:
+                      if child.tag == "failure":
+                          bad = "failed"
+                      elif child.tag == "error":
+                          bad = "errored"
+                      elif child.tag == "skipped":
+                          bad = "skipped"
+                  if bad == "failed":
+                      failed += 1
+                  elif bad == "errored":
+                      errored += 1
+                  elif bad == "skipped":
+                      skipped += 1
+                  if bad in ("failed", "errored"):
+                      cls = (tc.get("classname") or "?").split(".")[-1]
+                      names.append("%s.%s" % (cls, (tc.get("name") or "?").split("(")[0]))
+
+          rc = os.environ.get("GRADLE_RC", "?")
+          new = sorted(set(names) - KNOWN)
+          line = ("TEST SUITE SUMMARY: %d tests | %d failed | %d errors | %d skipped | "
+                  "%d xml files | gradle exit=%s | NEW failures: %d"
+                  % (total, failed, errored, skipped, len(files), rc, len(new)))
+          print(line)
+          if not files:
+              print("TEST SUITE SUMMARY: no JUnit XML found - the suite did not run at all.")
+          for n in sorted(set(names)):
+              print("   %s %s" % ("KNOWN " if n in KNOWN else "NEW   ", n))
+          step = os.environ.get("GITHUB_STEP_SUMMARY")
+          if step:
+              with open(step, "a") as f:
+                  f.write("### %s\n" % line)
+                  for n in sorted(set(names)):
+                      f.write("- %s `%s`\n" % ("known" if n in KNOWN else "**new**", n))
+          TESTSUM
           if [ "$rc" != "0" ]; then
-            echo "NOTE: test failures above are REPORT-ONLY in build 38. Review them, then remove"
-            echo "      continue-on-error + restore 'set -e -o pipefail' to make this a real gate."
+            echo "NOTE: the failures above are REPORT-ONLY. They do not fail the build."
             grep -nE 'FAILED|tests? (completed|failed)' test.log | head -40
           fi
           cp -r canvas-server/build/reports/tests /tmp/out/test-reports 2>/dev/null || true
@@ -315,6 +984,12 @@ jobs:
           run_server first $START_SH_FLAGS   # fresh world, shipped start.sh flags
           echo "=== F3 server brand (serverModName -> minecraft:brand payload) ==="
           grep -i 'serverModName' canvas-server.yml 2>/dev/null || echo "(canvas-server.yml not persisted on first run; F3 brand = brandName() = Rolia)"
+          # Rolia - build 40 turns the performance defaults ON. DAB is asserted below (it is the
+          # one that shows up in the Rolia startup line); the Canvas-side settings are printed for
+          # the record because their key names live in Canvas's own config, not in ours.
+          echo "=== performance defaults actually written to the configs ==="
+          grep -inE 'affinity|scheduler|region.*thread' canvas-server.yml 2>/dev/null | head -12 || echo "(no scheduler keys found in canvas-server.yml)"
+          grep -inE 'faster-network|dab|enabled' rolia.yml 2>/dev/null | head -12 || echo "(rolia.yml not present)"
           run_server second -Xmx3G           # restart on same world: must load cleanly, identical feature seed
 
           FS1=$(grep -oE 'Feature seed fp: [0-9a-f]{16}' server_first.log  | sed 's/.*fp: //' | head -1 || true)
@@ -324,27 +999,220 @@ jobs:
           [ -n "$FS1" ] || { echo "feature seed fingerprint not printed"; exit 1; }
           [ "${#FS1}" -eq 16 ] || { echo "malformed feature seed fingerprint: $FS1"; exit 1; }
           [ "$FS1" = "$FS2" ] || { echo "feature seed changed across restart: $FS1 vs $FS2"; exit 1; }
+
+          # Rolia - build 40: slime chunks are a pure function of the SECRET seed, so the same
+          # world must give the same answer on every boot. Nothing in vanilla reports slime
+          # chunks to the console and CI never connects a client, so this relies on the server
+          # publishing a digest over a FIXED grid of chunk coordinates at startup:
+          #     Rolia: slime-selftest <16 hex>
+          # (contract: digest of isSlimeChunk(x,z) for x,z in [-16,15], overworld, logged once).
+          # If that line is absent the check is SKIPPED LOUDLY - it must never pass silently.
+          SL1=$(grep -oE 'slime-selftest [0-9a-f]{8,}' server_first.log  | awk '{print $2}' | head -1 || true)
+          SL2=$(grep -oE 'slime-selftest [0-9a-f]{8,}' server_second.log | awk '{print $2}' | head -1 || true)
+          if [ -n "$SL1" ] && [ -n "$SL2" ]; then
+            echo "run1 slime-selftest: $SL1"
+            echo "run2 slime-selftest: $SL2"
+            [ "$SL1" = "$SL2" ] || { echo "FAIL: slime chunks CHANGED across a restart of the same world ($SL1 vs $SL2)"; exit 1; }
+            echo "SLIME CHUNK OK: identical slime-chunk answer for the fixed grid on both boots"
+          else
+            echo "########################################################################"
+            echo "SLIME CHUNK TEST SKIPPED - the server logged no 'Rolia: slime-selftest <hex>' line."
+            echo "  Slime chunks are not observable from the console in vanilla, so restart"
+            echo "  stability cannot be tested without it. To enable this check, log once at"
+            echo "  startup a hex digest over isSlimeChunk(x,z) for x,z in [-16,15]."
+            echo "########################################################################"
+          fi
           echo "SMOKE TEST OK: two clean starts, stable 1024-bit feature seed, no fatal errors"
 
-      - name: Determinism + seed-split test
-        timeout-minutes: 70
+      - name: Verify Hashing.java against the BLAKE2b vectors
+        # Rolia - build 40 replaces the homemade H(K xor M) in io.rolia.secureseed.Hashing with
+        # RFC 7693 KEYED BLAKE2b (a real MAC). A hash nobody checks is a hash nobody can trust, so
+        # the server publishes its own digest of a fixed key/message pair at startup and this step
+        # compares it with the value python's hashlib (pinned to the published vectors in the very
+        # first step of this workflow) computes for the same inputs.
+        #
+        #   CONTRACT - io.rolia.secureseed.Hashing must log, exactly once at startup, at INFO:
+        #       Rolia: blake2b-selftest <128 lowercase hex chars>
+        #   where the digest is RFC 7693 keyed BLAKE2b-512 with
+        #       key     = the 64 bytes 00 01 02 ... 3f
+        #       message = the 3 bytes "abc" (0x61 0x62 0x63)
+        #   Expected: 06bbc3dedf13a31139498655251b7588ccd3bb5aaa071b2d44d8e0a04095579e
+        #             d590fbfdcf941f4370ce5ce623624e7a76d33e7a8109dcda9b57d72f8f8efa51
         run: |
-          # Rolia - a real gate again: `set +e +o pipefail` made this step
-          # unfailable (it ends in an `echo ... OK`). Every diagnostic grep /
-          # command substitution below that may legitimately match nothing is
-          # neutralised explicitly with `|| true` instead.
+          set -e -o pipefail
+          . /tmp/blake2b-expected.txt
+          LOG=testrun/server_first.log
+          [ -f "$LOG" ] || { echo "FAIL: $LOG is missing - the smoke test did not run"; exit 1; }
+          GOT=$(grep -oE 'blake2b-selftest [0-9a-fA-F]+' "$LOG" | awk '{print $2}' | head -1 | tr 'A-F' 'a-f' || true)
+          if [ -z "$GOT" ]; then
+            echo "FAIL: the server never logged 'Rolia: blake2b-selftest <hex>'."
+            echo "      Build 40 cannot verify its own crypto without it. Contract:"
+            echo "        log once at startup, INFO:  Rolia: blake2b-selftest <128 lowercase hex>"
+            echo "        digest = RFC 7693 KEYED BLAKE2b-512, key = bytes 00..3f, message = \"abc\""
+            echo "        expected = $KEYED"
+            grep -i 'rolia:' "$LOG" | head -20 || true
+            exit 1
+          fi
+          echo "server  : $GOT"
+          echo "expected: $KEYED"
+          if [ "${#GOT}" -ne 128 ]; then
+            echo "FAIL: the self-test digest is ${#GOT} hex chars; BLAKE2b-512 is 128 (64 bytes)."
+            exit 1
+          fi
+          if [ "$GOT" = "$KEYED" ]; then
+            echo "BLAKE2b OK: Hashing.java reproduces RFC 7693 keyed BLAKE2b-512 exactly."
+          else
+            echo "FAIL: Hashing.java does NOT implement RFC 7693 keyed BLAKE2b."
+            [ "$GOT" = "$UNKEYED" ] && echo "  -> it printed the UNKEYED digest: the key is being ignored entirely."
+            [ "$GOT" = "$PREFIX" ]  && echo "  -> it printed BLAKE2b(key||message): a prefix-MAC, not RFC 7693 keyed mode."
+            exit 1
+          fi
+
+      - name: Terrain is public (same level-seed => same landscape)
+        timeout-minutes: 70
+        # Rolia - build 40's central claim, and the one that had no test at all: terrain SHAPE
+        # (continentalness/erosion/ridge/offset/jagged + BlendedNoise) comes from the PUBLIC
+        # level-seed, while climate, caves, ores, structures and slime chunks come from the
+        # secret. Two worlds that share only a level-seed must therefore have the same landscape
+        # and different biomes on it.
+        #
+        # There is no vanilla command that reports a column height, and CI never connects a
+        # client, so the observable is the world the server actually wrote: terrain_sig.py reads
+        # world/region/*.mca and reduces every column to (highest terrain block, biome there).
+        # Decorations, snow, ice and water are excluded, and surface rules only ever swap one
+        # terrain block for another, so the height is invariant to everything secret EXCEPT
+        # carvers - caves and ravines are secret and do occasionally break the surface. An exact
+        # match is therefore NOT expected and is not asserted; agreement RATES are, together with
+        # a control run on a different level-seed that proves the measurement has power.
+        run: |
+          set -e -o pipefail
+          set -x
+          source /tmp/ci-helpers.sh
+          [ -f /tmp/rolia.jar ] || { echo "FAIL: /tmp/rolia.jar missing"; exit 1; }
+          mkdir -p testrun/terrain && cd testrun/terrain
+          echo "eula=true" > eula.txt
+          SALT1="TERRAIN_PUBLIC_SALT_ONE__0123456789abcdef0123456789abcdef0123456789ab"
+          SALT2="TERRAIN_PUBLIC_SALT_TWO__fedcba9876543210fedcba9876543210fedcba987654"
+
+          terrain_run () {          # terrain_run <tag> <level-seed> <NEWSALT:salt | config file>
+            tag="$1"; lvl="$2"; cfg="$3"
+            rm -rf world world_nether world_the_end rolia.yml rolia-seed.properties
+            case "$cfg" in
+              NEWSALT:*) printf 'secure-seed:\n  salt: "%s"\n' "${cfg#NEWSALT:}" > rolia.yml ;;
+              *)         cp "$cfg" rolia.yml ;;
+            esac
+            printf 'level-seed=%s\nonline-mode=false\n' "$lvl" > server.properties
+            rm -f input exitcode; mkfifo input
+            (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "terr_$tag.log" 2>&1; echo $? > exitcode) &   # Rolia - set +e: record the exit code instead of dying on it
+            exec 3>input
+            for i in $(seq 1 180); do grep -q 'Done (' "terr_$tag.log" 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
+            if ! grep -q 'Done (' "terr_$tag.log"; then
+              echo "[terr_$tag] SERVER FAILED TO START"; tail -120 "terr_$tag.log"; exec 3>&- || true; exit 1
+            fi
+            sleep 3
+            # 144 chunks, (0,0)..(11,11) = 36864 columns. One command, under the vanilla
+            # 256-chunks-per-forceload cap, and at fixed coordinates - the world SPAWN cannot be
+            # used because spawn selection is biome-driven and biomes are secret, so the three
+            # worlds would not even overlap.
+            echo "forceload add 0 0 191 191" >&3 || true
+            for attempt in 1 2 3 4 5 6; do
+              sleep 20
+              echo "save-all flush" >&3 || true
+              sleep 8
+              n=$(python3 /tmp/terrain_sig.py extract world "sig_$tag.json" --x0 0 --z0 0 --x1 11 --z1 11 | sed -nE 's/.*columns=([0-9]+).*/\1/p')
+              echo "[terr_$tag] wait $attempt: ${n:-0} of 36864 columns on disk"
+              if [ "${n:-0}" -ge 36000 ]; then break; fi
+            done
+            echo "stop" >&3 || true
+            wait_exit "terr_$tag" "terr_$tag.log"
+            exec 3>&- 2>/dev/null || true
+            grep -iE 'forceload|Added .* forced' "terr_$tag.log" | head -5 || true
+            scan_errors "terr_$tag" "terr_$tag.log" || exit 1
+            python3 /tmp/terrain_sig.py extract world "sig_$tag.json" --x0 0 --z0 0 --x1 11 --z1 11
+          }
+
+          terrain_run w1 roliaterrain  "NEWSALT:$SALT1"    # public seed L1, secrets #1
+          cp rolia.yml cfg_w1.yml                          # salt S1 + the 1024-bit seed the server generated
+          terrain_run w2 roliaterrain  "NEWSALT:$SALT2"    # public seed L1, DIFFERENT salt and feature seed
+          terrain_run w3 roliaterrain2 cfg_w1.yml          # DIFFERENT public seed, IDENTICAL secrets
+
+          python3 /tmp/terrain_sig.py compare sig_w1.json sig_w2.json --env cmp12.env --prefix AB_
+          python3 /tmp/terrain_sig.py compare sig_w1.json sig_w3.json --env cmp13.env --prefix AC_
+          . ./cmp12.env
+          . ./cmp13.env
+          echo "=== same level-seed, DIFFERENT secrets  : common=$AB_COMMON exact=${AB_EXACT_PCT}% median|dh|=$AB_MEDIAN_ABS mean|dh|=${AB_MEAN_ABS_X100}/100 p90=$AB_P90_ABS land=${AB_LAND_PCT}% biome=${AB_BIOME_PCT}%"
+          echo "=== DIFFERENT level-seed, same secrets  : common=$AC_COMMON exact=${AC_EXACT_PCT}% median|dh|=$AC_MEDIAN_ABS mean|dh|=${AC_MEAN_ABS_X100}/100 p90=$AC_P90_ABS land=${AC_LAND_PCT}% biome=${AC_BIOME_PCT}%"
+
+          # A test with no data must never be a green test.
+          for v in "$AB_COMMON" "$AC_COMMON"; do
+            [ "${v:-0}" -ge 20000 ] || { echo "FAIL: only ${v:-0} columns are comparable (expected ~36864). The forceloaded chunks were not generated or not saved - fix that before reading anything below."; exit 1; }
+          done
+
+          # 1. TERRAIN IS PUBLIC: change every secret, keep the level-seed, get the same landscape.
+          [ "$AB_EXACT_PCT" -ge 85 ]      || { echo "FAIL: only ${AB_EXACT_PCT}% of columns have the SAME height with the same level-seed - terrain is not reproducible from level-seed alone"; exit 1; }
+          [ "$AB_MEDIAN_ABS" -eq 0 ]      || { echo "FAIL: median height difference is $AB_MEDIAN_ABS, expected 0"; exit 1; }
+          [ "$AB_MEAN_ABS_X100" -le 300 ] || { echo "FAIL: mean height difference is ${AB_MEAN_ABS_X100}/100 blocks, expected <= 3.00"; exit 1; }
+          [ "$AB_LAND_PCT" -ge 97 ]       || { echo "FAIL: the land/ocean mask agrees on only ${AB_LAND_PCT}% of columns - the landmass moved"; exit 1; }
+
+          # 2. CONTROL: the same measurement must clearly separate two different level-seeds,
+          #    otherwise assertion 1 above would pass on any two worlds at all.
+          [ "$AC_EXACT_PCT" -le $((AB_EXACT_PCT - 25)) ] || { echo "FAIL: a DIFFERENT level-seed scored ${AC_EXACT_PCT}% vs ${AB_EXACT_PCT}% - this metric cannot tell two terrains apart, so test 1 proves nothing"; exit 1; }
+          # Relative, not absolute: the mean |dh| between two different terrains scales with how
+          # mountainous the sampled area happens to be, so a fixed block threshold would be a
+          # coin flip on the world-seed. Compare the two measurements against each other instead.
+          [ "$AC_MEAN_ABS_X100" -ge $((AB_MEAN_ABS_X100 * 4 + 100)) ] || { echo "FAIL: a different level-seed moved the surface by only ${AC_MEAN_ABS_X100}/100 blocks on average, against ${AB_MEAN_ABS_X100}/100 for a mere secret change - the two are not distinguishable"; exit 1; }
+          [ "$AC_MEDIAN_ABS" -ge 1 ] || { echo "FAIL: the MEDIAN column height is unchanged by a different level-seed - the level-seed is not driving terrain at all"; exit 1; }
+
+          # 3. CLIMATE IS SECRET: the same landscape must be wearing different biomes.
+          [ "$AB_BIOME_PCT" -le 85 ]      || { echo "FAIL: ${AB_BIOME_PCT}% of columns kept the SAME biome after every secret changed - biome climate is not under the secret seed"; exit 1; }
+
+          # 4. Slime chunks move with the secret (see the smoke test for restart stability).
+          SL1=$(grep -oE 'slime-selftest [0-9a-f]{8,}' terr_w1.log | awk '{print $2}' | head -1 || true)
+          SL2=$(grep -oE 'slime-selftest [0-9a-f]{8,}' terr_w2.log | awk '{print $2}' | head -1 || true)
+          SL3=$(grep -oE 'slime-selftest [0-9a-f]{8,}' terr_w3.log | awk '{print $2}' | head -1 || true)
+          if [ -n "$SL1" ] && [ -n "$SL2" ]; then
+            [ "$SL1" != "$SL2" ] || { echo "FAIL: the slime-chunk grid is identical ($SL1) after the salt and feature seed both changed - slime chunks are not under the secret"; exit 1; }
+            echo "SLIME OK: the slime-chunk grid moved with the secret ($SL1 -> $SL2)"
+            echo "informational - same secrets, different level-seed: w1=$SL1 w3=$SL3 (slime chunks should not depend on the public seed)"
+          else
+            echo "SLIME/SECRET CHECK SKIPPED: no 'Rolia: slime-selftest <hex>' line (see the smoke test step for the contract)."
+          fi
+
+          echo "TERRAIN OK: the landscape is reproducible from level-seed alone (${AB_EXACT_PCT}% exact,"
+          echo "            land mask ${AB_LAND_PCT}%), a different level-seed scores only ${AC_EXACT_PCT}%,"
+          echo "            and only ${AB_BIOME_PCT}% of columns kept their biome when the secret changed."
+
+      - name: Determinism + seed-split test
+        timeout-minutes: 90
+        # Rolia - a real gate: `set +e +o pipefail` once made this step unfailable (it ends in an
+        # `echo ... OK`). Every diagnostic grep / command substitution that may legitimately match
+        # nothing is neutralised individually with `|| true` instead.
+        #
+        # Build 40 reworks the matrix. The secret no longer lives in server.properties (the
+        # `feature-level-seed` property is GONE), so CI cannot dictate the feature seed up front.
+        # Instead run A starts with no rolia.yml at all, the server generates and PERSISTS both
+        # secrets, and every later run is that same file with exactly one field mutated. That also
+        # makes each variable independent, which the old A/B/C matrix could not do:
+        #
+        #   A  fresh          -> salt S1, feature seed F1   (baseline)
+        #   B  = A's file     -> S1, F1   ==> structures must be IDENTICAL   (determinism)
+        #   C  salt changed   -> S2, F1   ==> structures must MOVE           (salt protects them)
+        #   D  seed changed   -> S1, F2   ==> structures must MOVE           (seed protects them)
+        #
+        # All four share the same public level-seed, so C and D moving is precisely the "your
+        # level-seed does not reveal my structures" claim in the README.
+        run: |
           set -e -o pipefail
           set -x
           source /tmp/ci-helpers.sh
           cd testrun
-          SALT="DETERMINISMSALT_DETERMINISMSALT_DETERMINISMSALT_DETERMINISM_0123"
-          FSEED="12345678901234567890123456789012345678901234567890"
-          FSEED2="98765432109876543210987654321098765432109876543210"
-          locate_run () {
-            tag="$1"; fs="$2"
+          SALT2="DETERMINISM_SALT_TWO__0123456789abcdef0123456789abcdef0123456789ab"
+          locate_run () {           # locate_run <tag> <FRESH | config file>
+            tag="$1"; cfg="$2"
             rm -rf world world_nether world_the_end
-            printf 'secure-seed:\n  salt: "%s"\n' "$SALT" > rolia.yml
-            printf 'level-seed=roliadettest\nfeature-level-seed=%s\nonline-mode=false\n' "$fs" > server.properties
+            rm -f rolia.yml rolia-seed.properties
+            if [ "$cfg" != FRESH ]; then cp "$cfg" rolia.yml; fi
+            printf 'level-seed=roliadettest\nonline-mode=false\n' > server.properties
             rm -f input exitcode; mkfifo input
             (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "det_$tag.log" 2>&1; echo $? > exitcode) &   # Rolia - set +e: record the exit code instead of dying on it
             exec 3>input
@@ -357,16 +1225,78 @@ jobs:
             exec 3>&- 2>/dev/null || true
             scan_errors "det_$tag" "det_$tag.log" || exit 1
           }
-          locate_run a "$FSEED"    # level L, feature F1
-          locate_run b "$FSEED"    # level L, feature F1  -> must be IDENTICAL (determinism)
-          locate_run c "$FSEED2"   # level L, feature F2  -> structures must MOVE (secured by feature seed)
+          locate_run a FRESH
+          # Hard requirement, not a diagnostic: if the server did not write the 1024-bit seed into
+          # rolia.yml then it cannot survive a restart and nothing below this line means anything.
+          # rolia_cfg.py exits non-zero (with the contract spelled out) when it is missing.
+          python3 /tmp/rolia_cfg.py show rolia.yml
+          cp rolia.yml cfg_a.yml
+          python3 /tmp/rolia_cfg.py set-salt  cfg_a.yml cfg_c.yml "$SALT2"
+          python3 /tmp/rolia_cfg.py bump-seed cfg_a.yml cfg_d.yml
+          locate_run b cfg_a.yml
+          locate_run c cfg_c.yml
+          locate_run d cfg_d.yml
           coords () { grep -oE '\[-?[0-9]+, ~, -?[0-9]+\]' "det_$1.log" | tr '\n' ' ' || true; }
-          CA=$(coords a); CB=$(coords b); CC=$(coords c)
-          echo "A (L,F1): $CA"; echo "B (L,F1): $CB"; echo "C (L,F2): $CC"
-          if [ -z "$CA" ] || [ -z "$CB" ] || [ -z "$CC" ]; then echo "FAIL: locate produced no coords - cannot verify determinism/seed-split"; exit 1; fi
-          if [ "$CA" != "$CB" ]; then echo "FAIL: non-deterministic (A!=B with identical seeds)"; exit 1; fi
-          if [ "$CA" = "$CC" ]; then echo "FAIL: structures did NOT move when feature seed changed -> not secured by feature seed"; exit 1; fi
-          echo "OK: determinism (A==B) + seed-split (structures move with feature seed, A!=C) verified"
+          fp ()     { grep -oE 'Feature seed fp: [0-9a-f]{16}' "det_$1.log" | sed 's/.*fp: //' | head -1 || true; }
+          CA=$(coords a); CB=$(coords b); CC=$(coords c); CD=$(coords d)
+          echo "A (L, S1, F1): $CA   fp=$(fp a)"
+          echo "B (L, S1, F1): $CB   fp=$(fp b)"
+          echo "C (L, S2, F1): $CC   fp=$(fp c)"
+          echo "D (L, S1, F2): $CD   fp=$(fp d)"
+          for v in "$CA" "$CB" "$CC" "$CD"; do
+            [ -n "$v" ] || { echo "FAIL: /locate produced no coordinates - determinism and the seed split cannot be verified"; exit 1; }
+          done
+          [ "$CA" = "$CB" ] || { echo "FAIL: NOT DETERMINISTIC - the same rolia.yml and the same level-seed produced different structures (A != B). The 1024-bit seed is not being persisted or not being re-read."; exit 1; }
+          [ "$CA" != "$CC" ] || { echo "FAIL: structures did NOT move when only the SALT changed - they are not protected by the salt"; exit 1; }
+          [ "$CA" != "$CD" ] || { echo "FAIL: structures did NOT move when only the FEATURE SEED changed - they are not protected by the 1024-bit seed"; exit 1; }
+          [ "$(fp a)" = "$(fp b)" ] || { echo "FAIL: the feature-seed fingerprint changed between two runs of the same rolia.yml"; exit 1; }
+          echo "OK: determinism (A==B), and structures move for a salt change (A!=C) and for a"
+          echo "    feature-seed change (A!=D) while the public level-seed stayed the same."
+
+      - name: Feature-seed fingerprint guard (secret swapped under an existing world)
+        timeout-minutes: 25
+        # Rolia - build 40 keeps only a FINGERPRINT of the 1024-bit secret in level.dat. Booting a
+        # world with the wrong rolia.yml used to be silent: every newly loaded chunk was generated
+        # from a different secret and the world grew a permanent seam that no tool can repair. This
+        # takes the world the terrain step left behind, swaps the salt underneath it, and boots.
+        #
+        # CONTRACT: the server must either refuse to start, or log a Rolia line naming the
+        # fingerprint mismatch. Doing neither is the bug this step exists to catch.
+        run: |
+          set -e -o pipefail
+          set -x
+          source /tmp/ci-helpers.sh
+          cd testrun/terrain
+          [ -f world/level.dat ] || { echo "FAIL: the terrain step left no world here"; ls -la; exit 1; }
+          [ -f rolia.yml ]       || { echo "FAIL: the terrain step left no rolia.yml here"; ls -la; exit 1; }
+          python3 /tmp/rolia_cfg.py set-salt rolia.yml guard.yml "FINGERPRINT_GUARD_SALT__0123456789abcdef0123456789abcdef0123456789"
+          cp guard.yml rolia.yml
+          rm -f input exitcode; mkfifo input
+          (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > guard.log 2>&1; echo $? > exitcode) &   # Rolia - set +e: an abort here is the expected outcome
+          exec 3>input
+          for i in $(seq 1 60); do grep -q 'Done (' guard.log 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
+          if grep -q 'Done (' guard.log 2>/dev/null; then echo "stop" >&3 || true; fi
+          # wait_exit_any, not wait_exit: a non-zero exit is the point. Only a HANG is a failure.
+          wait_exit_any guard guard.log
+          exec 3>&- 2>/dev/null || true
+          echo "=== what the server said about the swapped secret ==="
+          grep -iE 'rolia:' guard.log | tail -25 || true
+          STARTED=no; if grep -q 'Done (' guard.log 2>/dev/null; then STARTED=yes; fi
+          WARNED=no;  if grep -qiE 'rolia.*(fingerprint|does not match|mismatch|different (salt|secret))' guard.log; then WARNED=yes; fi
+          echo "started=$STARTED warned=$WARNED"
+          if [ "$STARTED" = no ]; then
+            echo "GUARD OK: the server refused to start on a world whose secret no longer matches."
+          elif [ "$WARNED" = yes ]; then
+            echo "GUARD OK (warn-only): the server started but logged the fingerprint mismatch."
+          else
+            echo "FAIL: the salt was swapped under an existing world and the server started"
+            echo "      normally without a word. Every chunk generated from now on would use a"
+            echo "      different secret than the chunks already on disk, and the seam is permanent."
+            echo "      Build 40 contract: store a fingerprint of the secret in level.dat and, on"
+            echo "      mismatch, refuse to start (or at minimum log a Rolia line naming it)."
+            tail -60 guard.log
+            exit 1
+          fi
 
       - name: DAB enabled smoke
         timeout-minutes: 30
@@ -450,6 +1380,17 @@ jobs:
           echo "B secure seed fingerprint: $FPB"
           [ -n "$FPA" ] && [ -n "$FPB" ] || { echo "FAIL: could not extract the secure seed fingerprints"; exit 1; }
           [ "$FPA" != "$FPB" ] || { echo "FAIL: two fresh servers derived the SAME secure seed (fp=$FPA)"; exit 1; }
+          # Rolia - build 40 ships DAB ENABLED BY DEFAULT. These two runs deleted rolia.yml before
+          # starting, so whatever they report is the shipped default and nothing else. The "DAB
+          # enabled smoke" step only ever proved that an explicit `enabled: true` is honoured.
+          for t in a b; do
+            grep -qE 'secure seed ACTIVE fp=[0-9a-f]{16}; DAB ON' "auto_$t.log" || {
+              echo "FAIL: DAB is not ON by default - build 40 ships the performance defaults enabled."
+              grep -i 'config loaded' "auto_$t.log" | head || true
+              exit 1
+            }
+          done
+          echo "DEFAULTS OK: a server started with no rolia.yml at all comes up with DAB ON"
           echo "AUTO-RANDOM OK: fresh servers get DIFFERENT 1024-bit feature seeds and DIFFERENT secure seed fingerprints"
 
       - name: Publish result to ci-output branch
@@ -476,6 +1417,13 @@ jobs:
           cp testrun/det_*.log /tmp/out/ 2>/dev/null || true
           cp testrun/dab.log /tmp/out/ 2>/dev/null || true
           cp testrun/auto_*.log /tmp/out/ 2>/dev/null || true
+          # Rolia - build 40 artifacts: the terrain/biome runs, the fingerprint-guard run and the
+          # signature files, so a terrain assertion can be re-checked offline with
+          #   python3 terrain_sig.py compare sig_w1.json sig_w2.json
+          cp testrun/terrain/terr_*.log /tmp/out/ 2>/dev/null || true
+          cp testrun/terrain/cmp*.env   /tmp/out/ 2>/dev/null || true
+          cp testrun/terrain/guard.log  /tmp/out/ 2>/dev/null || true
+          for f in testrun/terrain/sig_*.json; do [ -f "$f" ] && gzip -c "$f" > "/tmp/out/$(basename "$f").gz"; done
           cp apply.log build.log test.log /tmp/out/ 2>/dev/null || true
           cd /tmp/out
           for f in *.jar; do [ -f "$f" ] && sha256sum "$f" > "$f.sha256"; done
@@ -502,7 +1450,7 @@ jobs:
         run: |
           set -e -o pipefail
           source /tmp/ci-helpers.sh
-          BUILD_NUMBER=39
+          BUILD_NUMBER=40
           TAG="v26.1.2-build.$BUILD_NUMBER"
           JAR=/tmp/out/rolia-paperclip-26.1.2.jar
           [ -f "$JAR" ] || { echo "FAIL: $JAR not found - the publish step did not produce a release jar"; ls -la /tmp/out; exit 1; }
@@ -521,21 +1469,39 @@ jobs:
             jar_manifest "$JAR"; exit 1; }
           SHA=$(sha256sum "$JAR" | awk '{print $1}')
           cat > /tmp/relnotes.md << NOTES
-          ## Rolia 26.1.2
+          ## Rolia 26.1.2 (build $BUILD_NUMBER)
 
-          **Rolia** — высокопроизводительное ядро Minecraft на базе Canvas с полной поддержкой 1024-битного сида.
+          **Rolia** — высокопроизводительное ядро Minecraft на базе Canvas (Paper + Folia) с секретным 1024-битным сидом генерации.
 
-          ### Особенности
-          - Вся производительность Canvas: региональная многопоточность (Folia), оптимизации тиков, чанков и сущностей.
-          - **1024-битный защищённый сид (всегда включён)**: структуры, данжи, руды-фичи, жеоды и слизневые чанки генерируются от секретного 1024-битного сида — подбор по миру практически невозможен. Рельеф и биомы — от обычного level-seed (мир воспроизводим). На каждом новом сервере сид генерируется свой, случайный.
-          - Секретная соль в \`rolia.yml\` (права 0600) — мастер-ключ защиты. Единый конфиг rolia.yml; опциональный DAB (троттлинг ИИ дальних мобов, по умолчанию выключен).
-          - Команда \`/seed\` показывает ванильный сид и *отпечаток* feature-сида (сам секрет больше не печатается).
-          - Параметр \`feature-level-seed\` в \`server.properties\` для задания своего 1024-битного сида.
+          ### Модель защиты: что публично, а что секретно
+
+          Сборка 40 намеренно делит генерацию мира надвое.
+
+          | Источник | Что от него зависит |
+          | --- | --- |
+          | **Публично** — \`level-seed\` из \`server.properties\` | Только **форма рельефа**: continentalness, erosion, ridge, offset, jagged, BlendedNoise и форма островов Энда. |
+          | **Секретно** — 1024-битный сид + соль (64+ символов) из \`rolia.yml\` | Всё остальное: климат биомов (temperature, vegetation — то есть **какой** биом лежит на данном рельефе), пещеры, овраги, аквиферы, рудные жилы, surface rules, структуры, данжи, декорации, лут, слизнёвые чанки. |
+
+          Практический смысл: сообщив свой \`level-seed\`, вы даёте людям возможность увидеть **ландшафт** вашего мира — но не найти на нём структуры, руды, пещеры или данжи. Стойкость даёт соль и 1024-битный сид; рельеф секретным не является и это сделано осознанно.
+
+          ### Что изменилось в сборке 40
+
+          - **Рельеф вынесен в публичную часть.** До 40-й сборки от секрета зависел и он; теперь по \`level-seed\` мир воспроизводим по форме, а всё ценное — нет.
+          - **Секрет живёт только в \`rolia.yml\`** (права 0600). Параметр \`feature-level-seed\` в \`server.properties\` **УДАЛЁН**, в \`level.dat\` секрет больше не пишется.
+          - **Отпечаток в \`level.dat\`.** Хранится только односторонний отпечаток секрета: если запустить мир не с тем \`rolia.yml\`, сервер это увидит, а не сгенерирует молча шов на границе исследованного.
+          - **Хеширование — BLAKE2b в keyed-режиме RFC 7693** (настоящий MAC) вместо самодельного H(K xor M).
+          - **Производительность включена по умолчанию**: DAB (троттлинг ИИ дальних мобов), региональный планировщик Canvas AFFINITY, сетевые фильтры пакетов.
+          - Починены унаследованные от Canvas баги: полностью сломанное накопление снега, дистанция спавна мобов, честность spawn-чанков, кросс-региональная защита Folia.
+
+          ### Обновление со сборки 39
+
+          Уберите \`feature-level-seed\` из \`server.properties\` — он больше не читается. Ваш 1024-битный сид должен лежать в \`rolia.yml\` рядом с солью; **сохраните этот файл вместе с миром**. Рельеф существующего мира при переходе на 40 изменится, поэтому сборка 40 предназначена для нового мира.
 
           ### Запуск
+
           Требуется Java 25+.
           \`\`\`
-          java -Xmx4G -jar rolia-paperclip-26.1.2.jar --nogui
+          java -Xmx4G --add-modules=jdk.incubator.vector --sun-misc-unsafe-memory-access=allow -jar rolia-paperclip-26.1.2.jar --nogui
           \`\`\`
 
           ### Контрольная сумма

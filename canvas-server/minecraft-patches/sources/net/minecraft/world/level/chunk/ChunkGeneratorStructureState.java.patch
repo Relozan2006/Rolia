@@ -1,11 +1,19 @@
 --- a/net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java
 +++ b/net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java
-@@ -203,7 +_,7 @@
+@@ -203,7 +_,15 @@
          List<CompletableFuture<ChunkPos>> tasks = new ArrayList<>(count);
          int spread = placement.spread();
          HolderSet<Biome> preferredBiomes = placement.preferredBiomes();
 -        RandomSource random = RandomSource.create();
-+        RandomSource random = new io.rolia.secureseed.WorldgenCryptoRandom(0, 0, io.rolia.secureseed.Globals.Salt.STRONGHOLDS, 0); // Rolia - Feature secure seed
++        // Rolia start - Feature secure seed
++        // The dimension id is a hard-coded 0, not stableDimensionId(...): generateRingPositions runs on the
++        // main thread without setupGlobals, so the ambient-dimension constructor picked up whatever world
++        // happened to be constructed last - adding or removing a world silently moved every stronghold.
++        // A constant is the correct fix rather than a workaround, because ring positions are global to the
++        // server rather than per-dimension, and they are recomputed from scratch on every boot instead of
++        // being persisted, so they must not depend on any ambient or ordering-dependent state.
++        RandomSource random = new io.rolia.secureseed.WorldgenCryptoRandom(0, 0, 0, io.rolia.secureseed.Globals.Salt.STRONGHOLDS, 0);
++        // Rolia end - Feature secure seed
          // Paper start - Add missing structure set seed configs
          if (this.conf.strongholdSeed != null && structureSet.is(net.minecraft.world.level.levelgen.structure.BuiltinStructureSets.STRONGHOLDS)) {
              random.setSeed(this.conf.strongholdSeed);

@@ -9,15 +9,52 @@ import java.math.BigInteger;
 import java.security.SecureRandom;
 import java.util.Optional;
 
+/**
+ * Rolia - the secure world seed.
+ *
+ * <h2>Build 40 model: terrain is PUBLIC, everything else is SECRET</h2>
+ *
+ * <p>Worldgen is deliberately split in two:</p>
+ * <ul>
+ *   <li><b>Public</b>, derived from the ordinary {@code level-seed} in server.properties: the terrain
+ *       SHAPE. Concretely the {@code continentalness}, {@code erosion}, {@code ridge}, {@code offset}
+ *       and {@code jagged} noises, {@code BlendedNoise}, and End-island shape. Anyone who knows the
+ *       level seed can reproduce the landscape.</li>
+ *   <li><b>Secret</b>, derived from the 1024-bit feature seed plus the salt: everything else. Biome
+ *       climate ({@code temperature}/{@code vegetation} - i.e. WHICH biome sits on a given landform),
+ *       caves, ravines, ore veins, aquifers, surface rules, structures, decorations, loot and slime
+ *       chunks.</li>
+ * </ul>
+ *
+ * <p>Terrain shape and biome selection are coupled in 1.18+: the multi-noise biome source reads
+ * continentalness, erosion, depth and ridges, which are the same noises that build the heightmap. So a
+ * player who knows the level seed knows four of the six biome parameters. Temperature and vegetation
+ * stay secret, which is what decides whether a given mountain is snowy or jungle. This is a deliberate,
+ * documented limit, not an oversight.</p>
+ *
+ * <p>The public/secret routing is a <b>whitelist</b>: {@link #isPublicTerrainNoise} names the public
+ * noises and everything else falls to the secret side. That way a Minecraft update that adds a new
+ * noise fails safe - the new noise is secret - rather than silently leaking.</p>
+ */
 public class Globals {
     private static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
     public static final int WORLD_SEED_LONGS = 16;
     public static final int WORLD_SEED_BITS = WORLD_SEED_LONGS * 64;
 
     public static final long[] worldSeed = new long[WORLD_SEED_LONGS];
+
+    /**
+     * Rolia - the dimension domain separator for the CURRENT worldgen thread.
+     *
+     * <p>Set by {@link #setupGlobals} and read once per {@link WorldgenCryptoRandom} construction. It is
+     * only correct on threads that went through {@code ChunkStep.apply} / {@code getGenerator()} - which
+     * covers every worldgen path. Anything reached from elsewhere (the Bukkit API, {@code /summon}
+     * spawn checks, stronghold ring generation) must pass its dimension EXPLICITLY through the
+     * five-argument {@link WorldgenCryptoRandom} constructor; relying on the ambient value there gave
+     * wrong and unstable answers before build 40.</p>
+     */
     public static final ThreadLocal<Integer> dimension = ThreadLocal.withInitial(() -> 0);
 
-    // Rolia start - avoid linear scan + allocations on the hot path (called from getGenerator()/ChunkStep)
     private static volatile boolean seedInitialized = false;
     private static final java.util.concurrent.ConcurrentHashMap<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>, Integer> DIMENSION_ID_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -25,15 +62,21 @@ public class Globals {
         if (!seedInitialized) {
             synchronized (Globals.class) { // Rolia - publish the shared world seed exactly once, safely
                 if (!seedInitialized) {
-                    long[] seed = normalizeLength(world.getServer().getWorldGenSettings().options().featureSeed());
+                    long[] seed = normalizeLength(RoliaConfig.featureSeed());
                     System.arraycopy(seed, 0, worldSeed, 0, WORLD_SEED_LONGS);
-                    seedInitialized = true; // Rolia - volatile write; publishes the array contents written above
-                    // Rolia - the one authoritative startup line. Emitted at the point of publication and
-                    // derived from real state (fingerprint of seed+salt), so it cannot report "active" for
-                    // a seed that is not. The CI gate asserts on the fingerprint, not on a fixed string.
+                    seedInitialized = true; // Rolia - volatile write; publishes the array contents above
+                    // Rolia - the one authoritative startup line, emitted at the point of publication and
+                    // derived from real state, so it cannot report "active" for a seed that is not.
                     LOGGER.info("Rolia: config loaded (secure seed {}; DAB {}).",
                         isActive() ? "ACTIVE fp=" + seedFingerprint() : "INACTIVE",
                         RoliaConfig.dabEnabled() ? "ON" : "off");
+                    // Rolia - CI asserts this against hashlib.blake2b; see Hashing#selfTestHex.
+                    LOGGER.info("Rolia: blake2b-selftest {}", Hashing.selfTestHex());
+                    LOGGER.info("Rolia: slime-selftest {}", slimeSelfTestHex());
+                    // Rolia - refuse to keep generating into a world that was made with a different
+                    // secret. Done here, not inside the config loader: computing a fingerprint needs
+                    // the salt, and asking the loader for it from inside itself would re-enter it.
+                    RoliaConfig.verifyWorldFingerprint(seedFingerprint());
                 }
             }
         }
@@ -45,37 +88,38 @@ public class Globals {
      *
      * <p>This used to be the dimension's ordinal POSITION in {@code levelKeys()}. That position is not
      * stable: {@code unloadWorld} + {@code createWorld} re-inserts a world at the end and shifts every
-     * later world down by one, and changing world creation order (bukkit.yml, a plugin load-order
-     * change, a Multiverse edit) does the same. Every shifted world would then generate NEW chunks from
-     * a different RNG stream than the chunks already on disk - hard seams, doubled structures, ore and
-     * decoration discontinuities at the load frontier, with no error and no way back. The old code also
-     * had a race: two worlds registering concurrently both read {@code levelKeys().size()} and got
-     * IDENTICAL separators, i.e. byte-identical worldgen randomness in two different dimensions.</p>
-     *
-     * <p>The identifier never moves, so the separator never moves. It is hashed through the salt-keyed
-     * BLAKE2b so it is also not guessable, and cached because it is read on the worldgen path.</p>
+     * later world down by one, so those worlds would then generate NEW chunks from a different RNG
+     * stream than the chunks already on disk - seams, doubled structures, ore discontinuities, with no
+     * error. It also raced: two worlds registering concurrently both read {@code levelKeys().size()} and
+     * got IDENTICAL separators. The identifier never moves, so the separator never moves.</p>
      */
     public static int stableDimensionId(net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> key) {
         Integer cached = DIMENSION_ID_CACHE.get(key);
         if (cached != null) {
             return cached;
         }
-        byte[] idBytes = key.identifier().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        long[] in = new long[8];
-        for (int i = 0; i < Math.min(idBytes.length, 64); i++) {
-            in[i / 8] |= ((long) (idBytes[i] & 0xFF)) << ((i % 8) * 8);
-        }
-        int id = (int) Hashing.hashWorldSeed(in)[0];
+        // Rolia - hash the FULL identifier. The old version packed only the first 64 bytes, so two
+        // worlds whose ids agreed on a 64-byte prefix shared a separator - the very collision this
+        // method exists to prevent.
+        final byte[] idBytes = key.identifier().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        final int id = (int) Hashing.mac(null, idBytes)[0];
         DIMENSION_ID_CACHE.put(key, id);
         return id;
     }
 
+    /** Rolia - convenience for call sites that hold a level and must not rely on the ambient value. */
+    public static int stableDimensionId(final ServerLevel level) {
+        return stableDimensionId(level.dimension());
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Publication
+    // ---------------------------------------------------------------------------------------------
+
     /**
-     * Rolia - a volatile read of the publication flag. Callers that touch {@link #worldSeed} without
-     * having gone through {@link #setupGlobals} must call this first: reading the volatile {@code true}
-     * establishes the happens-before edge to the array writes inside the synchronized block above.
-     * Without it a worldgen thread may legally observe a partially written (or all-zero) seed on
-     * weakly-ordered hardware (ARM/Graviton), which would silently generate chunks off the wrong seed.
+     * Rolia - a volatile read of the publication flag, establishing the happens-before edge to the
+     * array writes inside the synchronized block above. Without it a worldgen thread may legally observe
+     * a partially written (or all-zero) seed on weakly-ordered hardware (ARM/Graviton).
      */
     public static boolean seedPublished() {
         return seedInitialized;
@@ -83,15 +127,12 @@ public class Globals {
 
     /**
      * Rolia - the correct way to read the shared seed from a thread that did not itself call
-     * {@link #setupGlobals}. The branch below consumes the volatile {@code seedInitialized} read, so
-     * it cannot be optimised away, and that read is what orders the array writes in setupGlobals
-     * before this thread's copy of them.
+     * {@link #setupGlobals}. The branch consumes the volatile read, so it cannot be optimised away.
      */
     public static long[] publishedWorldSeed() {
         if (seedInitialized) {
             return worldSeed; // published - the volatile read above orders the writes before this point
         }
-        // Not published yet (very early boot); the array is all-zero by definition, nothing to order.
         return worldSeed;
     }
 
@@ -109,20 +150,20 @@ public class Globals {
     }
 
     /**
-     * Rolia - a 16-hex-char fingerprint of the ACTIVE secret (seed + salt), safe to print.
-     * It is the truncated BLAKE2b of the salted seed, so it reveals nothing about either input but
-     * differs for every distinct (seed, salt) pair. This is what the startup line and the CI assertion
-     * use, so that check depends on real state instead of a hardcoded literal.
+     * Rolia - a 16-hex-char fingerprint of the active secret, safe to print.
+     *
+     * <p>Domain-separated from the RNG key (see {@link Hashing#fingerprint}). Until build 40 this
+     * returned word 0 of the LIVE key, which published 64 key bits into every log and gave an attacker
+     * a one-hash offline oracle for brute-forcing the salt.</p>
      */
     public static String seedFingerprint() {
         if (!isActive()) {
             return "0000000000000000";
         }
-        long[] h = Hashing.hashWorldSeed(worldSeed);
-        return String.format("%016x", h[0]);
+        return String.format("%016x", Hashing.fingerprint(worldSeed));
     }
 
-    /** Rolia - pad/truncate a stored feature seed to exactly WORLD_SEED_LONGS so a malformed level.dat cannot throw. */
+    /** Rolia - pad/truncate a stored feature seed to exactly WORLD_SEED_LONGS so a malformed value cannot throw. */
     public static long[] normalizeLength(long[] seed) {
         if (seed != null && seed.length == WORLD_SEED_LONGS) {
             return seed;
@@ -134,63 +175,80 @@ public class Globals {
         return out;
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Public / secret worldgen routing (build 40)
+    // ---------------------------------------------------------------------------------------------
+
     /**
-     * Derives a salt-protected 64-bit seed for vanilla systems that would otherwise
-     * leak the raw level seed (loot random sequences, end spikes, ...).
-     * Deterministic per (levelSeed, domain, salt).
+     * Rolia - the noises that stay on the PUBLIC level seed because they define terrain SHAPE.
+     *
+     * <p>Deliberately a whitelist: anything not named here - including any noise a future Minecraft
+     * version introduces - is routed to the secret. Failing safe matters more than failing convenient.</p>
+     *
+     * <p>Note {@code temperature} and {@code vegetation} are NOT here: they select which biome sits on a
+     * landform, which is exactly the thing we want hidden. They do not feed the overworld heightmap.</p>
+     */
+    public static boolean isPublicTerrainNoise(final net.minecraft.resources.ResourceKey<?> noise) {
+        final String path = noise.identifier().getPath();
+        return switch (path) {
+            case "continentalness", "continentalness_large",
+                 "erosion", "erosion_large",
+                 "ridge", "offset", "jagged" -> true;
+            default -> false;
+        };
+    }
+
+    /** Rolia - the same whitelist for the named positional factories (BlendedNoise uses "terrain"). */
+    public static boolean isPublicTerrainFactory(final net.minecraft.resources.Identifier name) {
+        return "terrain".equals(name.getPath());
+    }
+
+    /**
+     * Rolia - the root positional factory for every SECRET worldgen system.
+     *
+     * <p>Seeded with 128 bits derived from the 1024-bit secret through the keyed MAC. Vanilla itself
+     * uses a 128-bit Xoroshiro positional factory, so this matches the engine's own strength while
+     * being keyed by material an attacker does not have. This replaces build 39's arrangement, where
+     * terrain security funnelled through a single 64-bit long and two vanilla code paths truncated it
+     * to 48 bits - a routinely-executed seed-cracking workload.</p>
+     */
+    public static net.minecraft.world.level.levelgen.PositionalRandomFactory secretPositionalFactory(final String domain) {
+        final long[] k = Hashing.derive(domain, publishedWorldSeed(), 0L);
+        return new net.minecraft.world.level.levelgen.XoroshiroRandomSource(k[0], k[1]).forkPositional();
+    }
+
+    /**
+     * Rolia - a full-width secret RandomSource for the two legacy Nether climate noises.
+     *
+     * <p>Vanilla builds those from {@code new LegacyRandomSource(seed + offset)}, which keeps 48 bits of
+     * state. Nether biome climate is a SECRET system in the build 40 model, so it must not go through a
+     * 48-bit funnel derived from anything public.</p>
+     */
+    public static net.minecraft.util.RandomSource secretClimateSource(final long offset) {
+        final long[] k = Hashing.derive("climate-legacy", publishedWorldSeed(), offset);
+        return new net.minecraft.world.level.levelgen.XoroshiroRandomSource(k[0], k[1]);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Seed derivation for vanilla systems that would otherwise leak the raw level seed
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Rolia - a salt-protected 64-bit seed for vanilla systems that take a plain {@code long}
+     * (loot random sequences, end spikes). Deterministic per (worldSeed, domain, salt).
      */
     public static long transformSeed(long levelSeed, long domain) {
-        long[] expanded = Hashing.expandLevelSeedTo1024Bits(levelSeed ^ domain);
-        return expanded[(int) (domain & 7)];
+        return Hashing.derive("legacy-transform", publishedWorldSeed(), levelSeed ^ domain)[0];
     }
 
-    // Rolia - Seed V2: derive the TERRAIN seed from the secret (salt-keyed), so terrain/biomes/caves/
-    // aquifers/ore-noise are no longer reproducible from the public level seed - only with the secret salt.
-    // Applied once at the root of RandomState, so it cascades to every terrain sub-system (aquifer/ore/
-    // climate/surface all fork from this root). Part of the always-on 1024-bit protection; not disableable.
-    public static final long TERRAIN_DOMAIN = 0x5445525241494E00L; // "TERRAIN\0"
-    private static volatile boolean warnedTerrainBeforePublish = false;
-
-    /**
-     * Rolia - the terrain root seed, keyed by BOTH the secret salt and the full 1024-bit feature seed.
-     *
-     * <p>Previously this was {@code transformSeed(levelSeed, TERRAIN_DOMAIN)}, which mixed only the
-     * public level seed and the salt - so terrain security rested on a single derived 64-bit value that
-     * standard seed-cracking tooling attacks the usual 48-bit-lift-then-verify way. Recovering it never
-     * revealed the salt (BLAKE2b is one way), but it did let an attacker predict terrain elsewhere.
-     * Folding the 1024-bit secret in as well gives terrain the same strength the structures already had.</p>
-     *
-     * <p>Ordering: {@code setupGlobals} runs in the ServerLevel constructor BEFORE
-     * {@code new ServerChunkCache(...)} builds the RandomState, so the seed is always published by the
-     * time this is first called. If that ever stops being true the terrain would silently key on an
-     * all-zero seed, so we log at ERROR - which the CI log scanner turns into a red build.</p>
-     */
-    public static long secureTerrainSeed(long levelSeed) {
-        if (!seedInitialized && !warnedTerrainBeforePublish) {
-            warnedTerrainBeforePublish = true;
-            LOGGER.error("Rolia: secureTerrainSeed() was called before the 1024-bit seed was published - "
-                + "terrain would be keyed on an all-zero seed. This is a load-order regression; please report it.");
-        }
-        final long[] keyed = Hashing.hashWorldSeed(worldSeed);                                  // BLAKE2b(seed ^ salt)
-        final long[] expanded = Hashing.expandLevelSeedTo1024Bits(levelSeed ^ TERRAIN_DOMAIN);  // salt-keyed level seed
-        long out = 0x9E3779B97F4A7C15L;
-        for (int i = 0; i < keyed.length; i++) {
-            out ^= keyed[i] ^ expanded[i % expanded.length];
-            out = Long.rotateLeft(out, 27) * 0xBF58476D1CE4E5B9L;
-        }
-        return out;
-    }
-    // Rolia end
-
-    // Rolia - guarantee a real random 1024-bit feature seed: null/empty/all-zero means "uninitialised"
-    // (e.g. a world created without a feature seed), so generate a fresh cryptographically random one.
+    // Rolia - guarantee a real random 1024-bit feature seed: null/empty/all-zero means "uninitialised".
     public static long[] ensureRandomSeed(long[] seed) {
         if (seed == null || seed.length == 0) {
             return createRandomWorldSeed();
         }
         for (long v : seed) {
             if (v != 0L) {
-                return normalizeLength(seed); // Rolia - a short/long stored seed must not reach System.arraycopy
+                return normalizeLength(seed);
             }
         }
         return createRandomWorldSeed();
@@ -205,27 +263,30 @@ public class Globals {
         return seed;
     }
 
-    // Rolia - derive a STABLE, salt-keyed 1024-bit feature seed from a world's level seed.
-    // Used only for worlds that carry no stored feature seed yet (a world imported from vanilla/Paper,
-    // or an in-place upgrade): it keeps structure/ore placement identical across restarts even before the
-    // first save, while staying un-computable without the secret salt (both halves are keyed by the salt
-    // hash inside expandLevelSeedTo1024Bits). Fresh Rolia worlds never reach this path - they always get a
-    // fresh random feature seed from server.properties (feature-level-seed) instead.
+    /**
+     * Rolia - derive a stable 1024-bit feature seed from a world's level seed, for a world that carries
+     * no stored secret yet (an import from vanilla/Paper). Keyed by the salt, so it is still not
+     * computable without it - but its real entropy is the salt's, not 1024 bits. Fresh Rolia worlds
+     * never take this path; they get a fresh random seed written into rolia.yml.
+     */
     public static long[] deriveFeatureSeedFromLevel(long levelSeed) {
         long[] seed = new long[WORLD_SEED_LONGS];
-        long[] lo = Hashing.expandLevelSeedTo1024Bits(levelSeed);
-        long[] hi = Hashing.expandLevelSeedTo1024Bits(levelSeed ^ 0x9E3779B97F4A7C15L);
+        long[] lo = Hashing.derive("import-lo", new long[WORLD_SEED_LONGS], levelSeed);
+        long[] hi = Hashing.derive("import-hi", new long[WORLD_SEED_LONGS], levelSeed);
         System.arraycopy(lo, 0, seed, 0, 8);
         System.arraycopy(hi, 0, seed, 8, 8);
         return seed;
     }
 
     public static Optional<long[]> parseSeed(String seedStr) {
-        if (seedStr.isEmpty()) return Optional.empty();
+        if (seedStr == null || seedStr.isEmpty()) return Optional.empty();
+        // Rolia - bound the input: an operator-supplied or file-supplied value of unbounded length
+        // would otherwise stall or OOM startup inside BigInteger.
+        if (seedStr.length() > 400) return Optional.empty();
 
         try {
             long[] seed = new long[WORLD_SEED_LONGS];
-            BigInteger seedBigInt = new BigInteger(seedStr);
+            BigInteger seedBigInt = new BigInteger(seedStr.trim());
             if (seedBigInt.signum() < 0) {
                 seedBigInt = seedBigInt.and(BigInteger.ONE.shiftLeft(WORLD_SEED_BITS).subtract(BigInteger.ONE));
             }
@@ -249,18 +310,32 @@ public class Globals {
             }
             seedBigInt = seedBigInt.shiftLeft(64).add(val);
         }
-
         return seedBigInt.toString();
     }
 
     public static boolean isSecureSeedEnabled() {
-        // Rolia - the secure seed is ALWAYS on and cannot be disabled (hard-forced).
+        // Rolia - the secure seed is ALWAYS on and cannot be disabled.
         return true;
     }
 
-
     public static String getSecureSeedSalt() {
         return RoliaConfig.salt();
+    }
+
+    /**
+     * Rolia - digest over isSlimeChunk for a fixed 32x32 chunk window, logged once at startup.
+     * CI asserts it is identical across two boots of the same world (catching any regression to an
+     * ambient/thread-dependent dimension separator) and different between two different secrets.
+     */
+    public static String slimeSelfTestHex() {
+        long acc = 0x9E3779B97F4A7C15L;
+        for (int x = -16; x < 16; x++) {
+            for (int z = -16; z < 16; z++) {
+                acc = Long.rotateLeft(acc, 1) ^ (WorldgenCryptoRandom.seedSlimeChunk(0, x, z).nextInt(10) == 0 ? 0x5BD1E995L : 0x27D4EB2FL);
+                acc *= 0xBF58476D1CE4E5B9L;
+            }
+        }
+        return String.format("%016x", acc);
     }
 
     /**
@@ -268,10 +343,9 @@ public class Globals {
      *
      * <p><b>DO NOT REORDER, RENUMBER OR DELETE ANY CONSTANT.</b> The {@code id} below is mixed into
      * every generated chunk's random stream, so changing one silently reshuffles every structure,
-     * decoration and slime chunk in every existing world - with no error and no migration path.
-     * The ids were originally {@code ordinal()}; they are now explicit precisely so that a future
-     * reordering (or a tidy-up of the currently-unused constants) cannot corrupt live worlds.
-     * New domains must be appended with the next free id.</p>
+     * decoration and slime chunk in every existing world - with no error and no migration path. The ids
+     * were originally {@code ordinal()}; they are explicit precisely so a future reordering (or a
+     * tidy-up of the currently-unused constants) cannot corrupt live worlds. Append new domains only.</p>
      */
     public enum Salt {
         UNDEFINED(0),
@@ -293,8 +367,14 @@ public class Globals {
         POPULATION(15),
         DECORATION(16),
         SLIME_CHUNK(17),
-        // Rolia - build 38: cave/ravine carvers, previously left on the public 64-bit level seed.
-        CARVER(18);
+        // Rolia - build 38 added this for cave/ravine carvers but setLargeFeatureSeed overwrote the
+        // domain on the next line, so it was dead. Build 40 makes it real: carvers keep their own
+        // domain, so cave shape - which players can simply look at - no longer shares a keystream with
+        // structure placement.
+        CARVER(18),
+        // Rolia - build 40: the Bukkit BlockPopulator random, previously sharing UNDEFINED with
+        // structure-set placement (a datapack set with salt 0 collided exactly).
+        BUKKIT_POPULATOR(19);
 
         public final int id;
 

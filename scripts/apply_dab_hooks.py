@@ -97,28 +97,82 @@ patch(VILLAGER,
 #    all until the first add. So it added a 25-30 slot Object[] allocation to every dirty sync of every
 #    tracked entity to avoid a regrow that essentially never happened. Net GC pressure, no win.
 
-# 5) Seed V2 - terrain under the secret: seed RandomState's root random from the secret (cascades to all terrain)
+# 5) BUILD 40 SEED MODEL: terrain is PUBLIC, everything else is SECRET.
+#
+#    Build 36-39 put the WHOLE of RandomState under the secret ("Seed V2"). That was worse than it
+#    sounded: the secret was funnelled into a single 64-bit long, and two vanilla paths that consume it
+#    - LegacyRandomSource for the legacy Nether biome noises, and EndIslandDensityFunction - keep only
+#    48 bits of state. 48 bits is a routine seed-cracking workload, so the entire terrain layer was
+#    recoverable in GPU-hours from observable landscape.
+#
+#    Build 40 splits it instead, which is both stronger and what the project actually wants:
+#      PUBLIC (from the ordinary level-seed): terrain SHAPE - continentalness, erosion, ridge, offset,
+#        jagged, BlendedNoise, End-island shape. Reproducible by anyone who knows the level seed.
+#      SECRET (from the 1024-bit seed + salt, via a 128-bit Xoroshiro positional factory): everything
+#        else - biome climate (temperature/vegetation, i.e. WHICH biome sits on a landform), caves, ore
+#        veins, aquifers, surface rules.
+#
+#    The routing is a WHITELIST in Globals.isPublicTerrainNoise: anything not explicitly named public -
+#    including any noise a future Minecraft version adds - falls to the secret side. Failing safe beats
+#    failing convenient. Note the constructor's `seed` parameter is deliberately left alone, so the
+#    public root and the End-island shape stay exactly vanilla.
 RANDOMSTATE = "canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/RandomState.java"
-# seed is captured by the inner NoiseWiringHelper class, so it must stay final; use a new final local.
 patch(RANDOMSTATE,
-      "    private RandomState(final NoiseGeneratorSettings settings, final HolderGetter<NormalNoise.NoiseParameters> noises, final long seed) {\n        this.random = settings.getRandomSource().newInstance(seed).forkPositional();\n",
-      "    private RandomState(final NoiseGeneratorSettings settings, final HolderGetter<NormalNoise.NoiseParameters> noises, final long seed) {\n        final long secureSeed = io.rolia.secureseed.Globals.secureTerrainSeed(seed); // Rolia - Seed V2: terrain under the secret\n        this.random = settings.getRandomSource().newInstance(secureSeed).forkPositional();\n",
-      "RandomState terrain-under-secret (Seed V2 root)")
+      "    private final PositionalRandomFactory random;\n",
+      "    private final PositionalRandomFactory random;\n"
+      "    private final PositionalRandomFactory roliaSecretRandom; // Rolia - root of every SECRET worldgen system\n",
+      "RandomState secret-root field",
+      hint="PositionalRandomFactory", marker="roliaSecretRandom")
 patch(RANDOMSTATE,
-      "                return new LegacyRandomSource(seed + seedOffset);\n",
-      "                return new LegacyRandomSource(secureSeed + seedOffset);\n",
-      "RandomState legacy-nether noise under secret")
+      "        this.random = settings.getRandomSource().newInstance(seed).forkPositional();\n"
+      "        this.noises = noises;\n"
+      "        this.aquiferRandom = this.random.fromHashOf(Identifier.withDefaultNamespace(\"aquifer\")).forkPositional();\n"
+      "        this.oreRandom = this.random.fromHashOf(Identifier.withDefaultNamespace(\"ore\")).forkPositional();\n",
+      "        this.random = settings.getRandomSource().newInstance(seed).forkPositional(); // Rolia - PUBLIC: terrain shape stays on the level seed\n"
+      "        this.roliaSecretRandom = io.rolia.secureseed.Globals.secretPositionalFactory(\"worldgen-root\"); // Rolia\n"
+      "        this.noises = noises;\n"
+      "        this.aquiferRandom = this.roliaSecretRandom.fromHashOf(Identifier.withDefaultNamespace(\"aquifer\")).forkPositional(); // Rolia - SECRET\n"
+      "        this.oreRandom = this.roliaSecretRandom.fromHashOf(Identifier.withDefaultNamespace(\"ore\")).forkPositional(); // Rolia - SECRET\n",
+      "RandomState aquifer+ore under the secret",
+      hint="aquiferRandom")
 patch(RANDOMSTATE,
-      "new DensityFunctions.EndIslandDensityFunction(seed)",
-      "new DensityFunctions.EndIslandDensityFunction(secureSeed)",
-      "RandomState End-island shape under secret")
+      "        this.surfaceSystem = new SurfaceSystem(this, settings.defaultBlock(), settings.seaLevel(), this.random);\n",
+      "        this.surfaceSystem = new SurfaceSystem(this, settings.defaultBlock(), settings.seaLevel(), this.roliaSecretRandom); // Rolia - SECRET: surface rules\n",
+      "RandomState surface rules under the secret",
+      hint="surfaceSystem")
+patch(RANDOMSTATE,
+      "        return this.noiseIntances.computeIfAbsent(noise, key -> Noises.instantiate(this.noises, this.random, noise));\n",
+      "        // Rolia - route each noise to the public or the secret root. Whitelist: unknown noises are SECRET.\n"
+      "        return this.noiseIntances.computeIfAbsent(noise, key -> Noises.instantiate(this.noises,\n"
+      "            io.rolia.secureseed.Globals.isPublicTerrainNoise(noise) ? this.random : this.roliaSecretRandom, noise));\n",
+      "RandomState per-noise public/secret routing",
+      hint="noiseIntances")
+patch(RANDOMSTATE,
+      "        return this.positionalRandoms.computeIfAbsent(name, key -> this.random.fromHashOf(name).forkPositional());\n",
+      "        // Rolia - same split for named factories; only BlendedNoise's \"terrain\" factory stays public.\n"
+      "        return this.positionalRandoms.computeIfAbsent(name, key ->\n"
+      "            (io.rolia.secureseed.Globals.isPublicTerrainFactory(name) ? this.random : this.roliaSecretRandom).fromHashOf(name).forkPositional());\n",
+      "RandomState named-factory public/secret routing",
+      hint="positionalRandoms")
+# The two legacy Nether climate noises are SECRET, and must not go through LegacyRandomSource's 48-bit
+# state. newLegacyInstance() itself is left alone because useLegacyInit also routes BlendedNoise (which
+# is terrain, and public) through it.
+patch(RANDOMSTATE,
+      "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(this.newLegacyInstance(0L), noiseData.value());\n",
+      "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(io.rolia.secureseed.Globals.secretClimateSource(0L), noiseData.value()); // Rolia - SECRET, full width\n",
+      "RandomState nether temperature climate under the secret",
+      hint="TEMPERATURE_NETHER")
+patch(RANDOMSTATE,
+      "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(this.newLegacyInstance(1L), noiseData.value());\n",
+      "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(io.rolia.secureseed.Globals.secretClimateSource(1L), noiseData.value()); // Rolia - SECRET, full width\n",
+      "RandomState nether vegetation climate under the secret",
+      hint="VEGETATION_NETHER")
 
-# 6) Folia-safety: don't teleport a tamed pet into an UNLOADED chunk (raw getBlockState -> getBlockStateIfLoaded)
-TAMABLE = "canvas-server/src/minecraft/java/net/minecraft/world/entity/TamableAnimal.java"
-patch(TAMABLE,
-      "        BlockState blockStateBelow = this.level().getBlockState(pos.below());\n        if (!this.canFlyToOwner() && blockStateBelow.getBlock() instanceof LeavesBlock) {\n",
-      "        BlockState blockStateBelow = this.level().getBlockStateIfLoaded(pos.below()); // Rolia - Folia-safe\n        if (blockStateBelow == null) return false; // Rolia - do not teleport a pet into an unloaded chunk\n        if (!this.canFlyToOwner() && blockStateBelow.getBlock() instanceof LeavesBlock) {\n",
-      "TamableAnimal.canTeleportTo unloaded-chunk guard")
+# 6) (removed in build 40) TamableAnimal.canTeleportTo unloaded-chunk guard.
+#    It was a no-op. pos.below() is in the same chunk column as pos, and getPathTypeStatic(this, pos) -
+#    one line earlier in the same method - already reads that chunk, so by the time the guarded read ran
+#    the chunk was always loaded and the guard could never fire. The caller maybeTeleportTo already has
+#    Folia's own getChunkIfLoaded(...) == null early-out, which is the check that actually matters.
 
 
 # 8) SECRET SEED: cave/ravine carvers + worldgen mob spawning.

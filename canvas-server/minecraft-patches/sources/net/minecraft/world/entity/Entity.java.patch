@@ -38,18 +38,27 @@
          BlockGetter.forEachBlockIntersectedBetween(
              from,
              to,
-@@ -1774,13 +_,25 @@
+@@ -1774,13 +_,39 @@
                      return false;
                  }
  
--                // Folia start - region threading
--                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(Entity.this.level, blockIntersection, 16)) {
--                    return false;
--                }
--                // Folia end - region threading
++                // Rolia start - restore Folia's cross-region guard (Canvas deleted it)
++                // Canvas argued "if the chunk is loaded, and we are NEXT TO IT, then it should always be
++                // inside the current region". That is false: "loaded" is not "owned by my region thread",
++                // and a region boundary is exactly where a neighbouring chunk is loaded but ticked by
++                // another thread. The lambda below calls state.entityInside(...) (pressure plates,
++                // tripwire, cactus, portals, cauldrons, bubble columns), which MUTATES block and
++                // block-entity state, so without this guard we write into another region's chunk.
++                // Kept ahead of the chunk lookup so it still short-circuits before the expensive path.
++                // Rolia end - restore Folia's cross-region guard
+                 // Folia start - region threading
+                 if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(Entity.this.level, blockIntersection, 16)) {
+                     return false;
+                 }
+                 // Folia end - region threading
 +                // Canvas start - optimize checkInsideBlocks
-+                // remove thread check here, as if the chunk is loaded, and we are NEXT TO IT, then it
-+                // should always be inside the current region
++                // Rolia - per-chunk caching below is kept, it is a correct optimization; only the
++                // Rolia - deleted thread check was restored above
                  iterations.set(iteration);
 -                BlockState state = this.level().getBlockState(blockIntersection);
 +                final int chunkX = blockIntersection.getX() >> 4;

@@ -50,7 +50,10 @@ public class GlobalConfiguration extends Part {
     public static final int WARN = 1;
     public static final int ERROR = 2;
 
-    private static GlobalConfiguration INSTANCE;
+    // Rolia - volatile: /canvas reload reassigns INSTANCE while region threads read it in hot paths.
+    // Rolia - Without it a region thread can publish-read a non-null INSTANCE whose sub-config fields
+    // Rolia - are still null and NPE mid-tick.
+    private static volatile GlobalConfiguration INSTANCE;
     private static volatile ClientV2.BuildStatus BUILD_STATUS = ClientV2.BuildStatus.UNKNOWN; // Rolia - read from region threads, written on reload
     private static volatile boolean ENABLE_FASTER_RANDOM = true; // Rolia - read from region threads, written on reload
 
@@ -329,7 +332,10 @@ public class GlobalConfiguration extends Part {
             option("guardSeverity")
                 .docs(
                     Style.wrap(
-                        "Canvas introduces extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are"
+                        "Canvas introduces extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are.",
+                        // Rolia - default changed from THROW to LOG, see below
+                        "Rolia changed the default from THROW to LOG: Canvas's own docs say THROW can crash the server, and a"
+                            + " misbehaving plugin should not be able to take a production server down. Set it back to THROW when debugging."
                     ).defineEnum(GuardSeverity.class, (severity) -> {
                         return switch (severity) {
                             case LOG -> "Just logs a warning in console, but continues the operation";
@@ -342,7 +348,7 @@ public class GlobalConfiguration extends Part {
 
         public long overloadedLogMillis = 5_000L;
         public float defaultTickRate = 20.0F;
-        public GuardSeverity guardSeverity = GuardSeverity.THROW;
+        public GuardSeverity guardSeverity = GuardSeverity.LOG; // Rolia - was THROW; a misbehaving plugin should not crash a production server
 
         public enum GuardSeverity {
             SILENT,
@@ -505,9 +511,9 @@ public class GlobalConfiguration extends Part {
                 );
         }
 
-        public boolean filterVelocityPacket = false;
-        public boolean filterMovePackets = false;
-        public boolean alternativePlayerListTick = false;
+        public boolean filterVelocityPacket = false; // Rolia - left off: it changes client-side motion smoothing
+        public boolean filterMovePackets = true;     // Rolia - default ON: drops only zero-delta move packets, invisible to players
+        public boolean alternativePlayerListTick = true; // Rolia - default ON: spreads the tab-list ping refresh, matters at 100+ players
         public int playerInfoSendInterval = 600;
         public boolean asyncProtocolSwitch = false;
         public int maximumPacketBytes = 8388608;
@@ -526,7 +532,12 @@ public class GlobalConfiguration extends Part {
                 "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
             );
         option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
-        option("tileEntitySnapshotCreation").docs("Enables creation of tile entity snapshots on retrieving blockstates");
+        // Rolia - default changed from false to true, see docs below
+        option("tileEntitySnapshotCreation").docs(
+            "Enables creation of tile entity snapshots on retrieving blockstates.",
+            "Rolia changed the default from false to true: CraftBukkit's contract is that getOwner() returns a",
+            "snapshot, and disabling this hands plugins a live-backed holder, silently changing public API semantics."
+        );
 
         option("defaultRespawnDimensionKey")
             .docs(
@@ -541,8 +552,8 @@ public class GlobalConfiguration extends Part {
     public boolean restoreVanillaEnderPearlBehavior = false;
     public boolean displayWorldLoadScreenForPortaling = true;
     public boolean displayWorldLoadScreenForTeleporting = true;
-    public boolean cacheMinecraft2BukkitEntityTypeConversion = false;
-    public boolean tileEntitySnapshotCreation = false;
+    public boolean cacheMinecraft2BukkitEntityTypeConversion = true; // Rolia - default ON: a pure memo, no behaviour change
+    public boolean tileEntitySnapshotCreation = true; // Rolia - was false; CraftBukkit's getOwner() contract is a snapshot, not a live-backed holder
     public String defaultRespawnDimensionKey = Level.OVERWORLD.identifier().toString();
 
     public static @NonNull ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {

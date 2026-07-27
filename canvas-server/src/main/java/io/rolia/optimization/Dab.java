@@ -57,6 +57,15 @@ public final class Dab {
             if (!(entity.level() instanceof ServerLevel level)) {
                 return true;
             }
+            // Rolia - NEVER throttle a mob that is in water. FloatGoal lives in goalSelector, and the
+            // DAB gate in Mob.serverAiStep wraps the whole goalSelector block - so a throttled land mob
+            // in water never runs FloatGoal, never calls jumpControl.jump(), and DROWNS. Paper's
+            // goalFloat fallback only covers the !aware path, which returns before this code. This is
+            // the same bug Pufferfish #58 reported and the reason Leaf ships a config for it.
+            // isInWater() is a single boolean field read - cheaper than the memo probe it precedes.
+            if (entity.isInWater()) {
+                return true;
+            }
             // never throttle blacklisted types (e.g. mobs used by farms). The blacklist is resolved
             // once into EntityType objects (see RoliaConfig#dabBlacklisted), so this is a plain
             // hash-set lookup - the old code built a fresh String from the registry key for every

@@ -32,11 +32,23 @@ public final class RoliaConfig {
     private static final String LEGACY_FILE = "rolia-seed.properties";
 
     private static volatile boolean loaded;
+    // Rolia - build 40: once loading has failed we must NOT retry on every getter. The getters sit on
+    // the hottest paths in the server (dabEnabled() per mob per tick from every region thread,
+    // fasterNetwork() per long[] from Netty threads), so re-entering the synchronized loader and
+    // re-reading the file on each call turned "refuse to start" into an exception storm at an arbitrary
+    // later moment, with a global monitor and file I/O per throw. Latch the failure and rethrow cheaply.
+    private static volatile RuntimeException poisoned;
 
     // secure-seed
     private static String salt = "";
+    // Rolia - build 40: the 1024-bit secret lives HERE, in the 0600 rolia.yml, and nowhere else. It used
+    // to be read from server.properties (world-readable, and shown by every hosting panel's file
+    // browser) and persisted into level.dat (so any world download or backup handed over the whole
+    // secret). level.dat now carries only a fingerprint, which proves the world matches the secret
+    // without revealing it.
+    private static long[] featureSeed = null;
     // dab
-    private static boolean dabEnabled = false;
+    private static boolean dabEnabled = true;
     private static int dabStartDistance = 12;
     private static int dabMaxTickInterval = 20;
     private static Set<String> dabBlacklist = Set.of();
@@ -59,6 +71,19 @@ public final class RoliaConfig {
     }
 
     public static String salt() { load(); return salt; }
+
+    /**
+     * Rolia - the 1024-bit secret feature seed, as 16 longs.
+     *
+     * <p>Read from {@code rolia.yml} and generated with {@link java.security.SecureRandom} on first run.
+     * A defensive copy is returned so no caller can mutate the shared secret in place.</p>
+     */
+    public static long[] featureSeed() {
+        load();
+        final long[] s = featureSeed;
+        return s == null ? new long[io.rolia.secureseed.Globals.WORLD_SEED_LONGS] : s.clone();
+    }
+
     public static boolean dabEnabled() { load(); return dabEnabled; }
     public static int dabStartDistance() { load(); return dabStartDistance; }
     public static int dabMaxTickInterval() { load(); return dabMaxTickInterval; }
@@ -67,6 +92,36 @@ public final class RoliaConfig {
     public static boolean lobotomizeWaitUntilTradeLocked() { load(); return lobotomizeWaitUntilTradeLocked; }
     public static int lobotomizeCheckInterval() { load(); return lobotomizeCheckInterval; }
     public static boolean fasterNetwork() { load(); return fasterNetwork; }
+
+    /**
+     * Rolia - parse the stored 1024-bit feature seed. Accepts the decimal form written by
+     * {@code writeConfig} and, defensively, a YAML list of 16 longs. Returns null when absent or
+     * malformed, which makes the caller generate a fresh one.
+     */
+    private static long[] parseFeatureSeed(final Object raw) {
+        if (raw == null) return null;
+        if (raw instanceof List<?> list) {
+            if (list.size() != io.rolia.secureseed.Globals.WORLD_SEED_LONGS) return null;
+            final long[] out = new long[io.rolia.secureseed.Globals.WORLD_SEED_LONGS];
+            for (int i = 0; i < out.length; i++) {
+                final Object v = list.get(i);
+                if (!(v instanceof Number n)) return null;
+                out[i] = n.longValue();
+            }
+            return isAllZero(out) ? null : out;
+        }
+        final String s = String.valueOf(raw).trim();
+        if (s.isEmpty()) return null;
+        final long[] parsed = io.rolia.secureseed.Globals.parseSeed(s).orElse(null);
+        return parsed == null || isAllZero(parsed) ? null : parsed;
+    }
+
+    private static boolean isAllZero(final long[] a) {
+        for (final long v : a) {
+            if (v != 0L) return false;
+        }
+        return true;
+    }
 
     /** Rolia - is this entity type excluded from DAB throttling? Allocation-free; see dabBlacklistTypes. */
     public static boolean dabBlacklisted(EntityType<?> type) {
@@ -123,12 +178,28 @@ public final class RoliaConfig {
     // so that was a real CAS on one shared mark word from every region thread at once.
     private static void load() {
         if (loaded) return;
+        final RuntimeException dead = poisoned;
+        if (dead != null) {
+            // Rolia - already failed once; do not re-read the file and re-throw from a hot path.
+            throw dead;
+        }
         loadSlow();
     }
 
     @SuppressWarnings("unchecked")
     private static synchronized void loadSlow() {
         if (loaded) return;
+        if (poisoned != null) throw poisoned;
+        try {
+            loadOnce();
+        } catch (RuntimeException e) {
+            poisoned = e;
+            throw e;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void loadOnce() {
         File file = new File(FILE_NAME).getAbsoluteFile();
         Map<String, Object> root = null;
         String legacySalt = null;
@@ -192,8 +263,18 @@ public final class RoliaConfig {
         }
         salt = cfgSalt;
 
+        // Rolia - build 40: the 1024-bit feature seed. Stored here and nowhere else.
+        long[] cfgSeed = parseFeatureSeed(secureSeed.get("feature-seed"));
+        if (cfgSeed == null) {
+            LOGGER.info("Rolia: no 1024-bit feature seed found. Generating a new cryptographically secure one...");
+            cfgSeed = io.rolia.secureseed.Globals.createRandomWorldSeed();
+            firstGen = true;
+            warnIfWorldAlreadyExists(file);
+        }
+        featureSeed = cfgSeed;
+
         // dab
-        dabEnabled = bool(dab.get("enabled"), false);
+        dabEnabled = bool(dab.get("enabled"), true);
         dabStartDistance = clamp(intv(dab.get("start-distance"), 12), 1, 256);
         dabMaxTickInterval = clamp(intv(dab.get("max-tick-interval"), 20), 1, 200);
         dabBlacklist = strSet(dab.get("blacklist"));
@@ -239,10 +320,58 @@ public final class RoliaConfig {
     }
 
     /**
+     * Rolia - build 40: tie a world to the secret that generated it.
+     *
+     * <p>{@code level.dat} no longer stores the 1024-bit seed, so a world download cannot leak it. What
+     * it does need is a way to detect that the secret has CHANGED - because if it has, every newly
+     * generated chunk silently stops matching the ones on disk, and that is unrecoverable. So we drop a
+     * fingerprint file beside {@code level.dat} and compare it on every boot.</p>
+     *
+     * <p>Must be called AFTER loading completes: computing a fingerprint needs the salt, and asking for
+     * the salt from inside the loader would re-enter it.</p>
+     */
+    public static void verifyWorldFingerprint(final String fingerprint) {
+        try {
+            final File dir = new File(FILE_NAME).getAbsoluteFile().getParentFile();
+            if (dir == null) return;
+            final File[] candidates = dir.listFiles();
+            if (candidates == null) return;
+            for (final File world : candidates) {
+                if (!world.isDirectory() || !new File(world, "level.dat").isFile()) continue;
+                final File fp = new File(world, "rolia-seed.fp");
+                if (!fp.isFile()) {
+                    java.nio.file.Files.writeString(fp.toPath(), fingerprint + System.lineSeparator(),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                    continue;
+                }
+                final String stored = java.nio.file.Files.readString(fp.toPath(),
+                    java.nio.charset.StandardCharsets.UTF_8).trim();
+                if (!stored.equals(fingerprint)) {
+                    LOGGER.error("Rolia: ############################################################");
+                    LOGGER.error("Rolia: SECRET MISMATCH - the world '{}' was generated with a different secret.", world.getName());
+                    LOGGER.error("Rolia: stored fingerprint {} does not match the active one {}.", stored, fingerprint);
+                    LOGGER.error("Rolia: Every newly generated chunk would have different caves, ores, biomes and");
+                    LOGGER.error("Rolia: structures than the chunks already on disk, with a hard seam between them,");
+                    LOGGER.error("Rolia: and it cannot be repaired afterwards.");
+                    LOGGER.error("Rolia: Restore the original {} from backup, or delete {} to accept the change.",
+                        FILE_NAME, fp.getName());
+                    LOGGER.error("Rolia: ############################################################");
+                    throw new IllegalStateException("Rolia: world '" + world.getName()
+                        + "' fingerprint mismatch - refusing to start");
+                }
+            }
+        } catch (final IllegalStateException e) {
+            throw e;
+        } catch (final Exception e) {
+            LOGGER.warn("Rolia: could not verify the world secret fingerprint", e);
+        }
+    }
+
+    /**
      * Rolia - generating a brand-new salt is correct on a fresh server and catastrophic on an existing
-     * one: under Seed V2 the salt keys terrain, biomes, caves, aquifers and ore noise, so newly loaded
-     * chunks stop matching the ones already on disk. If a world folder is already present, say so loudly
-     * instead of proceeding in silence.
+     * one: the salt keys caves, ores, biome climate and structures, so newly loaded chunks stop matching
+     * the ones already on disk. If a world folder is already present, say so loudly rather than
+     * proceeding in silence.
      */
     private static void warnIfWorldAlreadyExists(File configFile) {
         try {
@@ -279,6 +408,14 @@ public final class RoliaConfig {
             + "  # Always on, cannot be disabled. Nothing's location can be computed from the public level seed.\n"
             + "  # 64+ char secret salt, auto-generated on first run. The master key of the 1024-bit seed protection.\n"
             + "  salt: \"" + salt + "\"\n"
+            + "\n"
+            + "  # The 1024-bit feature seed, as a decimal integer. Auto-generated on first run.\n"
+            + "  # Build 40: this lives HERE and nowhere else. It is no longer read from server.properties\n"
+            + "  # (world-readable, and shown by every hosting panel) and no longer written into level.dat\n"
+            + "  # (so a world download or backup no longer hands over the secret). level.dat keeps only a\n"
+            + "  # fingerprint, which proves a world matches this secret without revealing it.\n"
+            + "  # BACK THIS FILE UP. Lose it and the structures/ores/caves of an existing world are gone.\n"
+            + "  feature-seed: \"" + io.rolia.secureseed.Globals.seedToString(featureSeed) + "\"\n"
             + "\n"
             + "# Optimizations - Folia-safe performance toggles.\n"
             + "# NOTE: dab is OFF by default; villager-lobotomize and faster-network are ON by default.\n"

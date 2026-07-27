@@ -567,7 +567,7 @@ public class WorldConfig extends Part {
     public double waypointUpdateScale = 4000.0D;
     public boolean disableCriterionTrigger = false;
     public boolean cactusCheckSurvivalBeforeGrowth = false;
-    public boolean enableSuffocationOptimization = false;
+    public boolean enableSuffocationOptimization = true; // Rolia - default ON: vanilla already caps suffocation via invulnerableTime, so the damage RATE is unchanged (phase-shifted by <=9 ticks)
 
     public Sleeping sleeping = new Sleeping();
     public static class Sleeping extends Part {
