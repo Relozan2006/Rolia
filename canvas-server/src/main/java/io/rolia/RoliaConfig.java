@@ -330,6 +330,10 @@ public final class RoliaConfig {
      * <p>Must be called AFTER loading completes: computing a fingerprint needs the salt, and asking for
      * the salt from inside the loader would re-enter it.</p>
      */
+    // Rolia - worlds whose fingerprint has already been written or checked in this run. Keyed by
+    // absolute path, so the filesystem is touched once per world rather than on every call.
+    private static final Set<String> fingerprintChecked = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     public static void verifyWorldFingerprint(final String fingerprint) {
         try {
             final File dir = new File(FILE_NAME).getAbsoluteFile().getParentFile();
@@ -337,7 +341,13 @@ public final class RoliaConfig {
             final File[] candidates = dir.listFiles();
             if (candidates == null) return;
             for (final File world : candidates) {
-                if (!world.isDirectory() || !new File(world, "level.dat").isFile()) continue;
+                if (!world.isDirectory()) continue;
+                // Rolia - session.lock, not level.dat: level.dat does not exist yet during the FIRST
+                // boot of a brand-new world (it is written at the first save), so keying on it meant the
+                // fingerprint was never written for a fresh world and the guard only armed itself on the
+                // second boot. session.lock is created the moment the level storage is opened.
+                if (!new File(world, "session.lock").isFile() && !new File(world, "level.dat").isFile()) continue;
+                if (!fingerprintChecked.add(world.getAbsolutePath())) continue;
                 final File fp = new File(world, "rolia-seed.fp");
                 if (!fp.isFile()) {
                     java.nio.file.Files.writeString(fp.toPath(), fingerprint + System.lineSeparator(),

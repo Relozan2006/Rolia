@@ -73,13 +73,17 @@ public class Globals {
                     // Rolia - CI asserts this against hashlib.blake2b; see Hashing#selfTestHex.
                     LOGGER.info("Rolia: blake2b-selftest {}", Hashing.selfTestHex());
                     LOGGER.info("Rolia: slime-selftest {}", slimeSelfTestHex());
-                    // Rolia - refuse to keep generating into a world that was made with a different
-                    // secret. Done here, not inside the config loader: computing a fingerprint needs
-                    // the salt, and asking the loader for it from inside itself would re-enter it.
-                    RoliaConfig.verifyWorldFingerprint(seedFingerprint());
                 }
             }
         }
+        // Rolia - refuse to keep generating into a world that was made with a different secret.
+        // Deliberately OUTSIDE the publish-once block: on the first boot of a brand-new world the world
+        // directory does not exist yet when the seed is published, so a one-shot check would never write
+        // the fingerprint and the guard would only arm on the second boot. verifyWorldFingerprint is
+        // idempotent and remembers which worlds it has already handled, so this touches the filesystem
+        // once per world however often setupGlobals is called. It is also placed after publication
+        // because computing a fingerprint needs the salt.
+        RoliaConfig.verifyWorldFingerprint(seedFingerprint());
         dimension.set(stableDimensionId(world.dimension()));
     }
 
