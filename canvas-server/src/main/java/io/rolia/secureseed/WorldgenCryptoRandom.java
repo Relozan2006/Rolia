@@ -218,7 +218,16 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
     // or it will compile, run, and silently have no effect.
     @Override
     public void setSeed(long seed) {
-        setSecureSeed((int) (seed >>> 32), (int) seed, this.typeSalt, 0);
+        // Rolia - WorldgenRandom extends LegacyRandomSource, whose CONSTRUCTOR calls setSeed(). Because
+        // this override is virtual it runs during super(), i.e. before any field of this class has been
+        // initialised - worldSeed/message/typeSalt are all still null at that point. Delegate to the
+        // superclass then (it is initialising its own state) and only take over once we actually exist.
+        if (this.worldSeed == null) {
+            super.setSeed(seed);
+            return;
+        }
+        setSecureSeed((int) (seed >>> 32), (int) seed,
+            this.typeSalt == null ? Globals.Salt.UNDEFINED : this.typeSalt, 0);
     }
 
     @Override
