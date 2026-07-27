@@ -72,6 +72,13 @@ jobs:
             src="canvas-server/src/minecraft/java/$f"
             if [ -f "$src" ]; then cp "$src" "/tmp/out/refsrc/$(basename $f)"; else echo "MISSING $f" >> /tmp/out/refsrc/missing.txt; fi
           done
+          # Rolia - CraftBukkit sources live in a different tree (paper-server/, generated at build time
+          # and gitignored). The loop above only globs canvas-server/src/minecraft/java, so it could never
+          # capture them - which is why CraftChunk#isSlimeChunk could not be fixed against real source.
+          for f in org/bukkit/craftbukkit/CraftChunk.java org/bukkit/craftbukkit/CraftWorld.java; do
+            src="paper-server/src/main/java/$f"
+            if [ -f "$src" ]; then cp "$src" "/tmp/out/refsrc/$(basename $f)"; else echo "MISSING $src" >> /tmp/out/refsrc/missing.txt; fi
+          done
           ls -la /tmp/out/refsrc
 
       - name: Locate end spike seed usage
@@ -176,7 +183,7 @@ jobs:
       - name: Build paperclip jar
         timeout-minutes: 90
         env:
-          BUILD_NUMBER: 38
+          BUILD_NUMBER: 39
         run: |
           set -e -o pipefail
           source /tmp/ci-helpers.sh
@@ -207,21 +214,35 @@ jobs:
           echo "=== built jar: ${JARS[0]} -> /tmp/rolia.jar ==="
           ls -l /tmp/rolia.jar
           sha256sum /tmp/rolia.jar | tee /tmp/rolia.jar.sha256
-          echo "=== MANIFEST(s) ==="
+          echo "=== paperclip manifest ==="
           jar_manifest /tmp/rolia.jar | tee /tmp/rolia-manifest.txt
-          # Rolia - branding asserted on the artifact we ship. The old
-          # `grep -qi rolia "$log"` was satisfied by a log line the server prints
-          # unconditionally, so it could never fail.
-          BRAND_NAME=$(manifest_attr /tmp/rolia.jar 'Brand-Name')
-          BRAND_ID=$(manifest_attr /tmp/rolia.jar 'Brand-Id')
-          IMPL_TITLE=$(manifest_attr /tmp/rolia.jar 'Implementation-Title')
-          echo "Brand-Name='$BRAND_NAME' Brand-Id='$BRAND_ID' Implementation-Title='$IMPL_TITLE'"
-          case "$BRAND_NAME|$BRAND_ID|$IMPL_TITLE" in
-            *[Rr]olia*) echo "OK: jar manifest carries the Rolia brand" ;;
-            *) echo "FAIL: built jar carries no Rolia brand attribute (Brand-Name/Brand-Id/Implementation-Title)"
-               cat /tmp/rolia-manifest.txt; exit 1 ;;
+          # Rolia - the SERVER jar carries the brand/version attributes. The paperclip wrapper stores the
+          # server as a binary patch (META-INF/versions/<v>/server-<v>.jar.patch), not as a nested jar,
+          # so its own manifest only has Manifest-Version/Main-Class/Enable-Native-Access - there is
+          # nothing branded to assert on. Find the server jar and assert on that instead.
+          mapfile -t SRVJARS < <(find canvas-server/build/libs -name '*.jar' -not -name '*paperclip*' -not -name '*sources*' | sort)
+          if [ "${#SRVJARS[@]}" -eq 0 ]; then
+            echo "FAIL: no server jar in canvas-server/build/libs to verify branding against"; ls -la canvas-server/build/libs || true; exit 1
+          fi
+          echo "server jars: ${SRVJARS[*]}"
+          BRANDED=""
+          for sj in "${SRVJARS[@]}"; do
+            BN=$(manifest_attr "$sj" 'Brand-Name'); BI=$(manifest_attr "$sj" 'Brand-Id'); IT=$(manifest_attr "$sj" 'Implementation-Title')
+            echo "  $(basename "$sj"): Brand-Name='$BN' Brand-Id='$BI' Implementation-Title='$IT'"
+            case "$BN|$BI|$IT" in *[Rr]olia*) BRANDED="$sj" ;; esac
+          done
+          [ -n "$BRANDED" ] || { echo "FAIL: no server jar carries a Rolia brand attribute - rebrand regressed"; exit 1; }
+          echo "OK: branding verified on $(basename "$BRANDED")"
+          # Cross-check that the artifact really is the build number we think it is.
+          SRV_BUILD=$(manifest_attr "$BRANDED" 'Build-Number')
+          echo "server jar Build-Number='$SRV_BUILD' (expected '$BUILD_NUMBER')"
+          [ "$SRV_BUILD" = "$BUILD_NUMBER" ] || { echo "FAIL: server jar build number != BUILD_NUMBER"; exit 1; }
+          case "$(basename "${JARS[0]}")" in
+            *build.$BUILD_NUMBER*) echo "OK: paperclip filename carries build.$BUILD_NUMBER" ;;
+            *) echo "FAIL: paperclip filename '$(basename "${JARS[0]}")' does not carry build.$BUILD_NUMBER"; exit 1 ;;
           esac
-          echo "manifest Build-Number=$(manifest_attr /tmp/rolia.jar 'Build-Number') (expected $BUILD_NUMBER)"
+          cp "$BRANDED" /tmp/rolia-server.jar
+          basename "${JARS[0]}" > /tmp/rolia-jar-name.txt
 
       - name: Run test suite
         timeout-minutes: 60
@@ -231,7 +252,7 @@ jobs:
         # in build 39 once we have seen a clean run. `set +e` is deliberate and scoped to this step.
         continue-on-error: true
         env:
-          BUILD_NUMBER: 38
+          BUILD_NUMBER: 39
         run: |
           set +e
           ./gradlew test --stacktrace 2>&1 | tee test.log
@@ -481,16 +502,18 @@ jobs:
         run: |
           set -e -o pipefail
           source /tmp/ci-helpers.sh
-          BUILD_NUMBER=38
+          BUILD_NUMBER=39
           TAG="v26.1.2-build.$BUILD_NUMBER"
           JAR=/tmp/out/rolia-paperclip-26.1.2.jar
           [ -f "$JAR" ] || { echo "FAIL: $JAR not found - the publish step did not produce a release jar"; ls -la /tmp/out; exit 1; }
-          # Rolia - the tag and the jar's build number can never drift silently again.
-          MB=$(manifest_attr "$JAR" 'Build-Number')
+          # Rolia - the tag and the artifact's build number can never drift silently again.
+          # Read it from the SERVER jar stashed by the build step (paperclip's own manifest has no
+          # version attributes), falling back to the paperclip filename.
+          MB=""
+          [ -f /tmp/rolia-server.jar ] && MB=$(manifest_attr /tmp/rolia-server.jar 'Build-Number')
           if [ -z "$MB" ]; then
-            IV=$(manifest_attr "$JAR" 'Implementation-Version')   # <mcVersion>-<build>-<gitHash>
-            MB=$(printf '%s' "$IV" | awk -F- '{print $2}')
-            echo "Build-Number attribute absent; derived from Implementation-Version='$IV' -> '$MB'"
+            MB=$(printf '%s' "$(basename "$(cat /tmp/rolia-jar-name.txt 2>/dev/null || echo '')")" | sed -nE 's/.*build\.([0-9]+).*/\1/p')
+            echo "Build-Number attribute absent; derived from the built jar filename -> '$MB'"
           fi
           echo "tag=$TAG  expected build=$BUILD_NUMBER  jar manifest build=$MB"
           [ "$MB" = "$BUILD_NUMBER" ] || {

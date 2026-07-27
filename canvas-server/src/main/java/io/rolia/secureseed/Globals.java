@@ -3,8 +3,6 @@ package io.rolia.secureseed;
 import com.mojang.logging.LogUtils;
 import io.rolia.RoliaConfig;
 
-import com.google.common.collect.Iterables;
-
 import net.minecraft.server.level.ServerLevel;
 
 import java.math.BigInteger;
@@ -21,7 +19,7 @@ public class Globals {
 
     // Rolia start - avoid linear scan + allocations on the hot path (called from getGenerator()/ChunkStep)
     private static volatile boolean seedInitialized = false;
-    private static final java.util.concurrent.ConcurrentHashMap<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>, Integer> DIMENSION_INDEX_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>, Integer> DIMENSION_ID_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static void setupGlobals(ServerLevel world) {
         if (!seedInitialized) {
@@ -39,18 +37,37 @@ public class Globals {
                 }
             }
         }
-        Integer cached = DIMENSION_INDEX_CACHE.get(world.dimension());
-        if (cached == null) {
-            int worldIndex = Iterables.indexOf(world.getServer().levelKeys(), it -> it == world.dimension());
-            // prevent race condition where world is not yet added to levelKeys
-            if (worldIndex == -1) {
-                dimension.set(world.getServer().levelKeys().size()); // do not cache a value computed mid-registration
-                return;
-            }
-            DIMENSION_INDEX_CACHE.put(world.dimension(), worldIndex);
-            cached = worldIndex;
+        dimension.set(stableDimensionId(world.dimension()));
+    }
+
+    /**
+     * Rolia - a STABLE domain separator for a dimension, derived from its identifier.
+     *
+     * <p>This used to be the dimension's ordinal POSITION in {@code levelKeys()}. That position is not
+     * stable: {@code unloadWorld} + {@code createWorld} re-inserts a world at the end and shifts every
+     * later world down by one, and changing world creation order (bukkit.yml, a plugin load-order
+     * change, a Multiverse edit) does the same. Every shifted world would then generate NEW chunks from
+     * a different RNG stream than the chunks already on disk - hard seams, doubled structures, ore and
+     * decoration discontinuities at the load frontier, with no error and no way back. The old code also
+     * had a race: two worlds registering concurrently both read {@code levelKeys().size()} and got
+     * IDENTICAL separators, i.e. byte-identical worldgen randomness in two different dimensions.</p>
+     *
+     * <p>The identifier never moves, so the separator never moves. It is hashed through the salt-keyed
+     * BLAKE2b so it is also not guessable, and cached because it is read on the worldgen path.</p>
+     */
+    public static int stableDimensionId(net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> key) {
+        Integer cached = DIMENSION_ID_CACHE.get(key);
+        if (cached != null) {
+            return cached;
         }
-        dimension.set(cached);
+        byte[] idBytes = key.identifier().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        long[] in = new long[8];
+        for (int i = 0; i < Math.min(idBytes.length, 64); i++) {
+            in[i / 8] |= ((long) (idBytes[i] & 0xFF)) << ((i % 8) * 8);
+        }
+        int id = (int) Hashing.hashWorldSeed(in)[0];
+        DIMENSION_ID_CACHE.put(key, id);
+        return id;
     }
 
     /**
@@ -132,8 +149,36 @@ public class Globals {
     // Applied once at the root of RandomState, so it cascades to every terrain sub-system (aquifer/ore/
     // climate/surface all fork from this root). Part of the always-on 1024-bit protection; not disableable.
     public static final long TERRAIN_DOMAIN = 0x5445525241494E00L; // "TERRAIN\0"
+    private static volatile boolean warnedTerrainBeforePublish = false;
+
+    /**
+     * Rolia - the terrain root seed, keyed by BOTH the secret salt and the full 1024-bit feature seed.
+     *
+     * <p>Previously this was {@code transformSeed(levelSeed, TERRAIN_DOMAIN)}, which mixed only the
+     * public level seed and the salt - so terrain security rested on a single derived 64-bit value that
+     * standard seed-cracking tooling attacks the usual 48-bit-lift-then-verify way. Recovering it never
+     * revealed the salt (BLAKE2b is one way), but it did let an attacker predict terrain elsewhere.
+     * Folding the 1024-bit secret in as well gives terrain the same strength the structures already had.</p>
+     *
+     * <p>Ordering: {@code setupGlobals} runs in the ServerLevel constructor BEFORE
+     * {@code new ServerChunkCache(...)} builds the RandomState, so the seed is always published by the
+     * time this is first called. If that ever stops being true the terrain would silently key on an
+     * all-zero seed, so we log at ERROR - which the CI log scanner turns into a red build.</p>
+     */
     public static long secureTerrainSeed(long levelSeed) {
-        return transformSeed(levelSeed, TERRAIN_DOMAIN);
+        if (!seedInitialized && !warnedTerrainBeforePublish) {
+            warnedTerrainBeforePublish = true;
+            LOGGER.error("Rolia: secureTerrainSeed() was called before the 1024-bit seed was published - "
+                + "terrain would be keyed on an all-zero seed. This is a load-order regression; please report it.");
+        }
+        final long[] keyed = Hashing.hashWorldSeed(worldSeed);                                  // BLAKE2b(seed ^ salt)
+        final long[] expanded = Hashing.expandLevelSeedTo1024Bits(levelSeed ^ TERRAIN_DOMAIN);  // salt-keyed level seed
+        long out = 0x9E3779B97F4A7C15L;
+        for (int i = 0; i < keyed.length; i++) {
+            out ^= keyed[i] ^ expanded[i % expanded.length];
+            out = Long.rotateLeft(out, 27) * 0xBF58476D1CE4E5B9L;
+        }
+        return out;
     }
     // Rolia end
 

@@ -93,30 +93,53 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
             randomBitIndex += count;
             return result;
         } else {
-            long result = (randomBits[randomBitIndex >>> 6] >>> alignment) & lowMask(64 - alignment);
+            // Rolia - the stream is little-endian within each word: bit j of word i is stream bit i*64+j.
+            // So the tail of a draw that spans a word boundary must come from the LOW bits of the next
+            // word, shifted up above the bits already taken. The previous code took the HIGH bits
+            // (>>> (64 - alignment)) and shifted the FIRST part instead, which meant the top bits of
+            // each spanned word were consumed twice - once here and again by the following draw - while
+            // the low bits were never consumed at all. Deterministic, so not a world-consistency bug,
+            // but it correlated consecutive values across every word boundary.
+            final int firstBits = 64 - alignment;
+            long result = (randomBits[randomBitIndex >>> 6] >>> alignment) & lowMask(firstBits);
             randomBitIndex += count;
             if (randomBitIndex >= MAX_RANDOM_BIT_INDEX) {
                 moreRandomBits();
                 randomBitIndex -= MAX_RANDOM_BIT_INDEX;
             }
-            alignment = randomBitIndex & 63;
-            result <<= alignment;
-            result |= (randomBits[randomBitIndex >>> 6] >>> (64 - alignment)) & lowMask(alignment);
+            final int remaining = randomBitIndex & 63; // == count - firstBits
+            result |= (randomBits[randomBitIndex >>> 6] & lowMask(remaining)) << firstBits;
 
             return result;
         }
     }
 
+    /**
+     * Rolia - vanilla {@code fork()} is {@code new LegacyRandomSource(this.nextLong())}: it CONSUMES from
+     * the parent, so parent and child are decorrelated and two successive forks differ. Copying our state
+     * verbatim made the child replay the parent's exact sequence, and made {@code fork(); fork();} hand
+     * back two identical children. Everywhere vanilla forks for independence - noise octave chains,
+     * feature sub-placement, jigsaw sub-placers - those sub-streams were perfectly correlated, which is a
+     * visible worldgen-quality regression rather than a mere statistical nit.
+     *
+     * <p>Now two longs are drawn from the parent (advancing it) and folded into {@code message[4..5]},
+     * which are otherwise always zero but DO feed the compression input in {@link #moreRandomBits()},
+     * so the child gets a genuinely independent stream keyed on the same secret.</p>
+     */
     @Override
     public @NotNull RandomSource fork() {
-        WorldgenCryptoRandom fork = new WorldgenCryptoRandom(0, 0, null, 0);
+        final long a = this.nextLong(); // advance the parent - this is what decorrelates the two
+        final long b = this.nextLong();
 
+        WorldgenCryptoRandom fork = new WorldgenCryptoRandom(0, 0, null, 0);
         System.arraycopy(this.worldSeed, 0, fork.worldSeed, 0, Globals.WORLD_SEED_LONGS);
         System.arraycopy(this.message, 0, fork.message, 0, this.message.length);
-        System.arraycopy(this.randomBits, 0, fork.randomBits, 0, this.randomBits.length); // Rolia - fix fork() losing the random bit buffer
-        fork.randomBitIndex = this.randomBitIndex;
-        fork.counter = this.counter;
         fork.typeSalt = this.typeSalt;
+        fork.message[4] = a;
+        fork.message[5] = b;
+        fork.message[3] = 0;
+        fork.counter = 0;
+        fork.randomBitIndex = MAX_RANDOM_BIT_INDEX; // force a refill on first use
 
         return fork;
     }
@@ -125,14 +148,23 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
     // make them independent of the secret seed). Derive a secret-dependent positional factory instead.
     @Override
     public PositionalRandomFactory forkPositional() {
+        // Rolia - do NOT let positional randoms fall back to the wrapped constant-0 delegate (that would
+        // make them independent of the secret seed). Derive a secret-dependent factory instead.
+        // Build 39: seed a Xoroshiro factory with 128 bits rather than collapsing everything into a
+        // single long for LegacyRandomSource, which keeps only 48 bits of state - so every positional
+        // sub-random derived from the secret used to carry <= 48 bits of derived entropy.
         final long[] hashed = getHashedWorldSeed();
-        long secure = 0x9E3779B97F4A7C15L;
+        long lo = 0x9E3779B97F4A7C15L;
+        long hi = 0xBF58476D1CE4E5B9L;
         for (int i = 0; i < hashed.length; i++) {
-            secure ^= hashed[i];
-            secure = Long.rotateLeft(secure, 17) * 0xBF58476D1CE4E5B9L;
+            lo ^= hashed[i];
+            lo = Long.rotateLeft(lo, 17) * 0xBF58476D1CE4E5B9L;
+            hi ^= Long.rotateLeft(hashed[i], 32);
+            hi = Long.rotateLeft(hi, 29) * 0x94D049BB133111EBL;
         }
-        secure ^= message[0] ^ Long.rotateLeft(message[1], 32) ^ (message[2] * 0x94D049BB133111EBL) ^ counter;
-        return new LegacyRandomSource(secure).forkPositional();
+        lo ^= message[0] ^ Long.rotateLeft(message[1], 32) ^ (message[2] * 0x94D049BB133111EBL) ^ counter;
+        hi ^= Long.rotateLeft(message[0], 41) ^ message[1] ^ (message[3] * 0xD6E8FEB86659FD93L);
+        return new net.minecraft.world.level.levelgen.XoroshiroRandomSource(lo, hi).forkPositional();
     }
 
     @Override

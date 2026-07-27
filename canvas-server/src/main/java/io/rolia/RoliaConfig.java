@@ -1,6 +1,9 @@
 package io.rolia;
 
 import com.mojang.logging.LogUtils;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.EntityType;
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.Yaml;
 
@@ -37,9 +40,19 @@ public final class RoliaConfig {
     private static int dabStartDistance = 12;
     private static int dabMaxTickInterval = 20;
     private static Set<String> dabBlacklist = Set.of();
+    // Rolia - the blacklist is CONFIGURED as entity-type ids, but TESTED per mob per tick, so it is
+    // resolved once into the EntityType objects themselves and then tested with a plain set lookup
+    // (zero allocation). The old hot path built a fresh String from the registry key for every mob on
+    // every call. The string form above is kept for parsing/round-tripping the YAML.
+    // Resolution must be LAZY: RoliaConfig is loaded very early (the secret salt is needed before any
+    // world exists), long before BuiltInRegistries is populated and frozen - resolving inside
+    // loadSlow() would silently produce an empty set. volatile: written once by whichever region
+    // thread happens to resolve it first, read by all of them afterwards.
+    private static volatile Set<EntityType<?>> dabBlacklistTypes;
     // villager lobotomization
     private static boolean lobotomizeEnabled = true;
     private static boolean lobotomizeWaitUntilTradeLocked = true;
+    private static int lobotomizeCheckInterval = 100;
     private static boolean fasterNetwork = true;
 
     private RoliaConfig() {
@@ -49,11 +62,59 @@ public final class RoliaConfig {
     public static boolean dabEnabled() { load(); return dabEnabled; }
     public static int dabStartDistance() { load(); return dabStartDistance; }
     public static int dabMaxTickInterval() { load(); return dabMaxTickInterval; }
-    public static boolean dabBlacklisted(String typeId) { load(); return dabBlacklist.contains(typeId); }
     public static boolean dabHasBlacklist() { load(); return !dabBlacklist.isEmpty(); }
     public static boolean lobotomizeEnabled() { load(); return lobotomizeEnabled; }
     public static boolean lobotomizeWaitUntilTradeLocked() { load(); return lobotomizeWaitUntilTradeLocked; }
+    public static int lobotomizeCheckInterval() { load(); return lobotomizeCheckInterval; }
     public static boolean fasterNetwork() { load(); return fasterNetwork; }
+
+    /** Rolia - is this entity type excluded from DAB throttling? Allocation-free; see dabBlacklistTypes. */
+    public static boolean dabBlacklisted(EntityType<?> type) {
+        load();
+        Set<EntityType<?>> types = dabBlacklistTypes;
+        if (types == null) {
+            types = resolveDabBlacklist();
+        }
+        return types.contains(type);
+    }
+
+    // Rolia - one-shot resolution of the configured ids, run on the first mob tick (registries frozen).
+    private static synchronized Set<EntityType<?>> resolveDabBlacklist() {
+        Set<EntityType<?>> types = dabBlacklistTypes;
+        if (types != null) {
+            return types; // another thread already resolved it
+        }
+        Set<EntityType<?>> resolved = new HashSet<>();
+        for (String id : dabBlacklist) {
+            if (id.isEmpty()) continue;
+            EntityType<?> match = null;
+            try {
+                // Identifier.parse also supplies the default namespace, so both "minecraft:villager"
+                // and "villager" resolve (the old string compare required the fully qualified form).
+                Identifier key = Identifier.parse(id);
+                EntityType<?> candidate = BuiltInRegistries.ENTITY_TYPE.getValue(key);
+                // ENTITY_TYPE is a DEFAULTED registry: an unknown id silently returns the default type
+                // (minecraft:pig) rather than null, so verify the round-trip instead of trusting the
+                // lookup - otherwise a single typo would quietly exempt every pig on the server.
+                // 'var': the registry key type is the only thing here we cannot see spelled out in
+                // this tree, and Identifier.equals(Object) compares safely whatever it turns out to be.
+                var resolvedKey = candidate == null ? null : BuiltInRegistries.ENTITY_TYPE.getKey(candidate);
+                if (key.equals(resolvedKey)) {
+                    match = candidate;
+                }
+            } catch (Exception ignored) {
+                // malformed id - reported below
+            }
+            if (match == null) {
+                LOGGER.warn("Rolia: unknown entity type '{}' in {} -> optimizations.dab.blacklist; ignoring it.", id, FILE_NAME);
+            } else {
+                resolved.add(match);
+            }
+        }
+        types = Set.copyOf(resolved);
+        dabBlacklistTypes = types;
+        return types;
+    }
 
     // Rolia - fast path: a volatile read, no monitor. This method is on the hottest paths in the
     // server (DAB per mob per tick, faster-network per long[] on Netty threads); the previous
@@ -141,6 +202,8 @@ public final class RoliaConfig {
         Map<String, Object> villagerLobo = section(optimizations, "villager-lobotomize");
         lobotomizeEnabled = bool(villagerLobo.get("enabled"), true);
         lobotomizeWaitUntilTradeLocked = bool(villagerLobo.get("wait-until-trade-locked"), true);
+        // Rolia - ticks between boxed-in re-probes; the answer is cached in between (Purpur default 100)
+        lobotomizeCheckInterval = clamp(intv(villagerLobo.get("check-interval"), 100), 1, 1200);
         fasterNetwork = bool(section(optimizations, "faster-network").get("enabled"), true);
 
         if (!firstGen) {
@@ -243,6 +306,11 @@ public final class RoliaConfig {
             + "    # Keep full AI for villagers that have not been traded with yet (0 xp) so they can still\n"
             + "    # gain their first profession level. Recommended true.\n"
             + "    wait-until-trade-locked: " + lobotomizeWaitUntilTradeLocked + "\n"
+            + "    # How often (in ticks) a villager is re-checked for being boxed in; the answer is cached\n"
+            + "    # in between, because the check costs up to 8 block + collision-shape lookups per\n"
+            + "    # villager. Lower = a villager freed from its cell wakes up sooner; higher = cheaper.\n"
+            + "    # 100 ticks = 5 seconds (Purpur's default). Clamped to 1-1200.\n"
+            + "    check-interval: " + lobotomizeCheckInterval + "\n"
             + "  # Faster network: bulk-write long arrays (chunk light/heightmap) in one copy instead of a loop.\n"
             + "  # Bytes on the wire are IDENTICAL - purely faster serialization.\n"
             + "  faster-network:\n"

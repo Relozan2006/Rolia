@@ -188,21 +188,27 @@
      }
  
      private void replaceMissingSections(final PalettedContainerFactory containerFactory, final LevelChunkSection[] sections) { // Paper - Anti-Xray - make it a non-static method
-@@ -186,6 +_,18 @@
+@@ -186,6 +_,24 @@
          return GameEventListenerRegistry.NOOP;
      }
  
-+    private boolean slimeChunk;
-+    private boolean hasComputedSlimeChunk;
++    // Rolia start - slime chunks come from the secure seed
++    // One volatile field carries both "computed" and the value: 0 = unknown, 1 = slime chunk, 2 = not a
++    // slime chunk. The answer is deterministic for a given chunk, so a lost race just recomputes the same
++    // value; what must never happen is publishing "computed" before the value, which the previous
++    // two-field version did - a second thread could then cache `false` for a real slime chunk forever.
++    private volatile byte slimeChunkState;
 +
 +    public boolean isSlimeChunk() {
-+        if (!hasComputedSlimeChunk) {
-+            hasComputedSlimeChunk = true;
-+            slimeChunk = io.rolia.secureseed.WorldgenCryptoRandom.seedSlimeChunk(chunkPos.x(), chunkPos.z()).nextInt(10) == 0;
++        byte state = this.slimeChunkState;
++        if (state == 0) {
++            state = io.rolia.secureseed.WorldgenCryptoRandom.seedSlimeChunk(this.chunkPos.x(), this.chunkPos.z()).nextInt(10) == 0 ? (byte) 1 : (byte) 2;
++            this.slimeChunkState = state;
 +        }
 +
-+        return slimeChunk;
++        return state == 1;
 +    }
++    // Rolia end - slime chunks come from the secure seed
 +
      public abstract BlockState getBlockState(final int x, final int y, final int z); // Paper
  
