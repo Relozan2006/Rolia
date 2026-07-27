@@ -164,6 +164,26 @@ jobs:
           # Known-benign lines a headless first start legitimately produces.
           ROLIA_ERR_ALLOW='eula|Advanced terminal|libraries directory'
 
+          # Rolia - build 40: reap any server left over from an earlier step BEFORE launching a new one.
+          # Run 50 died on "FAILED TO BIND TO PORT": the terrain step is continue-on-error, so when its
+          # own assertions failed its JVM was never reaped, and it still held 25565 when the determinism
+          # step tried to boot. A step that is allowed to fail must not be allowed to poison the next one.
+          reap_servers () {          # reap_servers [tag]
+            _rtag="${1:-cleanup}"
+            if pgrep -f 'rolia\.jar' > /dev/null 2>&1; then
+              echo "[$_rtag] reaping leftover server JVM(s) from an earlier step:"
+              pgrep -af 'rolia\.jar' || true
+              pkill -f 'rolia\.jar' || true
+              for _i in $(seq 1 20); do
+                pgrep -f 'rolia\.jar' > /dev/null 2>&1 || break
+                sleep 1
+              done
+              pkill -9 -f 'rolia\.jar' > /dev/null 2>&1 || true
+              sleep 2
+            fi
+            return 0
+          }
+
           scan_errors () {           # scan_errors <tag> <logfile>
             _tag="$1"; _log="$2"
             if [ ! -f "$_log" ]; then echo "[$_tag] scan_errors: $_log is missing"; return 1; fi
@@ -798,6 +818,7 @@ jobs:
         run: |
           set -e -o pipefail
           source /tmp/ci-helpers.sh
+          reap_servers pre
           # Rolia - ONE task, no "|| other-task" fallback: a fallback can produce a
           # differently-mapped artifact that passes every check and ships. A build
           # failure must be a build failure.
@@ -941,6 +962,7 @@ jobs:
           set -e -o pipefail
           set -x
           source /tmp/ci-helpers.sh
+          reap_servers pre
           # Rolia - always the jar the build step verified; never re-search for one.
           [ -f /tmp/rolia.jar ] || { echo "FAIL: /tmp/rolia.jar missing (build step did not produce it)"; exit 1; }
           mkdir -p testrun && cd testrun
@@ -1093,6 +1115,7 @@ jobs:
           set -e -o pipefail
           set -x
           source /tmp/ci-helpers.sh
+          reap_servers pre
           [ -f /tmp/rolia.jar ] || { echo "FAIL: /tmp/rolia.jar missing"; exit 1; }
           mkdir -p testrun/terrain && cd testrun/terrain
           echo "eula=true" > eula.txt
@@ -1106,7 +1129,7 @@ jobs:
               NEWSALT:*) printf 'secure-seed:\n  salt: "%s"\n' "${cfg#NEWSALT:}" > rolia.yml ;;
               *)         cp "$cfg" rolia.yml ;;
             esac
-            printf 'level-seed=%s\nonline-mode=false\n' "$lvl" > server.properties
+            printf 'level-seed=%s\nonline-mode=false\nserver-port=25610\n' "$lvl" > server.properties
             rm -f input exitcode; mkfifo input
             (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "terr_$tag.log" 2>&1; echo $? > exitcode) &   # Rolia - set +e: record the exit code instead of dying on it
             exec 3>input
@@ -1219,6 +1242,7 @@ jobs:
           set -e -o pipefail
           set -x
           source /tmp/ci-helpers.sh
+          reap_servers pre
           cd testrun
           SALT2="DETERMINISM_SALT_TWO__0123456789abcdef0123456789abcdef0123456789ab"
           locate_run () {           # locate_run <tag> <FRESH | config file>
@@ -1226,7 +1250,7 @@ jobs:
             rm -rf world world_nether world_the_end
             rm -f rolia.yml rolia-seed.properties
             if [ "$cfg" != FRESH ]; then cp "$cfg" rolia.yml; fi
-            printf 'level-seed=roliadettest\nonline-mode=false\n' > server.properties
+            printf 'level-seed=roliadettest\nonline-mode=false\nserver-port=25620\n' > server.properties
             rm -f input exitcode; mkfifo input
             (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "det_$tag.log" 2>&1; echo $? > exitcode) &   # Rolia - set +e: record the exit code instead of dying on it
             exec 3>input
@@ -1280,6 +1304,7 @@ jobs:
           set -e -o pipefail
           set -x
           source /tmp/ci-helpers.sh
+          reap_servers pre
           cd testrun/terrain
           [ -f world/level.dat ] || { echo "FAIL: the terrain step left no world here"; ls -la; exit 1; }
           [ -f rolia.yml ]       || { echo "FAIL: the terrain step left no rolia.yml here"; ls -la; exit 1; }
@@ -1320,13 +1345,14 @@ jobs:
           set -e -o pipefail
           set -x
           source /tmp/ci-helpers.sh
+          reap_servers pre
           cd testrun
           rm -rf world world_nether world_the_end
           # Rolia - RoliaConfig reads optimizations.dab first and only falls back
           # to a top-level dab: block, so the smoke test must use the nested,
           # documented form - otherwise it only ever exercised the back-compat path.
           printf 'secure-seed:\n  salt: "DABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKE01"\noptimizations:\n  dab:\n    enabled: true\n    start-distance: 8\n    max-tick-interval: 20\n    blacklist: []\n' > rolia.yml
-          printf 'level-seed=dabtest\nonline-mode=false\n' > server.properties
+          printf 'level-seed=dabtest\nonline-mode=false\nserver-port=25630\n' > server.properties
           rm -f input exitcode; mkfifo input
           (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > dab.log 2>&1; echo $? > exitcode) &   # Rolia - set +e: record the exit code instead of dying on it
           exec 3>input
@@ -1354,11 +1380,12 @@ jobs:
           set -e -o pipefail
           set -x
           source /tmp/ci-helpers.sh
+          reap_servers pre
           cd testrun
           fresh_run () {
             tag="$1"
             rm -rf world world_nether world_the_end rolia.yml rolia-seed.properties
-            printf 'level-seed=samelevel\nonline-mode=false\n' > server.properties
+            printf 'level-seed=samelevel\nonline-mode=false\nserver-port=25640\n' > server.properties
             rm -f input exitcode; mkfifo input
             (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "auto_$tag.log" 2>&1; echo $? > exitcode) &   # Rolia - set +e: record the exit code instead of dying on it
             exec 3>input
@@ -1464,6 +1491,7 @@ jobs:
         run: |
           set -e -o pipefail
           source /tmp/ci-helpers.sh
+          reap_servers pre
           BUILD_NUMBER=40
           TAG="v26.1.2-build.$BUILD_NUMBER"
           JAR=/tmp/out/rolia-paperclip-26.1.2.jar
