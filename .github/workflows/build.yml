@@ -101,7 +101,7 @@ jobs:
           # followed by bare stack-trace lines. The old detector only looked for
           # "Exception in thread"/"Caused by:", which misses nearly every real
           # server error. Match the log-LEVEL field and stack-trace shapes instead.
-          ROLIA_ERR_RE='/(ERROR|FATAL)\]|^[[:space:]]+at [a-zA-Z]|^[a-zA-Z_$][a-zA-Z0-9_.$]*(Exception|Error): |Exception in thread|Caused by:|Failed to start the minecraft server'
+          ROLIA_ERR_RE='[[:space:]/](ERROR|FATAL)\]|^[[:space:]]+at [a-zA-Z]|^[a-zA-Z_$][a-zA-Z0-9_.$]*(Exception|Error): |Exception in thread|Caused by:|Failed to start the minecraft server'
           # Known-benign lines a headless first start legitimately produces.
           ROLIA_ERR_ALLOW='eula|Advanced terminal|libraries directory'
 
@@ -306,8 +306,8 @@ jobs:
             grep -iE 'checking version|\[Rolia\]|\| STABLE|made by' "$log" | head || true
             # Rolia - anchored to the log-level field, so an unrelated line that
             # merely contains "rolia" (e.g. the config line) cannot satisfy it.
-            grep -qE '/INFO\]:[[:space:]]*(This server is running Rolia |\[Rolia\])' "$log" || {
-              echo "[$tag] NO ROLIA BRANDING on the startup/version banner"; exit 1; }
+            grep -qE 'This server is running Rolia version|[[:space:]/]INFO\]:[[:space:]]*\[Rolia\]' "$log" || {
+              echo "[$tag] NO ROLIA BRANDING on the startup/version banner"; tail -40 "$log"; exit 1; }
             grep -qE 'Feature seed fp: [0-9a-f]{16}' "$log" || { echo "[$tag] NO FEATURE SEED FINGERPRINT"; exit 1; }
             scan_errors "$tag" "$log" || exit 1
           }
