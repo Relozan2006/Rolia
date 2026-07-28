@@ -23,7 +23,7 @@
      }
  
      // Folia start - region threading
-@@ -1038,71 +_,92 @@
+@@ -1038,71 +_,97 @@
      // Paper start - optimise random ticking
      private final io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource simpleRandom = io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource.INSTANCE; // Folia - region threading
  
@@ -70,17 +70,22 @@
 +            long rndCache = random.nextLong();
 +            int bitsLeft = 64;
 +
++            // Rolia start - vanilla-parity.random-tick-selection (default false = Canvas behaviour)
++            // Canvas hoists the ticking-block count out of the loop. state.randomTick() below can add
++            // or remove randomly-ticking blocks in THIS section while the loop is still running, so a
++            // stale count lets tickList.getRaw(index) return a slot at or past the live size: a block
++            // that is no longer eligible gets random-ticked, and a newly eligible one can never be
++            // picked. That shifts CROP GROWTH, grass/mycelium spread and fire spread off Vanilla.
++            // Paper re-reads it every iteration for exactly this reason.
++            //
++            // The flag is read ONCE per section rather than per iteration, and the RNG draw pattern is
++            // identical either way (rndCache is filled before the loop regardless), so switching this
++            // on cannot shift any other random stream in the world - only which block gets picked.
++            final boolean roliaFreshTickCount = io.rolia.RoliaConfig.parityRandomTick();
++            int tickingBlocks = tickList.size();
++            // Rolia end - vanilla-parity.random-tick-selection
 +            for (int i = 0; i < tickSpeed; i++) {
-+                // Rolia start - restore Paper's per-iteration tickList.size() read
-+                // Canvas hoisted this out of the loop (plus a tickingBlocks == 0 fast-out derived from
-+                // it). state.randomTick() below can add or remove randomly-ticking blocks in THIS
-+                // section while the loop is still running, so a stale count lets tickList.getRaw(index)
-+                // return a slot at or past the live size: a block that is no longer eligible gets
-+                // random-ticked, and a newly eligible one can never be picked. That shifts crop growth,
-+                // grass/mycelium spread and fire spread off vanilla. Paper re-reads it every iteration
-+                // for exactly this reason; the size() call is a field read on the section's ShortList.
-+                final int tickingBlocks = tickList.size();
-+                // Rolia end - restore Paper's per-iteration tickList.size() read
++                if (roliaFreshTickCount) { tickingBlocks = tickList.size(); } // Rolia - vanilla-parity.random-tick-selection
 +                if (bitsLeft < 12) { // need 12 bits for 0-4095
 +                    rndCache = random.nextLong();
 +                    bitsLeft = 64;

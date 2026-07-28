@@ -209,9 +209,9 @@ public class WorldConfig extends Part {
             // Rolia - default changed from true to false, see docs below
             option("enableTpsBar").docs(
                 "Enables a regionized TPS-Bar implementation for Canvas.",
-                "Rolia changed the default from true to false: this is a Canvas extra, not a Vanilla feature,",
-                "and while enabled it ticks once a second for every region even when no player has ever run",
-                "/regionbar. Turn it on per world if you actually want it."
+                "A Canvas extra, not a Vanilla feature. While enabled it ticks once a second for every region even",
+                "when no player has ever run /regionbar. Canvas's default (true) is kept; set",
+                "canvas-overrides.disable-region-bars in rolia.yml to turn both bars off by default."
             );
             option("tpsBarFormat")
                 .docs(
@@ -221,8 +221,9 @@ public class WorldConfig extends Part {
             // Rolia - default changed from true to false, see docs below
             option("enableRamBar").docs(
                 "Enables a regionized RAM-Bar implementation for Canvas.",
-                "Rolia changed the default from true to false: same reasoning as enableTpsBar - a Canvas extra",
-                "that costs a per-region tick every second whether or not anybody asked for it."
+                "Same reasoning as enableTpsBar: a Canvas extra that costs a per-region tick every second whether",
+                "or not anybody asked for it. Canvas's default (true) is kept; see",
+                "canvas-overrides.disable-region-bars in rolia.yml."
             );
             option("ramBarFormat")
                 .docs(
@@ -231,10 +232,10 @@ public class WorldConfig extends Part {
                 ).greedyString();
         }
 
-        public boolean enableTpsBar = false; // Rolia - was true; Canvas extra that ticks once a second per region even when nobody enabled it
+        public boolean enableTpsBar = !io.rolia.RoliaConfig.canvasDisableRegionBars(); // Rolia - Canvas default (true) unless canvas-overrides.disable-region-bars
         public String tpsBarFormat = DEFAULT_TPSBAR_FORMAT;
 
-        public boolean enableRamBar = false; // Rolia - was true; Canvas extra that ticks once a second per region even when nobody enabled it
+        public boolean enableRamBar = !io.rolia.RoliaConfig.canvasDisableRegionBars(); // Rolia - Canvas default (true) unless canvas-overrides.disable-region-bars
         public String ramBarFormat = DEFAULT_RAMBAR_FORMAT;
     }
 
@@ -413,10 +414,11 @@ public class WorldConfig extends Part {
                         )
                         .blank()
                         .wordWrap(
-                            "Rolia changed the default from false to true. With it off, an arrow that hits a wind",
-                            "charge or fireball owned by another region thread silently fails to deflect it, so the",
-                            "same shot works or does not work purely depending on where the region boundary happens",
-                            "to fall. That is a Vanilla deviation players can hit without ever knowing why."
+                            "With this off, an arrow that hits a wind charge or fireball owned by another region thread",
+                            "silently fails to deflect it, so the same shot works or does not work purely depending on",
+                            "where the region boundary happens to fall - a Vanilla deviation players can hit without",
+                            "ever knowing why. Canvas's default (false) is kept; set",
+                            "vanilla-parity.cross-region-projectile-deflection in rolia.yml to make true the default."
                         )
                         .blank()
                         .wordWrap(
@@ -429,7 +431,7 @@ public class WorldConfig extends Part {
             public int maxProjectileChunkLoadsPerTick = 10;
             public int maxProjectileChunkLoadsPerProjectileBeforeRemoval = 10;
             public List<String> loadChunks = new ArrayList<>();
-            public boolean crossRegionRedirectableProjectileDeflection = true; // Rolia - was false; Vanilla arrow/wind-charge deflection silently fails across region boundaries
+            public boolean crossRegionRedirectableProjectileDeflection = io.rolia.RoliaConfig.parityProjectileDeflection(); // Rolia - Canvas default (false) unless vanilla-parity.cross-region-projectile-deflection
 
             private final CanonicalReference<Predicate<Projectile>> compiledPredicate = new CanonicalReference<>();
 
@@ -586,7 +588,7 @@ public class WorldConfig extends Part {
     public double waypointUpdateScale = 4000.0D;
     public boolean disableCriterionTrigger = false;
     public boolean cactusCheckSurvivalBeforeGrowth = false;
-    public boolean enableSuffocationOptimization = true; // Rolia - default ON: vanilla already caps suffocation via invulnerableTime, so the damage RATE is unchanged (phase-shifted by <=9 ticks)
+    public boolean enableSuffocationOptimization = io.rolia.RoliaConfig.canvasSuffocationOptimization(); // Rolia - Canvas default (false) unless canvas-overrides.suffocation-optimization
 
     public Sleeping sleeping = new Sleeping();
     public static class Sleeping extends Part {

@@ -353,7 +353,7 @@
                                  if (isValidPositionForMob(level, mob, nearestPlayerDistanceSqr)) {
                                      groupData = mob.finalizeSpawn(
                                          level, level.getCurrentDifficultyAt(mob.blockPosition()), EntitySpawnReason.NATURAL, groupData
-@@ -364,8 +_,13 @@
+@@ -364,8 +_,20 @@
              return false;
          }
  
@@ -365,6 +365,13 @@
          ChunkPos chunkPos = ChunkPos.containing(pos);
          return Objects.equals(chunkPos, chunk.getPos()) || level.canSpawnEntitiesInChunk(chunkPos);
      }
++
++    // Rolia - Canvas's clamp helper, needed again by the Canvas placement path in
++    // spawnCategoryForPosition. Named roliaClampToChunk rather than clamp so it cannot collide with
++    // anything upstream adds later.
++    private static int roliaClampToChunk(final int val, final int min, final int max) {
++        return val < min ? min : (val > max ? max : val);
++    }
  
      // Paper start - PreCreatureSpawnEvent
 @@ -383,6 +_,8 @@

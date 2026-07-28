@@ -334,8 +334,10 @@ public class GlobalConfiguration extends Part {
                     Style.wrap(
                         "Canvas introduces extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are.",
                         // Rolia - default changed from THROW to LOG, see below
-                        "Rolia changed the default from THROW to LOG: Canvas's own docs say THROW can crash the server, and a"
-                            + " misbehaving plugin should not be able to take a production server down. Set it back to THROW when debugging."
+                        "Canvas's default is THROW, and Canvas's own documentation for it says THROW can crash the server."
+                            + " Rolia leaves that default alone. Set canvas-overrides.log-instead-of-throwing-on-guard-violation"
+                            + " in rolia.yml to make LOG the default instead, so a misbehaving plugin degrades the server rather"
+                            + " than stopping it. An explicit value here always wins over that."
                     ).defineEnum(GuardSeverity.class, (severity) -> {
                         return switch (severity) {
                             case LOG -> "Just logs a warning in console, but continues the operation";
@@ -348,7 +350,9 @@ public class GlobalConfiguration extends Part {
 
         public long overloadedLogMillis = 5_000L;
         public float defaultTickRate = 20.0F;
-        public GuardSeverity guardSeverity = GuardSeverity.LOG; // Rolia - was THROW; a misbehaving plugin should not crash a production server
+        // Rolia - Canvas's default is THROW and it stays THROW. Set
+        // canvas-overrides.log-instead-of-throwing-on-guard-violation in rolia.yml to make it LOG.
+        public GuardSeverity guardSeverity = io.rolia.RoliaConfig.canvasGuardSeverityLog() ? GuardSeverity.LOG : GuardSeverity.THROW;
 
         public enum GuardSeverity {
             SILENT,
@@ -535,8 +539,8 @@ public class GlobalConfiguration extends Part {
         }
 
         public boolean filterVelocityPacket = false; // Rolia - left off: it changes client-side motion smoothing
-        public boolean filterMovePackets = true;     // Rolia - default ON: drops only zero-delta move packets, invisible to players
-        public boolean alternativePlayerListTick = true; // Rolia - default ON: spreads the tab-list ping refresh, matters at 100+ players
+        public boolean filterMovePackets = io.rolia.RoliaConfig.canvasFilterMovePackets(); // Rolia - Canvas default (false) unless canvas-overrides.filter-zero-delta-move-packets
+        public boolean alternativePlayerListTick = io.rolia.RoliaConfig.canvasAltPlayerListTick(); // Rolia - Canvas default (false) unless canvas-overrides.alternative-player-list-tick
         public int playerInfoSendInterval = 600;
         public boolean asyncProtocolSwitch = false;
         public int maximumPacketBytes = 8388608;
@@ -550,9 +554,10 @@ public class GlobalConfiguration extends Part {
         // Rolia - default changed from false to true, see docs below
         option("restoreVanillaEnderPearlBehavior").docs(
             "Restores and fixes Vanilla Ender Pearl behavior, broken by Folia.",
-            "Rolia changed the default from false to true: Folia dropped Vanilla's per-player ender pearl",
-            "tracking, so a pearl still in flight is not saved with the player. Leaving this off is a live",
-            "deviation from Vanilla - relog or a server restart mid-throw silently voids the pearl."
+            "Folia dropped Vanilla's per-player ender pearl tracking, so a pearl still in flight is not saved",
+            "with the player: a relog or a restart mid-throw silently voids it. Canvas's default (false) is",
+            "kept. Set vanilla-parity.ender-pearl-persistence in rolia.yml to make true the default, or just",
+            "set this option directly - an explicit value here always wins."
         );
 
         option("displayWorldLoadScreenForPortaling")
@@ -564,8 +569,10 @@ public class GlobalConfiguration extends Part {
         // Rolia - default changed from false to true, see docs below
         option("tileEntitySnapshotCreation").docs(
             "Enables creation of tile entity snapshots on retrieving blockstates.",
-            "Rolia changed the default from false to true: CraftBukkit's contract is that getOwner() returns a",
-            "snapshot, and disabling this hands plugins a live-backed holder, silently changing public API semantics."
+            "CraftBukkit's contract is that getOwner() returns a SNAPSHOT; with this off, plugins get a",
+            "live-backed holder and a plugin that edits its copy is editing the real block entity. Canvas's",
+            "default (false) is kept. Set canvas-overrides.tile-entity-snapshot-creation in rolia.yml to make",
+            "true the default. An explicit value here always wins."
         );
 
         option("defaultRespawnDimensionKey")
@@ -578,11 +585,11 @@ public class GlobalConfiguration extends Part {
     }
 
     public String serverModName = ServerBuildInfo.buildInfo().brandName();
-    public boolean restoreVanillaEnderPearlBehavior = true; // Rolia - was false; Folia disabled per-player ender pearl tracking, so pearls in flight are not saved with the player - a live Vanilla deviation
+    public boolean restoreVanillaEnderPearlBehavior = io.rolia.RoliaConfig.parityEnderPearl(); // Rolia - Canvas default (false) unless vanilla-parity.ender-pearl-persistence
     public boolean displayWorldLoadScreenForPortaling = true;
     public boolean displayWorldLoadScreenForTeleporting = true;
-    public boolean cacheMinecraft2BukkitEntityTypeConversion = true; // Rolia - default ON: a pure memo, no behaviour change
-    public boolean tileEntitySnapshotCreation = true; // Rolia - was false; CraftBukkit's getOwner() contract is a snapshot, not a live-backed holder
+    public boolean cacheMinecraft2BukkitEntityTypeConversion = io.rolia.RoliaConfig.canvasCacheEntityTypeConversion(); // Rolia - Canvas default (false) unless canvas-overrides.cache-entity-type-conversion
+    public boolean tileEntitySnapshotCreation = io.rolia.RoliaConfig.canvasTileEntitySnapshot(); // Rolia - Canvas default (false) unless canvas-overrides.tile-entity-snapshot-creation
     public String defaultRespawnDimensionKey = Level.OVERWORLD.identifier().toString();
 
     public static @NonNull ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {

@@ -80,6 +80,21 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
      */
     private final int dimensionId;
 
+    /**
+     * Rolia - {@code secure-seed.enabled: false}. Every override below then delegates straight to
+     * {@link WorldgenRandom}, so all fifteen worldgen call sites become vanilla without any of them
+     * being touched.
+     *
+     * <p>This works because of a property of those call sites: every one of them re-seeds through
+     * {@code setDecorationSeed}, {@code setFeatureSeed}, {@code setLargeFeatureSeed},
+     * {@code setLargeFeatureWithSalt} or {@code setSeed} immediately after construction, exactly as
+     * vanilla does, so delegating those five methods reproduces vanilla's stream bit for bit. The two
+     * sites that do NOT re-seed - stronghold ring generation and slime chunks - are handled explicitly:
+     * the former is constructed from the level seed below, and the latter has its own vanilla path in
+     * {@link #seedSlimeChunk}.</p>
+     */
+    private final boolean disabled;
+
     /** Worldgen paths: the dimension comes from the thread that {@code setupGlobals} prepared. */
     public WorldgenCryptoRandom(int x, int z, Globals.Salt typeSalt, long salt) {
         this(Globals.dimension.get(), x, z, typeSalt, salt);
@@ -87,8 +102,17 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     /** Rolia - explicit dimension, for every call site that is NOT on a prepared worldgen thread. */
     public WorldgenCryptoRandom(int dimensionId, int x, int z, Globals.Salt typeSalt, long salt) {
-        super(new LegacyRandomSource(0L));
+        // Rolia - when the secure seed is off, start from the public level seed, which is what vanilla's
+        // `new WorldgenRandom(new LegacyRandomSource(level.getSeed()))` does at the sites that use the
+        // instance without re-seeding it.
+        super(new LegacyRandomSource(Globals.isSecureSeedEnabled() ? 0L : Globals.levelSeed()));
         this.dimensionId = dimensionId;
+        this.disabled = !Globals.isSecureSeedEnabled();
+
+        if (this.disabled) {
+            // Nothing keyed to set up: this instance is now an ordinary WorldgenRandom.
+            return;
+        }
 
         if (typeSalt == null) {
             // fork() fills the state itself; leave a non-degenerate value so an unseeded instance can
@@ -104,8 +128,20 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
     /**
      * Rolia - slime chunks. The dimension MUST be passed explicitly: this is reachable from the Bukkit
      * API and from spawn checks driven by /summon, neither of which runs on a prepared worldgen thread.
+     *
+     * <p>This is one of only two call sites that USES the instance without re-seeding it, so when the
+     * secure seed is switched off it needs vanilla's own construction rather than the generic fallback -
+     * hence the level seed and Spigot's slime seed being passed in. Getting this wrong would move every
+     * slime chunk on a server that had the secure seed disabled, which is precisely the kind of silent
+     * difference this fork exists to avoid.</p>
+     *
+     * @param levelSeed the public level seed, as {@code WorldgenRandom.seedSlimeChunk} expects
+     * @param slimeSeed {@code spigotConfig.slimeSeed} (vanilla's 987234911L unless configured)
      */
-    public static RandomSource seedSlimeChunk(int dimensionId, int chunkX, int chunkZ) {
+    public static RandomSource seedSlimeChunk(int dimensionId, int chunkX, int chunkZ, long levelSeed, long slimeSeed) {
+        if (!Globals.isSecureSeedEnabled()) {
+            return WorldgenRandom.seedSlimeChunk(chunkX, chunkZ, levelSeed, slimeSeed);
+        }
         return new WorldgenCryptoRandom(dimensionId, chunkX, chunkZ, Globals.Salt.SLIME_CHUNK, 0);
     }
 
@@ -158,6 +194,9 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public int next(int bits) {
+        if (this.disabled) {
+            return super.next(bits);
+        }
         // Take the high bits: Xoroshiro128++'s low bits are the weakest, and vanilla's own
         // XoroshiroRandomSource does exactly this.
         return (int) (nextBits64() >>> (64 - bits));
@@ -165,11 +204,38 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public long nextLong() {
+        if (this.disabled) {
+            // Vanilla BitRandomSource#nextLong, written out rather than delegated. nextLong(),
+            // nextInt(int) and consumeCount() are DEFAULT METHODS on an interface the superclass
+            // implements, and `super.x()` through that chain is the kind of thing that compiles on one
+            // Minecraft version and not the next. super.next(int) is safe because LegacyRandomSource
+            // declares it outright.
+            final int hi = super.next(32);
+            final int lo = super.next(32);
+            return ((long) hi << 32) + (long) lo;
+        }
         return nextBits64();
     }
 
     @Override
     public int nextInt(int bound) {
+        if (this.disabled) {
+            if (bound <= 0) {
+                throw new IllegalArgumentException("Bound must be positive");
+            }
+            // Vanilla BitRandomSource#nextInt, same reasoning as nextLong above: identical draw count
+            // and identical rejection loop, so the stream matches vanilla exactly.
+            if ((bound & -bound) == bound) {
+                return (int) (((long) bound * (long) super.next(31)) >> 31);
+            }
+            int i;
+            int j;
+            do {
+                i = super.next(31);
+                j = i % bound;
+            } while (i - j + (bound - 1) < 0);
+            return j;
+        }
         // Match vanilla: a non-positive bound is a programming error, not undefined behaviour.
         if (bound <= 0) {
             throw new IllegalArgumentException("Bound must be positive");
@@ -192,6 +258,14 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public void consumeCount(int count) {
+        if (this.disabled) {
+            // Vanilla RandomSource#consumeCount is `for (i < count) this.nextInt();`, and nextInt() is
+            // next(32). Written out for the same reason as nextLong/nextInt above.
+            for (int i = 0; i < count; i++) {
+                super.next(32);
+            }
+            return;
+        }
         // RandomSource#consumeCount skips `count` rounds of nextInt(), i.e. count draws - not count
         // bits, which is what builds 39-40 did (a 32x mismatch that broke PerlinNoise.skipOctave's
         // octave alignment). A non-positive count is a no-op in vanilla.
@@ -206,6 +280,9 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
      */
     @Override
     public @NotNull RandomSource fork() {
+        if (this.disabled) {
+            return super.fork();
+        }
         final long a = nextBits64();
         long b = nextBits64();
         if ((a | b) == 0L) {
@@ -225,6 +302,9 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
      */
     @Override
     public PositionalRandomFactory forkPositional() {
+        if (this.disabled) {
+            return super.forkPositional();
+        }
         final long lo = nextBits64();
         final long hi = nextBits64();
         return new XoroshiroRandomSource(lo, hi).forkPositional();
@@ -238,7 +318,9 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
      */
     @Override
     public void setSeed(long seed) {
-        if (this.macIn == null) {
+        // Rolia - macIn == null means we are still inside LegacyRandomSource's constructor (see above);
+        // `disabled` is not assigned yet at that point either, so this check has to come first.
+        if (this.macIn == null || this.disabled) {
             super.setSeed(seed);
             return;
         }
@@ -248,17 +330,28 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public long setDecorationSeed(long worldSeed, int blockX, int blockZ) {
+        if (this.disabled) {
+            return super.setDecorationSeed(worldSeed, blockX, blockZ);
+        }
         setSecureSeed(blockX, blockZ, Globals.Salt.POPULATION, 0);
         return ((long) blockX << 32) | ((long) blockZ & 0xffffffffL);
     }
 
     @Override
     public void setFeatureSeed(long populationSeed, int index, int step) {
+        if (this.disabled) {
+            super.setFeatureSeed(populationSeed, index, step);
+            return;
+        }
         setSecureSeed((int) (populationSeed >> 32), (int) populationSeed, Globals.Salt.DECORATION, index + 10000L * step);
     }
 
     @Override
     public void setLargeFeatureSeed(long worldSeed, int chunkX, int chunkZ) {
+        if (this.disabled) {
+            super.setLargeFeatureSeed(worldSeed, chunkX, chunkZ);
+            return;
+        }
         // Keep an explicitly chosen domain instead of forcing GENERATE_FEATURE. Carvers are constructed
         // with Salt.CARVER and then reseeded through here; forcing the structure domain made carver
         // index 0 produce a stream identical to Structure.makeRandom for the same chunk, and a player
@@ -269,6 +362,10 @@ public class WorldgenCryptoRandom extends WorldgenRandom {
 
     @Override
     public void setLargeFeatureWithSalt(long worldSeed, int regionX, int regionZ, int salt) {
+        if (this.disabled) {
+            super.setLargeFeatureWithSalt(worldSeed, regionX, regionZ, salt);
+            return;
+        }
         setSecureSeed(regionX, regionZ, Globals.Salt.POTENTIONAL_FEATURE, salt);
     }
 }

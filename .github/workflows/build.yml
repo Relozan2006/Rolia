@@ -28,18 +28,27 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 240   # Rolia - build 40 adds the terrain, fingerprint-guard and crypto runs
+    env:
+      # Rolia - the ONE place the build number is written. It used to be hardcoded in three separate
+      # places (the build step, the test step and the release step), and the release tag came from the
+      # third, so editing two of them shipped a mislabelled release.
+      BUILD_NUMBER: 43
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      # Rolia - actions are pinned to a commit SHA, not a tag. A tag is a movable pointer: whoever
+      # controls the action repository can retarget v4 at new code, and it would run with this
+      # workflow's write permission on the next build. The trailing comment records which release
+      # the SHA corresponds to, so upgrading stays a deliberate, reviewable edit.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
         with:
           distribution: temurin
           java-version: 25
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
 
       - name: BLAKE2b keyed-mode test vectors (expected values)
         # Rolia - build 40 replaces the homemade H(K xor M) with RFC 7693 keyed BLAKE2b.
@@ -127,7 +136,7 @@ jobs:
       - name: Dump reference sources
         run: |
           mkdir -p /tmp/out/refsrc
-          for f in net/minecraft/world/RandomSequences.java net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java net/minecraft/world/entity/Mob.java net/minecraft/world/entity/ai/Brain.java net/minecraft/world/entity/npc/villager/Villager.java net/minecraft/world/entity/LivingEntity.java net/minecraft/world/entity/Entity.java net/minecraft/world/entity/ai/goal/GoalSelector.java net/minecraft/world/entity/ai/goal/Goal.java net/minecraft/world/entity/ai/goal/WrappedGoal.java net/minecraft/world/entity/ai/sensing/Sensor.java net/minecraft/network/FriendlyByteBuf.java net/minecraft/network/VarInt.java net/minecraft/network/VarLong.java net/minecraft/network/syncher/SynchedEntityData.java net/minecraft/network/protocol/game/ClientboundLightUpdatePacketData.java net/minecraft/world/phys/shapes/Shapes.java net/minecraft/world/phys/shapes/CollisionContext.java net/minecraft/core/MappedRegistry.java net/minecraft/core/Holder.java net/minecraft/core/Registry.java net/minecraft/world/level/chunk/PalettedContainer.java net/minecraft/util/RandomSource.java net/minecraft/util/Mth.java net/minecraft/world/level/levelgen/RandomState.java net/minecraft/world/level/chunk/ChunkGenerator.java net/minecraft/world/entity/projectile/ThrownEnderpearl.java net/minecraft/world/entity/TamableAnimal.java net/minecraft/world/entity/Leashable.java net/minecraft/nbt/CompoundTag.java net/minecraft/world/entity/raid/Raid.java net/minecraft/world/level/chunk/storage/RegionFile.java net/minecraft/world/level/chunk/storage/RegionFileStorage.java net/minecraft/world/level/Level.java net/minecraft/server/level/ServerLevel.java net/minecraft/server/MinecraftServer.java net/minecraft/server/players/PlayerList.java net/minecraft/world/entity/npc/villager/VillagerTrades.java net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java net/minecraft/world/level/levelgen/carver/WorldCarver.java; do
+          for f in net/minecraft/world/RandomSequences.java net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java net/minecraft/world/entity/Mob.java net/minecraft/world/entity/ai/Brain.java net/minecraft/world/entity/npc/villager/Villager.java net/minecraft/world/entity/LivingEntity.java net/minecraft/world/entity/Entity.java net/minecraft/world/entity/ai/goal/GoalSelector.java net/minecraft/world/entity/ai/goal/Goal.java net/minecraft/world/entity/ai/goal/WrappedGoal.java net/minecraft/world/entity/ai/sensing/Sensor.java net/minecraft/network/FriendlyByteBuf.java net/minecraft/network/VarInt.java net/minecraft/network/VarLong.java net/minecraft/network/syncher/SynchedEntityData.java net/minecraft/network/protocol/game/ClientboundLightUpdatePacketData.java net/minecraft/world/phys/shapes/Shapes.java net/minecraft/world/phys/shapes/CollisionContext.java net/minecraft/core/MappedRegistry.java net/minecraft/core/Holder.java net/minecraft/core/Registry.java net/minecraft/world/level/chunk/PalettedContainer.java net/minecraft/util/RandomSource.java net/minecraft/util/Mth.java net/minecraft/world/level/levelgen/RandomState.java net/minecraft/world/level/chunk/ChunkGenerator.java net/minecraft/world/entity/projectile/ThrownEnderpearl.java net/minecraft/world/entity/TamableAnimal.java net/minecraft/world/entity/Leashable.java net/minecraft/nbt/CompoundTag.java net/minecraft/world/entity/raid/Raid.java net/minecraft/world/level/chunk/storage/RegionFile.java net/minecraft/world/level/chunk/storage/RegionFileStorage.java net/minecraft/world/level/Level.java net/minecraft/server/level/ServerLevel.java net/minecraft/server/MinecraftServer.java net/minecraft/server/players/PlayerList.java net/minecraft/world/entity/npc/villager/VillagerTrades.java net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java net/minecraft/world/level/levelgen/carver/WorldCarver.java net/minecraft/server/level/ServerEntity.java net/minecraft/server/level/ChunkMap.java net/minecraft/world/entity/ai/sensing/Sensing.java net/minecraft/world/phys/shapes/CubeVoxelShape.java net/minecraft/world/entity/ai/attributes/AttributeMap.java net/minecraft/world/entity/ai/attributes/AttributeInstance.java net/minecraft/util/ClassInstanceMultiMap.java net/minecraft/world/level/block/ObserverBlock.java net/minecraft/world/entity/boss/enderdragon/EndCrystal.java net/minecraft/server/network/ServerGamePacketListenerImpl.java net/minecraft/world/item/HoeItem.java net/minecraft/world/inventory/AnvilMenu.java net/minecraft/world/level/block/SpawnerBlock.java net/minecraft/world/item/EnderpearlItem.java net/minecraft/world/level/redstone/CollectingNeighborUpdater.java net/minecraft/world/level/redstone/NeighborUpdater.java net/minecraft/world/level/block/CropBlock.java net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java net/minecraft/world/entity/ai/goal/GoalSelector.java net/minecraft/world/level/portal/PortalProcessor.java; do
             src="canvas-server/src/minecraft/java/$f"
             if [ -f "$src" ]; then cp "$src" "/tmp/out/refsrc/$(basename $f)"; else echo "MISSING $f" >> /tmp/out/refsrc/missing.txt; fi
           done
@@ -813,8 +822,6 @@ jobs:
 
       - name: Build paperclip jar
         timeout-minutes: 90
-        env:
-          BUILD_NUMBER: 42
         run: |
           set -e -o pipefail
           source /tmp/ci-helpers.sh
@@ -878,17 +885,14 @@ jobs:
 
       - name: Run test suite
         timeout-minutes: 60
-        # Rolia - STILL REPORT-ONLY, deliberately. Build 39 ran this suite for the first time and it
-        # failed on a PRE-EXISTING upstream test (:canvas-api:test > AnnotationTest > testAll()) that
-        # Rolia has not touched, so turning it into a hard gate now would block build 40 on a defect
-        # we did not introduce. What build 40 changes is visibility: the step used to end in a bare
-        # `exit 0` with the counts buried in 50k lines of gradle output. It now prints ONE summary
-        # line (from the JUnit XML, not from grepping the console) and repeats it in the job summary,
-        # and it separates KNOWN pre-existing failures from NEW ones. Flip `continue-on-error` off
-        # once "NEW failures: 0" holds and the known one is fixed upstream.
-        continue-on-error: true
-        env:
-          BUILD_NUMBER: 42
+        # Rolia - build 43: this is a HARD GATE. It was report-only from build 39, because the suite
+        # failed on a pre-existing upstream test (:canvas-api:test > AnnotationTest > testAll()) that
+        # Rolia never touched, and blocking on someone else's defect is not a useful gate. That one
+        # test is now excluded by name in build.gradle.kts, so everything that remains is either ours
+        # or something we have chosen to depend on - and any failure fails the build.
+        #
+        # The summary below is computed from the JUnit XML rather than by grepping gradle's console
+        # output, because grepping misses whole suites and double-counts retries.
         run: |
           set +e
           ./gradlew test --stacktrace 2>&1 | tee test.log
@@ -902,7 +906,9 @@ jobs:
 
           # Rolia - the JUnit XML is the only trustworthy source of pass/fail counts;
           # grepping gradle's console output misses suites and double-counts retries.
-          KNOWN = {"AnnotationTest.testAll"}   # build 39: pre-existing upstream failure in :canvas-api
+          # Rolia - build 43: empty. AnnotationTest is excluded in build.gradle.kts, so a failure
+          # appearing here is genuinely new and must fail the build.
+          KNOWN = set()
 
           total = failed = errored = skipped = 0
           names = []
@@ -949,12 +955,12 @@ jobs:
                   for n in sorted(set(names)):
                       f.write("- %s `%s`\n" % ("known" if n in KNOWN else "**new**", n))
           TESTSUM
+          cp -r canvas-server/build/reports/tests /tmp/out/test-reports 2>/dev/null || true
           if [ "$rc" != "0" ]; then
-            echo "NOTE: the failures above are REPORT-ONLY. They do not fail the build."
+            echo "FAIL: the test suite did not pass. Failures are listed above."
             grep -nE 'FAILED|tests? (completed|failed)' test.log | head -40
           fi
-          cp -r canvas-server/build/reports/tests /tmp/out/test-reports 2>/dev/null || true
-          exit 0
+          exit "$rc"
 
       - name: Smoke test server (run twice)
         timeout-minutes: 50
@@ -1006,10 +1012,9 @@ jobs:
           run_server first $START_SH_FLAGS   # fresh world, shipped start.sh flags
           echo "=== F3 server brand (serverModName -> minecraft:brand payload) ==="
           grep -i 'serverModName' canvas-server.yml 2>/dev/null || echo "(canvas-server.yml not persisted on first run; F3 brand = brandName() = Rolia)"
-          # Rolia - build 40 turns the performance defaults ON. DAB is asserted below (it is the
-          # one that shows up in the Rolia startup line); the Canvas-side settings are printed for
-          # the record because their key names live in Canvas's own config, not in ours.
-          echo "=== performance defaults actually written to the configs ==="
+          # Rolia - build 43 turns every performance default OFF; the assertion lives in the
+          # auto-random step, which boots with no rolia.yml at all. Printed here for the record.
+          echo "=== generated rolia.yml: defaults actually written ==="
           grep -inE 'affinity|scheduler|region.*thread' canvas-server.yml 2>/dev/null | head -12 || echo "(no scheduler keys found in canvas-server.yml)"
           grep -inE 'faster-network|dab|enabled' rolia.yml 2>/dev/null | head -12 || echo "(rolia.yml not present)"
           run_server second -Xmx3G           # restart on same world: must load cleanly, identical feature seed
@@ -1421,18 +1426,184 @@ jobs:
           echo "B secure seed fingerprint: $FPB"
           [ -n "$FPA" ] && [ -n "$FPB" ] || { echo "FAIL: could not extract the secure seed fingerprints"; exit 1; }
           [ "$FPA" != "$FPB" ] || { echo "FAIL: two fresh servers derived the SAME secure seed (fp=$FPA)"; exit 1; }
-          # Rolia - build 40 ships DAB ENABLED BY DEFAULT. These two runs deleted rolia.yml before
-          # starting, so whatever they report is the shipped default and nothing else. The "DAB
-          # enabled smoke" step only ever proved that an explicit `enabled: true` is honoured.
+          # Rolia - build 43 INVERTS the defaults. The promise is now "stock Rolia behaves exactly
+          # like stock Canvas, plus the secure seed", so a server booted with no rolia.yml at all must
+          # report DAB off AND must report that every option is still at its default. The second
+          # assertion is the one with teeth: it catches a new option accidentally shipped enabled,
+          # which the DAB check alone would never see.
           for t in a b; do
-            grep -qE 'secure seed ACTIVE fp=[0-9a-f]{16}; DAB ON' "auto_$t.log" || {
-              echo "FAIL: DAB is not ON by default - build 40 ships the performance defaults enabled."
+            grep -qE 'secure seed ACTIVE fp=[0-9a-f]{16}; DAB off' "auto_$t.log" || {
+              echo "FAIL: DAB is not OFF by default - build 43 ships every optimization disabled."
               grep -i 'config loaded' "auto_$t.log" | head || true
               exit 1
             }
+            grep -qE 'all [0-9]+ options are at their defaults' "auto_$t.log" || {
+              echo "FAIL: a fresh server reports non-default options. Stock Rolia must equal stock Canvas."
+              grep -iE 'non-default option' "auto_$t.log" | head || true
+              exit 1
+            }
           done
-          echo "DEFAULTS OK: a server started with no rolia.yml at all comes up with DAB ON"
+          echo "DEFAULTS OK: a server started with no rolia.yml comes up with DAB off and every option at its default"
           echo "AUTO-RANDOM OK: fresh servers get DIFFERENT 1024-bit feature seeds and DIFFERENT secure seed fingerprints"
+
+      - name: Config contract (defaults, key dump, Russian docs)
+        timeout-minutes: 25
+        # Rolia - build 43 makes three promises about rolia.yml, and this step is what makes them
+        # true rather than merely intended:
+        #
+        #   1. EVERY boolean option defaults to false, except secure-seed.enabled. That is the whole
+        #      "stock Rolia behaves like stock Canvas" claim, and without a test it survives exactly
+        #      until the first person adds an option they are enthusiastic about.
+        #   2. docs/rolia.yml.ru.md documents EXACTLY the options that exist - no missing keys, no
+        #      keys for options that were removed. Translated documentation rots silently otherwise.
+        #   3. The generated file round-trips: parse what we wrote, and every value comes back.
+        #
+        # The key list comes from the server itself (-Drolia.dumpConfigKeys), not from grepping the
+        # source, so it reflects what the running server actually reads.
+        run: |
+          set -e -o pipefail
+          source /tmp/ci-helpers.sh
+          reap_servers pre
+          [ -f /tmp/rolia.jar ] || { echo "FAIL: /tmp/rolia.jar missing"; exit 1; }
+          mkdir -p testrun/cfg && cd testrun/cfg
+          echo "eula=true" > eula.txt
+          rm -f rolia.yml /tmp/rolia-keys.txt
+          rm -f input exitcode; mkfifo input
+          (set +e; java -Xmx3G -Drolia.dumpConfigKeys=/tmp/rolia-keys.txt -jar /tmp/rolia.jar --nogui < input > cfg.log 2>&1; echo $? > exitcode) &
+          exec 3>input
+          for i in $(seq 1 60); do grep -q 'Done (' cfg.log 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
+          grep -q 'Done (' cfg.log 2>/dev/null && { echo "stop" >&3 || true; }
+          wait_exit_any cfg cfg.log
+          exec 3>&- 2>/dev/null || true
+
+          [ -s /tmp/rolia-keys.txt ] || { echo "FAIL: the server wrote no config key dump"; tail -60 cfg.log; exit 1; }
+          echo "=== registry ($(wc -l < /tmp/rolia-keys.txt) options) ==="
+          cat /tmp/rolia-keys.txt
+          [ -f rolia.yml ] || { echo "FAIL: the server generated no rolia.yml"; ls -la; exit 1; }
+          cp rolia.yml /tmp/out/rolia.yml.generated
+          cp /tmp/rolia-keys.txt /tmp/out/rolia-config-keys.txt
+
+          python3 - <<'CFGCHECK'
+          import sys, re, os
+          keys = []
+          for line in open("/tmp/rolia-keys.txt", encoding="utf-8"):
+              line = line.strip()
+              if not line:
+                  continue
+              path, typ, default, reload = line.split("|", 3)
+              keys.append((path, typ, default, reload))
+
+          fail = []
+
+          # 1. every boolean defaults to false, except the one documented exception
+          ALLOWED_TRUE = {
+              "secure-seed.enabled",                                  # the reason this fork exists
+              "optimizations.villager-lobotomize.wait-until-trade-locked",  # only read when its parent is on
+              "advisory.warn-chunk-system-threads",                   # a log line, changes no behaviour
+          }
+          for path, typ, default, _ in keys:
+              if typ == "bool" and default == "true" and path not in ALLOWED_TRUE:
+                  fail.append("%s defaults to true; build 43 ships every behaviour switch off" % path)
+
+          # 2. the Russian documentation covers exactly these keys
+          doc_path = "docs/rolia.yml.ru.md"
+          repo = os.environ["GITHUB_WORKSPACE"]
+          doc = open(os.path.join(repo, doc_path), encoding="utf-8").read()
+          declared = {k[0] for k in keys}
+          # Only treat a backticked dotted token as an option reference when its FIRST segment is a
+          # real top-level section. Prefix or extension matching was tried first and is wrong in both
+          # directions: it flagged `rolia.yml`, `level.dat` and `spigot.yml` as unknown options, and it
+          # silently excused a typo in any `canvas-overrides.*` key because they share a prefix with
+          # `canvas-server.yml`.
+          sections = {k.split(".")[0] for k in declared}
+          documented = {
+              d for d in re.findall(r"`([a-z0-9-]+(?:\.[a-z0-9-]+)+)`", doc)
+              if d.split(".")[0] in sections
+          }
+          missing = sorted(declared - documented)
+          extra = sorted(documented - declared)
+          for m in missing:
+              fail.append("%s is not documented in %s" % (m, doc_path))
+          for e in extra:
+              fail.append("%s is documented in %s but no such option exists" % (e, doc_path))
+
+          # 3. the generated file round-trips: every key we declared is present in it
+          text = open("rolia.yml", encoding="utf-8").read()
+          for path, _, _, _ in keys:
+              leaf = path.rsplit(".", 1)[-1]
+              if not re.search(r"^\s*%s:" % re.escape(leaf), text, re.M):
+                  fail.append("%s was declared but does not appear in the generated rolia.yml" % path)
+
+          print("checked %d options against %s" % (len(keys), doc_path))
+          if fail:
+              print("")
+              print("CONFIG CONTRACT FAILURES:")
+              for f in fail:
+                  print("  - %s" % f)
+              sys.exit(1)
+          print("CONFIG CONTRACT OK: defaults are off, docs match the registry, the file round-trips")
+          CFGCHECK
+
+      - name: Secure seed can be switched off (worldgen falls back to Vanilla)
+        timeout-minutes: 30
+        # Rolia - secure-seed.enabled: false is new in build 43, and "we added a switch" is a much
+        # weaker claim than "the switch works". A half-applied disable - where some systems fall back
+        # to Vanilla and others still consult the secret - would be the worst possible outcome: worlds
+        # that look ordinary but are not portable, and no error anywhere.
+        #
+        # The observable is the slime-chunk self-test digest, which runs the full secret pipeline
+        # (WorldgenCryptoRandom -> the keyed MAC -> the dimension separator) over a fixed 32x32 window
+        # at startup, without generating a world. The contract:
+        #
+        #   enabled:false + secret A  ==  enabled:false + secret B     (the secret is truly ignored)
+        #   enabled:true  + secret A  !=  enabled:false + secret A     (it is not ignored when on)
+        run: |
+          set -e -o pipefail
+          source /tmp/ci-helpers.sh
+          reap_servers pre
+          mkdir -p testrun/seedoff && cd testrun/seedoff
+          echo "eula=true" > eula.txt
+          S1="SEED_OFF_SALT_ONE__0123456789abcdef0123456789abcdef0123456789abcdef"
+          S2="SEED_OFF_SALT_TWO__fedcba9876543210fedcba9876543210fedcba9876543210"
+
+          boot () {   # boot <tag> <enabled> <salt>
+            tag="$1"; en="$2"; slt="$3"
+            rm -rf world world_nether world_the_end rolia.yml
+            printf 'secure-seed:\n  enabled: %s\n  salt: "%s"\n' "$en" "$slt" > rolia.yml
+            rm -f input exitcode; mkfifo input
+            (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "$tag.log" 2>&1; echo $? > exitcode) &
+            exec 3>input
+            for i in $(seq 1 60); do grep -q 'Done (' "$tag.log" 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
+            grep -q 'Done (' "$tag.log" 2>/dev/null && { echo "stop" >&3 || true; }
+            wait_exit_any "$tag" "$tag.log"
+            exec 3>&- 2>/dev/null || true
+          }
+
+          boot offA false "$S1"
+          boot offB false "$S2"
+          boot onA  true  "$S1"
+
+          dig () { grep -oE 'slime-selftest [0-9a-f]{8,}' "$1.log" | awk '{print $2}' | head -1; }
+          OFFA=$(dig offA); OFFB=$(dig offB); ONA=$(dig onA)
+          echo "enabled=false salt=A : $OFFA"
+          echo "enabled=false salt=B : $OFFB"
+          echo "enabled=true  salt=A : $ONA"
+          [ -n "$OFFA" ] && [ -n "$OFFB" ] && [ -n "$ONA" ] || {
+            echo "FAIL: a run produced no slime-selftest line"; tail -40 offA.log; exit 1; }
+
+          [ "$OFFA" = "$OFFB" ] || {
+            echo "FAIL: with secure-seed.enabled=false, two DIFFERENT secrets still produced different"
+            echo "      worldgen. The switch does not actually bypass the secret, so a world generated"
+            echo "      with it off would not be an ordinary Minecraft world after all."
+            exit 1; }
+          [ "$ONA" != "$OFFA" ] || {
+            echo "FAIL: enabling the secure seed changed nothing. Either the switch is stuck off or the"
+            echo "      secret never reaches worldgen at all."
+            exit 1; }
+
+          grep -qE 'secure seed DISABLED' offA.log || {
+            echo "FAIL: the server did not say out loud that the secure seed is off."; exit 1; }
+          echo "SEED-OFF OK: the switch fully bypasses the secret, and says so in the log."
 
       - name: Publish result to ci-output branch
         # Rolia - PR builds must not push to ci-output (fork tokens are read-only).
@@ -1492,7 +1663,6 @@ jobs:
           set -e -o pipefail
           source /tmp/ci-helpers.sh
           reap_servers pre
-          BUILD_NUMBER=42
           TAG="v26.1.2-build.$BUILD_NUMBER"
           JAR=/tmp/out/rolia-paperclip-26.1.2.jar
           [ -f "$JAR" ] || { echo "FAIL: $JAR not found - the publish step did not produce a release jar"; ls -la /tmp/out; exit 1; }

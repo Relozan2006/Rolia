@@ -62,14 +62,26 @@ public class Globals {
         if (!seedInitialized) {
             synchronized (Globals.class) { // Rolia - publish the shared world seed exactly once, safely
                 if (!seedInitialized) {
+                    // Rolia - the PUBLIC level seed, needed by WorldgenCryptoRandom to reproduce vanilla
+                    // exactly when the secure seed is switched off. Written before seedInitialized, so
+                    // the volatile write below publishes it too.
+                    levelSeed = world.getSeed();
                     long[] seed = normalizeLength(RoliaConfig.featureSeed());
                     System.arraycopy(seed, 0, worldSeed, 0, WORLD_SEED_LONGS);
                     seedInitialized = true; // Rolia - volatile write; publishes the array contents above
                     // Rolia - the one authoritative startup line, emitted at the point of publication and
                     // derived from real state, so it cannot report "active" for a seed that is not.
                     LOGGER.info("Rolia: config loaded (secure seed {}; DAB {}).",
-                        isActive() ? "ACTIVE fp=" + seedFingerprint() : "INACTIVE",
+                        isActive() ? "ACTIVE fp=" + seedFingerprint()
+                            : (RoliaConfig.secureSeedEnabled() ? "INACTIVE" : "DISABLED (secure-seed.enabled=false)"),
                         RoliaConfig.dabEnabled() ? "ON" : "off");
+                    if (!RoliaConfig.secureSeedEnabled()) {
+                        LOGGER.warn("Rolia: secure-seed.enabled is FALSE - worldgen is plain Vanilla and everything");
+                        LOGGER.warn("Rolia: in this world is computable from the public level-seed alone.");
+                    }
+                    // Rolia - one line per non-default option, so a support request never has to ask
+                    // "what does your rolia.yml say?" and a mystery is one log grep away.
+                    logNonDefaults();
                     // Rolia - CI asserts this against hashlib.blake2b; see Hashing#selfTestHex.
                     LOGGER.info("Rolia: blake2b-selftest {}", Hashing.selfTestHex());
                     LOGGER.info("Rolia: slime-selftest {}", slimeSelfTestHex());
@@ -92,6 +104,37 @@ public class Globals {
             verifyFingerprintOnce();
         }
         dimension.set(stableDimensionId(world.dimension()));
+    }
+
+    /**
+     * Rolia - list every option that is NOT at its default, once, at startup.
+     *
+     * <p>Stock Rolia is stock Canvas plus the secure seed, so this line is normally very short. When it
+     * is not, the operator (and anyone reading their log in a bug report) can see immediately which
+     * switches are responsible for whatever behaviour is being investigated. Secrets are excluded.</p>
+     */
+    private static void logNonDefaults() {
+        try {
+            final StringBuilder sb = new StringBuilder();
+            int n = 0;
+            for (final io.rolia.config.Opt<?> o : RoliaConfig.allOptions()) {
+                if (o.isSecret() || o.isDefault()) {
+                    continue;
+                }
+                if (n++ > 0) {
+                    sb.append(", ");
+                }
+                sb.append(o.path).append('=').append(o.yamlValue());
+            }
+            if (n == 0) {
+                LOGGER.info("Rolia: all {} options are at their defaults (stock Canvas behaviour + the secure seed).",
+                    RoliaConfig.allOptions().size());
+            } else {
+                LOGGER.info("Rolia: {} non-default option(s): {}", n, sb);
+            }
+        } catch (final Throwable t) {
+            LOGGER.warn("Rolia: could not list non-default options", t);
+        }
     }
 
     private static volatile boolean fingerprintDone = false;
@@ -177,6 +220,12 @@ public class Globals {
 
     /** Rolia - true once a real (non-zero) 1024-bit seed is in effect. Used by the startup log + CI gate. */
     public static boolean isActive() {
+        if (!isSecureSeedEnabled()) {
+            // Rolia - switched off in rolia.yml. This also makes seedFingerprint() return the all-zero
+            // value, so a world generated WITH the secret is detected on the next boot instead of
+            // silently continuing with vanilla generation against secret-generated chunks.
+            return false;
+        }
         if (!seedInitialized) {
             return false;
         }
@@ -228,6 +277,9 @@ public class Globals {
      * landform, which is exactly the thing we want hidden. They do not feed the overworld heightmap.</p>
      */
     public static boolean isPublicTerrainNoise(final net.minecraft.resources.ResourceKey<?> noise) {
+        if (!isSecureSeedEnabled()) {
+            return true; // Rolia - switched off: every noise goes back to the public root, i.e. vanilla
+        }
         final String path = noise.identifier().getPath();
         return switch (path) {
             case "continentalness", "continentalness_large",
@@ -239,6 +291,9 @@ public class Globals {
 
     /** Rolia - the same whitelist for the named positional factories (BlendedNoise uses "terrain"). */
     public static boolean isPublicTerrainFactory(final net.minecraft.resources.Identifier name) {
+        if (!isSecureSeedEnabled()) {
+            return true; // Rolia - switched off: vanilla routing
+        }
         return "terrain".equals(name.getPath());
     }
 
@@ -352,10 +407,42 @@ public class Globals {
         return seedBigInt.toString();
     }
 
+    /**
+     * Rolia - is the secure seed switched on? ({@code secure-seed.enabled} in rolia.yml, default true.)
+     *
+     * <p>This is the single gate for the whole system. When it is false, four things happen and nothing
+     * else needs to know about it:</p>
+     * <ul>
+     *   <li>{@link #isPublicTerrainNoise} and {@link #isPublicTerrainFactory} answer true for
+     *       everything, so {@code RandomState} routes every noise back through the public root;</li>
+     *   <li>{@link #secretPositionalFactory} and {@link #secretClimateSource} are not called at all -
+     *       the hooks in {@code RandomState} pick the vanilla expression instead;</li>
+     *   <li>{@link WorldgenCryptoRandom} degrades to the plain {@code WorldgenRandom} it extends, so
+     *       every one of the fifteen worldgen call sites becomes vanilla without being touched;</li>
+     *   <li>{@link #isActive} is false, so the fingerprint written beside {@code level.dat} is the
+     *       all-zero one - which means flipping this switch on a world that already exists is detected
+     *       and reported exactly like any other secret change.</li>
+     * </ul>
+     *
+     * <p>The result is an ordinary Minecraft world, derived from the ordinary level-seed, that can be
+     * moved to any Paper or Folia server.</p>
+     */
     public static boolean isSecureSeedEnabled() {
-        // Rolia - the secure seed is ALWAYS on and cannot be disabled.
-        return true;
+        return RoliaConfig.secureSeedEnabled();
     }
+
+    /**
+     * Rolia - the public level seed of the world being generated.
+     *
+     * <p>Captured in {@link #setupGlobals} because {@link WorldgenCryptoRandom} needs it to reproduce
+     * vanilla exactly when the secure seed is switched off, and it has no level reference of its own.
+     * All dimensions of a server share one level seed, so a single value is correct.</p>
+     */
+    public static long levelSeed() {
+        return levelSeed;
+    }
+
+    private static volatile long levelSeed;
 
     public static String getSecureSeedSalt() {
         return RoliaConfig.salt();
@@ -363,14 +450,27 @@ public class Globals {
 
     /**
      * Rolia - digest over isSlimeChunk for a fixed 32x32 chunk window, logged once at startup.
-     * CI asserts it is identical across two boots of the same world (catching any regression to an
-     * ambient/thread-dependent dimension separator) and different between two different secrets.
+     *
+     * <p>CI asserts three things about it, and between them they cover the whole secret pipeline
+     * cheaply, without generating a world:</p>
+     * <ul>
+     *   <li>identical across two boots of the same world - catching any regression to an ambient or
+     *       thread-dependent dimension separator;</li>
+     *   <li>different between two different secrets - proving the secret actually reaches worldgen;</li>
+     *   <li>with {@code secure-seed.enabled: false}, identical for two DIFFERENT secrets and equal to
+     *       what plain Vanilla would produce - proving the switch really does bypass the secret rather
+     *       than merely hiding it.</li>
+     * </ul>
+     *
+     * <p>The slime seed passed here is vanilla's own 987234911L rather than {@code spigotConfig.slimeSeed},
+     * because this runs before any world config is available and it only has to be a fixed constant to
+     * be comparable between runs.</p>
      */
     public static String slimeSelfTestHex() {
         long acc = 0x9E3779B97F4A7C15L;
         for (int x = -16; x < 16; x++) {
             for (int z = -16; z < 16; z++) {
-                acc = Long.rotateLeft(acc, 1) ^ (WorldgenCryptoRandom.seedSlimeChunk(0, x, z).nextInt(10) == 0 ? 0x5BD1E995L : 0x27D4EB2FL);
+                acc = Long.rotateLeft(acc, 1) ^ (WorldgenCryptoRandom.seedSlimeChunk(0, x, z, levelSeed, 987234911L).nextInt(10) == 0 ? 0x5BD1E995L : 0x27D4EB2FL);
                 acc *= 0xBF58476D1CE4E5B9L;
             }
         }

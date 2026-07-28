@@ -129,7 +129,7 @@ patch(RANDOMSTATE,
       "        this.aquiferRandom = this.random.fromHashOf(Identifier.withDefaultNamespace(\"aquifer\")).forkPositional();\n"
       "        this.oreRandom = this.random.fromHashOf(Identifier.withDefaultNamespace(\"ore\")).forkPositional();\n",
       "        this.random = settings.getRandomSource().newInstance(seed).forkPositional(); // Rolia - PUBLIC: terrain shape stays on the level seed\n"
-      "        this.roliaSecretRandom = io.rolia.secureseed.Globals.secretPositionalFactory(\"worldgen-root\"); // Rolia\n"
+      "        this.roliaSecretRandom = io.rolia.secureseed.Globals.isSecureSeedEnabled() ? io.rolia.secureseed.Globals.secretPositionalFactory(\"worldgen-root\") : this.random; // Rolia - secure-seed.enabled=false routes every SECRET system back through the public root, i.e. vanilla\n"
       "        this.noises = noises;\n"
       "        this.aquiferRandom = this.roliaSecretRandom.fromHashOf(Identifier.withDefaultNamespace(\"aquifer\")).forkPositional(); // Rolia - SECRET\n"
       "        this.oreRandom = this.roliaSecretRandom.fromHashOf(Identifier.withDefaultNamespace(\"ore\")).forkPositional(); // Rolia - SECRET\n",
@@ -159,12 +159,12 @@ patch(RANDOMSTATE,
 # is terrain, and public) through it.
 patch(RANDOMSTATE,
       "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(this.newLegacyInstance(0L), noiseData.value());\n",
-      "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(io.rolia.secureseed.Globals.secretClimateSource(0L), noiseData.value()); // Rolia - SECRET, full width\n",
+      "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(io.rolia.secureseed.Globals.isSecureSeedEnabled() ? io.rolia.secureseed.Globals.secretClimateSource(0L) : this.newLegacyInstance(0L), noiseData.value()); // Rolia - SECRET, full width (vanilla when secure-seed.enabled=false)\n",
       "RandomState nether temperature climate under the secret",
       hint="TEMPERATURE_NETHER")
 patch(RANDOMSTATE,
       "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(this.newLegacyInstance(1L), noiseData.value());\n",
-      "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(io.rolia.secureseed.Globals.secretClimateSource(1L), noiseData.value()); // Rolia - SECRET, full width\n",
+      "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(io.rolia.secureseed.Globals.isSecureSeedEnabled() ? io.rolia.secureseed.Globals.secretClimateSource(1L) : this.newLegacyInstance(1L), noiseData.value()); // Rolia - SECRET, full width (vanilla when secure-seed.enabled=false)\n",
       "RandomState nether vegetation climate under the secret",
       hint="VEGETATION_NETHER")
 

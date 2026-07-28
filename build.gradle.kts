@@ -79,6 +79,17 @@ subprojects {
             exceptionFormat = TestExceptionFormat.FULL
             events(TestLogEvent.STANDARD_OUT)
         }
+        // Rolia - test failures are a hard gate as of build 43. There is exactly one exception:
+        // org.bukkit.AnnotationTest, an upstream Paper test that lives in the generated paper-api test
+        // sources (which :canvas-api compiles in) and that fails before Rolia touches anything. It
+        // audits @NotNull/@Nullable coverage across the whole API surface, so excluding it does lose
+        // real coverage - that is the price of having a gate at all, and it should be re-enabled the
+        // moment upstream is green. Everything else now fails the build.
+        ignoreFailures = false
+        filter {
+            excludeTestsMatching("org.bukkit.AnnotationTest")
+            isFailOnNoMatchingTests = false
+        }
     }
 
     tasks.withType<AbstractPatchRouletteTask>().configureEach {
