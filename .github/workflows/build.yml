@@ -1467,6 +1467,9 @@ jobs:
           [ -f /tmp/rolia.jar ] || { echo "FAIL: /tmp/rolia.jar missing"; exit 1; }
           mkdir -p testrun/cfg && cd testrun/cfg
           echo "eula=true" > eula.txt
+          # Rolia - every server-launching step pins its own port and disables online-mode. A step that
+          # does not is one leftover JVM away from FAILED TO BIND TO PORT.
+          printf 'online-mode=false\nserver-port=25650\n' > server.properties
           rm -f rolia.yml /tmp/rolia-keys.txt
           rm -f input exitcode; mkfifo input
           (set +e; java -Xmx3G -Drolia.dumpConfigKeys=/tmp/rolia-keys.txt -jar /tmp/rolia.jar --nogui < input > cfg.log 2>&1; echo $? > exitcode) &
@@ -1476,6 +1479,7 @@ jobs:
           wait_exit_any cfg cfg.log
           exec 3>&- 2>/dev/null || true
 
+          cp cfg.log /tmp/out/cfg.log 2>/dev/null || true   # Rolia - leave evidence even when the check below fails
           [ -s /tmp/rolia-keys.txt ] || { echo "FAIL: the server wrote no config key dump"; tail -60 cfg.log; exit 1; }
           echo "=== registry ($(wc -l < /tmp/rolia-keys.txt) options) ==="
           cat /tmp/rolia-keys.txt
@@ -1566,9 +1570,14 @@ jobs:
           S1="SEED_OFF_SALT_ONE__0123456789abcdef0123456789abcdef0123456789abcdef"
           S2="SEED_OFF_SALT_TWO__fedcba9876543210fedcba9876543210fedcba9876543210"
 
-          boot () {   # boot <tag> <enabled> <salt>
-            tag="$1"; en="$2"; slt="$3"
+          # Rolia - the level-seed MUST be pinned. With secure-seed.enabled:false the slime digest is a
+          # function of the PUBLIC level seed, and an empty level-seed in server.properties means a new
+          # random one per world - so two runs would differ for a reason that has nothing to do with the
+          # switch under test. This is exactly how run 1 of build 43 failed.
+          boot () {   # boot <tag> <enabled> <salt> <level-seed>
+            tag="$1"; en="$2"; slt="$3"; lvl="$4"
             rm -rf world world_nether world_the_end rolia.yml
+            printf 'level-seed=%s\nonline-mode=false\nserver-port=25660\n' "$lvl" > server.properties
             printf 'secure-seed:\n  enabled: %s\n  salt: "%s"\n' "$en" "$slt" > rolia.yml
             rm -f input exitcode; mkfifo input
             (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > "$tag.log" 2>&1; echo $? > exitcode) &
@@ -1577,24 +1586,33 @@ jobs:
             grep -q 'Done (' "$tag.log" 2>/dev/null && { echo "stop" >&3 || true; }
             wait_exit_any "$tag" "$tag.log"
             exec 3>&- 2>/dev/null || true
+            cp "$tag.log" "/tmp/out/seedoff_$tag.log" 2>/dev/null || true   # leave evidence on failure
           }
 
-          boot offA false "$S1"
-          boot offB false "$S2"
-          boot onA  true  "$S1"
+          boot offA false "$S1" roliaseedoff
+          boot offB false "$S2" roliaseedoff
+          boot offC false "$S1" roliaseedoffOTHER
+          boot onA  true  "$S1" roliaseedoff
 
           dig () { grep -oE 'slime-selftest [0-9a-f]{8,}' "$1.log" | awk '{print $2}' | head -1; }
-          OFFA=$(dig offA); OFFB=$(dig offB); ONA=$(dig onA)
-          echo "enabled=false salt=A : $OFFA"
-          echo "enabled=false salt=B : $OFFB"
-          echo "enabled=true  salt=A : $ONA"
-          [ -n "$OFFA" ] && [ -n "$OFFB" ] && [ -n "$ONA" ] || {
-            echo "FAIL: a run produced no slime-selftest line"; tail -40 offA.log; exit 1; }
+          OFFA=$(dig offA); OFFB=$(dig offB); OFFC=$(dig offC); ONA=$(dig onA)
+          echo "enabled=false secretA level1 : $OFFA"
+          echo "enabled=false secretB level1 : $OFFB"
+          echo "enabled=false secretA level2 : $OFFC"
+          echo "enabled=true  secretA level1 : $ONA"
+          for v in "$OFFA" "$OFFB" "$OFFC" "$ONA"; do
+            [ -n "$v" ] || { echo "FAIL: a run produced no slime-selftest line"; tail -40 offA.log; exit 1; }
+          done
 
           [ "$OFFA" = "$OFFB" ] || {
             echo "FAIL: with secure-seed.enabled=false, two DIFFERENT secrets still produced different"
             echo "      worldgen. The switch does not actually bypass the secret, so a world generated"
             echo "      with it off would not be an ordinary Minecraft world after all."
+            exit 1; }
+          [ "$OFFA" != "$OFFC" ] || {
+            echo "FAIL: with the secret bypassed, changing the LEVEL-SEED changed nothing either. The"
+            echo "      disabled path is returning a constant instead of falling back to Vanilla, so the"
+            echo "      test above proves nothing."
             exit 1; }
           [ "$ONA" != "$OFFA" ] || {
             echo "FAIL: enabling the secure seed changed nothing. Either the switch is stuck off or the"
@@ -1603,7 +1621,8 @@ jobs:
 
           grep -qE 'secure seed DISABLED' offA.log || {
             echo "FAIL: the server did not say out loud that the secure seed is off."; exit 1; }
-          echo "SEED-OFF OK: the switch fully bypasses the secret, and says so in the log."
+          echo "SEED-OFF OK: the switch bypasses the secret (A==B), still follows the level-seed (A!=C),"
+          echo "             the secret matters when it is on (A!=onA), and the server says so in the log."
 
       - name: Publish result to ci-output branch
         # Rolia - PR builds must not push to ci-output (fork tokens are read-only).

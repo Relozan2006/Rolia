@@ -313,6 +313,83 @@ patch(FBB,
       "FriendlyByteBuf bulk writeFixedSizeLongArray call", context="74f77d49a71f7fc7")
 
 
+# 9) optimizations.ai.line-of-sight-interval (default 1 = Vanilla).
+#    Sensing clears its seen/unseen sets EVERY tick, so every mob re-raycasts every target every
+#    tick. Raycasting is the expensive part of a mob's sensing, and it is per mob per target, so on a
+#    mob-dense server this is the largest single saving available. Above 1 a mob notices a target
+#    appearing (or losing cover) up to N-1 ticks late, which is why the default is Vanilla.
+#    Per-mob state, so this is Folia-safe by construction.
+SENSING = "canvas-server/src/minecraft/java/net/minecraft/world/entity/ai/sensing/Sensing.java"
+patch(SENSING,
+      "    public void tick() {\n"
+      "        this.seen.clear();\n"
+      "        this.unseen.clear();\n"
+      "    }\n",
+      "    // Rolia start - optimizations.ai.line-of-sight-interval\n"
+      "    private int roliaLineOfSightAge;\n"
+      "\n"
+      "    public void tick() {\n"
+      "        final int roliaInterval = io.rolia.RoliaConfig.lineOfSightInterval();\n"
+      "        if (roliaInterval > 1) {\n"
+      "            if (++this.roliaLineOfSightAge < roliaInterval) {\n"
+      "                return; // keep the cached results for another tick\n"
+      "            }\n"
+      "            this.roliaLineOfSightAge = 0;\n"
+      "        }\n"
+      "        this.seen.clear();\n"
+      "        this.unseen.clear();\n"
+      "    }\n"
+      "    // Rolia end - optimizations.ai.line-of-sight-interval\n",
+      "Sensing line-of-sight interval", context="65e60d08fc5e1944",
+      hint="unseen", marker="roliaLineOfSightAge")
+
+# 10) optimizations.ai.inactive-goal-selector-interval (default 3 = exactly what Paper does).
+#     Paper's EAR 2 already runs the goal selector of INACTIVE mobs on a reduced schedule; this only
+#     makes the divisor configurable. curRate is a per-selector field, so nothing is shared.
+GOALSELECTOR = "canvas-server/src/minecraft/java/net/minecraft/world/entity/ai/goal/GoalSelector.java"
+patch(GOALSELECTOR,
+      "        return this.curRate % 3 == 0; // TODO newGoalRate was already unused in 1.20.4, check if this is correct\n",
+      "        // Rolia - optimizations.ai.inactive-goal-selector-interval; 3 is Paper's own rate\n"
+      "        final int roliaRate = io.rolia.RoliaConfig.inactiveGoalSelectorInterval();\n"
+      "        return this.curRate % roliaRate == 0;\n",
+      "GoalSelector inactive rate", context="dfbefef0e3fa4bce",
+      hint="curRate", marker="roliaRate")
+
+# 11) optimizations.collision.cache-shape-coords (default false).
+#     getCoords allocates a fresh CubePointRange on every call, and collision queries are hot. A cube
+#     shape's size is fixed at construction, so the list is the same value every time. The cache is
+#     write-once and two threads racing can only compute the same value twice, so no lock is needed.
+CUBESHAPE = "canvas-server/src/minecraft/java/net/minecraft/world/phys/shapes/CubeVoxelShape.java"
+patch(CUBESHAPE,
+      "    @Override\n"
+      "    public DoubleList getCoords(final Direction.Axis axis) {\n"
+      "        return new CubePointRange(this.shape.getSize(axis));\n"
+      "    }\n",
+      "    // Rolia start - optimizations.collision.cache-shape-coords\n"
+      "    private DoubleList[] roliaCoordCache;\n"
+      "\n"
+      "    @Override\n"
+      "    public DoubleList getCoords(final Direction.Axis axis) {\n"
+      "        if (!io.rolia.RoliaConfig.cacheShapeCoords()) {\n"
+      "            return new CubePointRange(this.shape.getSize(axis));\n"
+      "        }\n"
+      "        DoubleList[] cache = this.roliaCoordCache;\n"
+      "        if (cache == null) {\n"
+      "            cache = this.roliaCoordCache = new DoubleList[3]; // Direction.Axis has exactly three values\n"
+      "        }\n"
+      "        final int index = axis.ordinal();\n"
+      "        DoubleList cached = cache[index];\n"
+      "        if (cached == null) {\n"
+      "            cached = cache[index] = new CubePointRange(this.shape.getSize(axis));\n"
+      "        }\n"
+      "        return cached;\n"
+      "    }\n"
+      "    // Rolia end - optimizations.collision.cache-shape-coords\n",
+      "CubeVoxelShape coordinate cache", context="603eb6446725fad4",
+      hint="CubePointRange", marker="roliaCoordCache")
+
+
+
 if PRINT_HASHES:
     print("")
     print("=== context hashes (paste into the context= arguments above) ===")

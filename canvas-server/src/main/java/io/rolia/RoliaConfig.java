@@ -235,6 +235,41 @@ public final class RoliaConfig {
         "Behaviour-neutral: the bytes on the wire are byte-for-byte identical, this is purely faster",
         "serialization on the Netty threads. Safe to turn on.");
 
+    public static final IntOpt AI_LINE_OF_SIGHT_INTERVAL = new IntOpt(
+        "optimizations.ai.line-of-sight-interval", 1, 1, 40, Reload.LIVE,
+        "Reuse a mob's line-of-sight results for this many ticks. 1 is Vanilla.",
+        "",
+        "Vanilla clears the seen/unseen cache every tick, so every mob re-raycasts every target every",
+        "tick. Raycasting is one of the more expensive things a mob does, and it happens per mob per",
+        "target, so this is likely the largest single saving available on a mob-dense server.",
+        "",
+        "CHANGES BEHAVIOUR at any value above 1: a mob notices a target appearing, or losing cover, up",
+        "to this many ticks late. What that looks like in practice is skeletons and blazes firing a",
+        "fraction of a second behind, and mobs re-acquiring targets slightly later after you break line",
+        "of sight. 2 or 3 is a reasonable trade; 20 is a mob that reacts a second late.");
+
+    public static final IntOpt AI_INACTIVE_GOAL_INTERVAL = new IntOpt(
+        "optimizations.ai.inactive-goal-selector-interval", 3, 1, 40, Reload.LIVE,
+        "Run the goal selector of INACTIVE mobs once per this many ticks. 3 is what Paper does today.",
+        "",
+        "Inactive means the mob is outside entity-activation range - Paper already ticks those mobs on",
+        "a reduced schedule, and this only changes the divisor. Active mobs are untouched, and so is",
+        "the target selector's own rate.",
+        "",
+        "Raising it makes far-away mobs pick new goals less often. They still move, still despawn and",
+        "still count towards mob caps; what changes is how promptly one that is out of range starts",
+        "wandering somewhere new. Anything relying on distant mobs re-pathing quickly may be affected.");
+
+    public static final BoolOpt COLLISION_CACHE_SHAPE_COORDS = new BoolOpt(
+        "optimizations.collision.cache-shape-coords", false, Reload.LIVE,
+        "Cache each cube collision shape's coordinate lists instead of rebuilding them on every query.",
+        "",
+        "Behaviour-neutral: a cube shape's size never changes after construction, so the list is the",
+        "same object every time - Vanilla just builds a new one on each call. Collision queries are hot",
+        "on any server with a lot of moving entities.",
+        "",
+        "Costs one small array per distinct cube shape, which is a fixed and very small set.");
+
     // ---------------------------------------------------------------------------------------------
     // vanilla-parity
     // ---------------------------------------------------------------------------------------------
@@ -404,6 +439,9 @@ public final class RoliaConfig {
     public static boolean lobotomizeWaitUntilTradeLocked() { load(); return LOBOTOMIZE_WAIT_UNTIL_TRADE_LOCKED.get0(); }
     public static int lobotomizeCheckInterval() { load(); return LOBOTOMIZE_CHECK_INTERVAL.get0(); }
     public static boolean fasterNetwork() { load(); return FASTER_NETWORK.get0(); }
+    public static int lineOfSightInterval() { load(); return AI_LINE_OF_SIGHT_INTERVAL.get0(); }
+    public static int inactiveGoalSelectorInterval() { load(); return AI_INACTIVE_GOAL_INTERVAL.get0(); }
+    public static boolean cacheShapeCoords() { load(); return COLLISION_CACHE_SHAPE_COORDS.get0(); }
 
     public static boolean parityRandomTick() { load(); return PARITY_RANDOM_TICK.get0(); }
     public static boolean parityMobSpawnPlacement() { load(); return PARITY_MOB_SPAWN_PLACEMENT.get0(); }
