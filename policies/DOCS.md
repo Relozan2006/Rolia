@@ -1,3 +1,3 @@
-# CanvasMC Documentation
+# Rolia Documentation
 
-This has been moved to https://docs.canvasmc.io/canvas/introduction
+This has been moved to https://github.com/Relozan2006/Rolia#readme

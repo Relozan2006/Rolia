@@ -1,7 +1,7 @@
-# CanvasMC Contributing Documentation
+# Rolia Contributing Documentation
 
-The primary documentation on how to contribute to Canvas' source code and
-understanding said source has been moved to [here](https://docs.canvasmc.io/canvas/developers/contributing/canvas/)
+The primary documentation on how to contribute to Rolia's source code and
+understanding said source has been moved to [here](https://github.com/Relozan2006/Rolia)
 
 This page is specifically for PRing guidelines
 

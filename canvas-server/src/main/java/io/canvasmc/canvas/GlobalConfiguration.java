@@ -44,7 +44,7 @@ public class GlobalConfiguration extends Part {
 
     protected static final int CHAR_LIM = 90;
 
-    public static final Logger LOGGER = LoggerFactory.getLogger("CanvasMC");
+    public static final Logger LOGGER = LoggerFactory.getLogger("Rolia");
 
     public static final int INFO = 0;
     public static final int WARN = 1;
@@ -62,7 +62,7 @@ public class GlobalConfiguration extends Part {
     }
 
     public static void reload() {
-        LOGGER.info("Loading Canvas server configuration");
+        LOGGER.info("Loading server configuration");
         ConfigurationProvider.buildSolidConfiguration(
             CONFIG_PATH,
             GlobalConfiguration::new,
@@ -105,16 +105,16 @@ public class GlobalConfiguration extends Part {
                             case EXPERIMENTAL ->
                                 broadcast("Running a beta build, there may be bugs, proceed with caution!", WARN);
                             case LOCAL ->
-                                broadcast("You are running a development version of Canvas, which may not be production-ready, be very careful!", WARN);
+                                broadcast("You are running a development version of Rolia, which may not be production-ready, be very careful!", WARN);
                         }
                     }));
                 }
             },
             Style.create()
-                .literal("Global Configuration for CanvasMC").endLine()
+                .literal("Global Configuration for Rolia").endLine()
                 .blank()
                 .wordWrap(
-                    "This is the server-wide configuration file provided by CanvasMC. This config holds options",
+                    "This is the server-wide configuration file, inherited from Canvas. This config holds options",
                     "that are set across the entire server, and cannot be overridden per-world. You are free to modify,",
                     "add, or remove comments as you please."
                 ).endLine()
@@ -134,7 +134,7 @@ public class GlobalConfiguration extends Part {
                 .wordWrap(
                     "If you have questions about certain configuration options please reach out in our discord"
                 ).endLine()
-                .literal("https://canvasmc.io/discord")
+                .literal("https://github.com/Relozan2006/Rolia/issues")
                 .compile(60)
         );
     }
@@ -165,7 +165,7 @@ public class GlobalConfiguration extends Part {
             try {
                 RandomGeneratorFactory.of("Xoroshiro128PlusPlus");
             } catch (Throwable throwable) {
-                broadcast("Canvas' faster random impl is not supported by your VM, falling back to legacy random", WARN);
+                broadcast("Rolia's faster random impl is not supported by your VM, falling back to legacy random", WARN);
                 ENABLE_FASTER_RANDOM = false;
             }
 
@@ -332,7 +332,7 @@ public class GlobalConfiguration extends Part {
             option("guardSeverity")
                 .docs(
                     Style.wrap(
-                        "Canvas introduces extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are.",
+                        "Rolia introduces extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are.",
                         // Rolia - default changed from THROW to LOG, see below
                         "Canvas's default is THROW, and Canvas's own documentation for it says THROW can crash the server."
                             + " Rolia leaves that default alone. Set canvas-overrides.log-instead-of-throwing-on-guard-violation"
@@ -563,7 +563,7 @@ public class GlobalConfiguration extends Part {
         option("displayWorldLoadScreenForPortaling")
             .docs(
                 "Folia's portaling rewrite makes the world loading screen not display on the client properly, and",
-                "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
+                "instead shows an empty void. With this enabled, the server will display the proper world loading screen"
             );
         option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
         // Rolia - default changed from false to true, see docs below

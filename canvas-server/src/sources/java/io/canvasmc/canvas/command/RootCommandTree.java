@@ -7,6 +7,7 @@ import io.canvasmc.canvas.command.sub.RegionTickCommand;
 import io.canvasmc.canvas.command.sub.ReloadCommand;
 import io.canvasmc.canvas.command.sub.SetMaxPlayersCommand;
 import io.canvasmc.canvas.command.sub.WorldDistanceCommand;
+import io.rolia.command.RoliaCommand;
 import java.lang.reflect.InvocationTargetException;
 import java.util.LinkedList;
 import java.util.List;
@@ -41,6 +42,7 @@ public class RootCommandTree {
         INSTANCE.register(WorldDistanceCommand.class);
         INSTANCE.register(ReloadCommand.class);
         INSTANCE.register(RegionTickCommand.class);
+        INSTANCE.register(RoliaCommand.class); // Rolia - /rolia status and /rolia reload
     }
 
     private final List<Command> subCommands = new LinkedList<>();
@@ -103,7 +105,7 @@ public class RootCommandTree {
 
                 TextComponent.Builder builder = Component.text()
                     .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
-                    .append(Component.text("Canvas Commands", HEADER, TextDecoration.BOLD))
+                    .append(Component.text("Rolia Commands", HEADER, TextDecoration.BOLD))
                     .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
                     .appendNewline();
 

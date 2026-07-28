@@ -33,7 +33,7 @@ index 08745a35b1ce8cc56d970472088de3cd17b9e43a..8255b30ac896218bdc2b1d23e3535fa1
                      paperVersion = "unknown";
                  }
 -                metrics.addCustomChart(new Metrics.SimplePie("folia_version", () -> paperVersion)); // Folia - we have our own bstats page
-+                metrics.addCustomChart(new Metrics.SimplePie("canvas_version", () -> paperVersion)); // Folia - we have our own bstats page // Canvas - Rebrand
++                metrics.addCustomChart(new Metrics.SimplePie("rolia_version", () -> paperVersion)); // Folia - we have our own bstats page // Canvas - Rebrand
  
                  metrics.addCustomChart(new Metrics.DrilldownPie("java_version", () -> {
                      Map<String, Map<String, Integer>> map = new HashMap<>();

@@ -105,7 +105,7 @@
      testImplementation("org.mockito:mockito-core:5.22.0")
      mockitoAgent("org.mockito:mockito-core:5.22.0") { isTransitive = false } // Configure mockito agent that is needed in newer java versions
      testImplementation("org.ow2.asm:asm-tree:9.9.1")
-@@ -188,22 +_,23 @@
+@@ -188,22 +_,27 @@
      manifest {
          val git = Git(rootProject.layout.projectDirectory.path)
          val mcVersion = rootProject.providers.gradleProperty("mcVersion").get()
@@ -133,6 +133,10 @@
 +            "Brand-Id" to "rolia:rolia",
 +            "Brand-Name" to "Rolia",
 +            "Brand-Vendor" to "Rolia Team",
++            // Rolia - ServerBuildInfoImpl reads Brand-Website, and CanvasVersionFetcher only renders
++            // the clickable brand link when it is present. Without it /version showed a dead brand
++            // token while a second, hardcoded copy of the URL lived in the fetcher.
++            "Brand-Website" to "https://github.com/Relozan2006/Rolia",
              "Build-Number" to (build ?: ""),
              "Build-Time" to buildTime.toString(),
              "Git-Branch" to gitBranch,

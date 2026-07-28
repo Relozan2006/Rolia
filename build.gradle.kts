@@ -93,7 +93,9 @@ subprojects {
     }
 
     tasks.withType<AbstractPatchRouletteTask>().configureEach {
-        endpoint = "https://patch-roulette.canvasmc.io/api"
+        // Rolia - patch roulette is CanvasMC's own patch-triage service and Rolia is not part of it;
+        // pointing at it would submit our patch state to another project. Left unset.
+        endpoint = providers.gradleProperty("patchRouletteEndpoint").orNull ?: ""
     }
 
     extensions.configure<PublishingExtension> {
@@ -118,7 +120,7 @@ subprojects {
         extensions.configure<xyz.jpenilla.resourcefactory.paper.PaperPluginYaml> {
             apiVersion.set(providers.gradleProperty("apiVersion"))
             version = "SNAPSHOT-DEV"
-            authors = listOf("CanvasMC")
+            authors = listOf("Rolia")
             foliaSupported = true
         }
 

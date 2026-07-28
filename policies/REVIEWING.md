@@ -1,6 +1,6 @@
 # Reviewing PRs
 
-Reviewing PRs for Canvas is honestly pretty simple, but can be time-consuming
+Reviewing PRs for Rolia is honestly pretty simple, but can be time-consuming
 depending on the PR in question. Overall, we expect people to review the diff
 thoroughly, and also `checkout` the PR in question and actually apply patches
 if applicable and view the **full** diff in its entirety, since sometimes we

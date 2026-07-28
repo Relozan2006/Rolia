@@ -45,7 +45,7 @@ public class WorldConfig extends Part {
     // we have a logger internally here for level-config related things, and should not be used globally. the global
     // config class should be the logger publicly used
 
-    private static final Logger LOGGER = LoggerFactory.getLogger("CanvasWorlds");
+    private static final Logger LOGGER = LoggerFactory.getLogger("Rolia");
 
     private static final Path BASE_FILE = Path.of("config/canvas-worlds.yml").toAbsolutePath().normalize();
 
@@ -87,10 +87,10 @@ public class WorldConfig extends Part {
                 }
             },
             Style.create()
-                .literal("Worlds default configuration file for CanvasMC").endLine()
+                .literal("Worlds default configuration file for Rolia").endLine()
                 .blank()
                 .wordWrap(
-                    "This is the defaults for the per-world configuration file for CanvasMC.",
+                    "This is the defaults for the per-world configuration file, inherited from Canvas.",
                     "Each option can be overridden by the patch variant in each dimension folder. You are",
                     "free to modify, add, or remove comments as you please."
                 ).endLine()
@@ -110,7 +110,7 @@ public class WorldConfig extends Part {
                 .wordWrap(
                     "If you have questions about certain configuration options please reach out in our discord"
                 ).endLine()
-                .literal("https://canvasmc.io/discord")
+                .literal("https://github.com/Relozan2006/Rolia/issues")
                 .compile(60)
         );
 
@@ -137,7 +137,7 @@ public class WorldConfig extends Part {
             BASE_FILE,
             WorldConfig::new,
             instance -> {
-                LOGGER.info("Loaded Canvas config patch for level {}", dimension.identifier());
+                LOGGER.info("Loaded world config patch for level {}", dimension.identifier());
 
                 result[0] = instance;
 
@@ -208,7 +208,7 @@ public class WorldConfig extends Part {
         {
             // Rolia - default changed from true to false, see docs below
             option("enableTpsBar").docs(
-                "Enables a regionized TPS-Bar implementation for Canvas.",
+                "Enables a regionized TPS-Bar implementation.",
                 "A Canvas extra, not a Vanilla feature. While enabled it ticks once a second for every region even",
                 "when no player has ever run /regionbar. Canvas's default (true) is kept; set",
                 "canvas-overrides.disable-region-bars in rolia.yml to turn both bars off by default."
@@ -220,7 +220,7 @@ public class WorldConfig extends Part {
                 ).greedyString();
             // Rolia - default changed from true to false, see docs below
             option("enableRamBar").docs(
-                "Enables a regionized RAM-Bar implementation for Canvas.",
+                "Enables a regionized RAM-Bar implementation.",
                 "Same reasoning as enableTpsBar: a Canvas extra that costs a per-region tick every second whether",
                 "or not anybody asked for it. Canvas's default (true) is kept; see",
                 "canvas-overrides.disable-region-bars in rolia.yml."

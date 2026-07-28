@@ -1,9 +1,58 @@
 #!/usr/bin/env python3
-# Rolia - apply DAB (Dynamic Activation of Brain) hooks to the decompiled Minecraft source,
-# run AFTER applyAllPatches and BEFORE compilation. tickSensors (brain sensors) and
-# Mob.serverAiStep (goal-mob AI) are not otherwise patched, so we edit them here at build time.
-# Fails loudly (exit 1) if the source shifted, so a silent miss can never ship.
+"""Rolia - source hooks applied AFTER applyAllPatches and BEFORE compilation.
+
+WHY A SCRIPT AND NOT PATCHES
+    Several methods Rolia needs to touch are not patched by Canvas at all (Brain.tickSensors,
+    Mob.serverAiStep, NoiseBasedChunkGenerator.applyCarvers, RandomState's constructor). Adding
+    paperweight patch files for them would work, but every one of those files is DECOMPILED output,
+    so a patch against it is no more stable than a string match - and a rejected patch and a missed
+    substitution fail at the same point in the build for the same reason.
+
+WHAT THE SCRIPT GIVES UP, AND WHAT BUILD 43 GIVES BACK
+    What paperweight has that a plain substitution does not is CONTEXT: git checks the lines around
+    a change, so a hunk that still matches its anchor but sits in a method upstream has rewritten is
+    rejected rather than applied. A bare `s.replace(old, new)` has no such check. Two things can go
+    wrong silently:
+
+      - the anchor still matches, but somewhere else, because upstream moved the code;
+      - the anchor matches in the right place, but the surrounding logic changed underneath it, so
+        the hook is now inserted into a method that no longer does what it did.
+
+    Both are now caught. Every hook records a checksum over a fixed window of source lines around
+    its anchor, and a change anywhere in that window fails the build with the window printed. That
+    is the same guarantee git's context lines provide, made explicit.
+
+    Run with --print-context-hashes after a deliberate upstream update to get the new values.
+
+    Fails loudly (exit 1) on any mismatch, so a silent miss can never ship.
+"""
+import hashlib
 import sys
+
+PRINT_HASHES = "--print-context-hashes" in sys.argv
+_HASH_REPORT = []
+
+# Lines of context captured on each side of an anchor. Wide enough to cover the method a hook sits
+# in, narrow enough that unrelated edits elsewhere in a 3000-line file do not trip it.
+CONTEXT_LINES = 12
+
+
+def _context_hash(text, anchor):
+    """Checksum the source around `anchor`. Returns (hash, window_text, first_line_number).
+
+    Whitespace at end of line is stripped before hashing so a stray trailing space in the decompiler
+    output cannot fail a build on its own.
+    """
+    idx = text.find(anchor)
+    if idx < 0:
+        return None, None, 0
+    start_line = text.count("\n", 0, idx)
+    end_line = start_line + anchor.count("\n")
+    lines = text.split("\n")
+    lo = max(0, start_line - CONTEXT_LINES)
+    hi = min(len(lines), end_line + CONTEXT_LINES + 1)
+    window = "\n".join(l.rstrip() for l in lines[lo:hi])
+    return hashlib.sha256(window.encode("utf-8")).hexdigest()[:16], window, lo + 1
 
 def _dump_context(path, hint, label):
     """Print every line containing `hint` with its number, so a CI failure shows the real
@@ -29,13 +78,16 @@ def _dump_context(path, hint, label):
         print("  (no line contains %r either)" % hint, file=sys.stderr)
 
 
-def patch(path, old, new, what, hint=None, count=1, marker=None):
+def patch(path, old, new, what, hint=None, count=1, marker=None, context=None):
     """Replace `old` with `new` exactly `count` times. Fails loudly so a silent miss can never ship.
 
     `marker` makes the hook idempotent: if it is already present the hook is skipped instead of
     being applied a second time (several anchors still match after their own substitution, so a
     re-run used to double-apply them).
     `hint` is a short substring dumped with line numbers on failure, to identify upstream drift.
+    `context` is the expected checksum of the surrounding source (see the module docstring). This is
+    what replaces git's context lines: the anchor matching is not enough on its own, because upstream
+    can rewrite the method around it and leave the anchor intact.
     """
     s = open(path, encoding="utf-8").read()
     if marker is not None and marker in s:
@@ -46,8 +98,24 @@ def patch(path, old, new, what, hint=None, count=1, marker=None):
         print("ERROR: expected %d match(es) for %s in %s, found %d" % (count, what, path, n), file=sys.stderr)
         _dump_context(path, hint, what)
         sys.exit(1)
+
+    actual, window, firstline = _context_hash(s, old)
+    if PRINT_HASHES:
+        _HASH_REPORT.append((what, actual))
+    elif context is not None and actual != context:
+        print("ERROR: %s - the source AROUND the anchor changed." % what, file=sys.stderr)
+        print("       expected context %s, found %s" % (context, actual), file=sys.stderr)
+        print("       The anchor still matches, so the substitution would have been applied silently", file=sys.stderr)
+        print("       into a method upstream has rewritten. Read the window below, decide whether the", file=sys.stderr)
+        print("       hook is still correct, then update the context hash in scripts/apply_dab_hooks.py", file=sys.stderr)
+        print("       (run it with --print-context-hashes to get the new values).", file=sys.stderr)
+        print("       --- %s lines %d.. ---" % (path, firstline), file=sys.stderr)
+        for i, line in enumerate(window.split("\n")):
+            print("       %5d: %s" % (firstline + i, line), file=sys.stderr)
+        sys.exit(1)
+
     open(path, "w", encoding="utf-8").write(s.replace(old, new, count))
-    print("OK: " + what + (" (x%d)" % count if count != 1 else ""))
+    print("OK: " + what + (" (x%d)" % count if count != 1 else "") + ("" if context is None else " [ctx %s]" % context))
 
 
 def assert_contains(path, needle, why):
@@ -66,7 +134,7 @@ patch(BRAIN,
       "    private void tickSensors(final ServerLevel level, final E body) {\n",
       "    private void tickSensors(final ServerLevel level, final E body) {\n"
       "        if (!io.rolia.optimization.Dab.shouldTickBrain(body)) return; // Rolia - DAB\n",
-      "Brain.tickSensors DAB gate")
+      "Brain.tickSensors DAB gate", context="6b3d0d2669203e48")
 
 # 2) throttle goal-mob AI (zombies/skeletons etc.) far from players; navigation still runs (mobs keep moving)
 block = ("        this.sensing.tick();\n"
@@ -82,14 +150,14 @@ patch(MOB, block,
       "        if (io.rolia.optimization.Dab.shouldTickBrain(this)) { // Rolia - DAB (throttle goal-mob AI far from players)\n"
       + block +
       "        } // Rolia - DAB end\n",
-      "Mob.serverAiStep DAB gate")
+      "Mob.serverAiStep DAB gate", context="777ce9b1f1cea226")
 
 # 3) villager lobotomization: skip the expensive brain tick for boxed-in villagers, but still restock
 VILLAGER = "canvas-server/src/minecraft/java/net/minecraft/world/entity/npc/villager/Villager.java"
 patch(VILLAGER,
       "        if (!inactive) this.getBrain().tick(level, this); // Paper - EAR 2\n",
       "        if (!inactive) io.rolia.optimization.Lobotomize.tickVillagerBrain(this, level); // Rolia - villager lobotomization (restock preserved)\n",
-      "Villager.customServerAiStep lobotomize gate")
+      "Villager.customServerAiStep lobotomize gate", context="6716fb424c613783")
 
 # 4) (removed in build 38) SynchedEntityData.packDirty pre-sizing.
 #    It sized the list to itemsById.length (~25-30 entries for a player) when packDirty returns the
@@ -121,7 +189,7 @@ patch(RANDOMSTATE,
       "    private final PositionalRandomFactory random;\n",
       "    private final PositionalRandomFactory random;\n"
       "    private final PositionalRandomFactory roliaSecretRandom; // Rolia - root of every SECRET worldgen system\n",
-      "RandomState secret-root field",
+      "RandomState secret-root field", context="8b276daa6ade7608",
       hint="PositionalRandomFactory", marker="roliaSecretRandom")
 patch(RANDOMSTATE,
       "        this.random = settings.getRandomSource().newInstance(seed).forkPositional();\n"
@@ -133,26 +201,26 @@ patch(RANDOMSTATE,
       "        this.noises = noises;\n"
       "        this.aquiferRandom = this.roliaSecretRandom.fromHashOf(Identifier.withDefaultNamespace(\"aquifer\")).forkPositional(); // Rolia - SECRET\n"
       "        this.oreRandom = this.roliaSecretRandom.fromHashOf(Identifier.withDefaultNamespace(\"ore\")).forkPositional(); // Rolia - SECRET\n",
-      "RandomState aquifer+ore under the secret",
+      "RandomState aquifer+ore under the secret", context="aa03c4885be73c83",
       hint="aquiferRandom")
 patch(RANDOMSTATE,
       "        this.surfaceSystem = new SurfaceSystem(this, settings.defaultBlock(), settings.seaLevel(), this.random);\n",
       "        this.surfaceSystem = new SurfaceSystem(this, settings.defaultBlock(), settings.seaLevel(), this.roliaSecretRandom); // Rolia - SECRET: surface rules\n",
-      "RandomState surface rules under the secret",
+      "RandomState surface rules under the secret", context="f069d615b323915e",
       hint="surfaceSystem")
 patch(RANDOMSTATE,
       "        return this.noiseIntances.computeIfAbsent(noise, key -> Noises.instantiate(this.noises, this.random, noise));\n",
       "        // Rolia - route each noise to the public or the secret root. Whitelist: unknown noises are SECRET.\n"
       "        return this.noiseIntances.computeIfAbsent(noise, key -> Noises.instantiate(this.noises,\n"
       "            io.rolia.secureseed.Globals.isPublicTerrainNoise(noise) ? this.random : this.roliaSecretRandom, noise));\n",
-      "RandomState per-noise public/secret routing",
+      "RandomState per-noise public/secret routing", context="374470dcfbee24e3",
       hint="noiseIntances")
 patch(RANDOMSTATE,
       "        return this.positionalRandoms.computeIfAbsent(name, key -> this.random.fromHashOf(name).forkPositional());\n",
       "        // Rolia - same split for named factories; only BlendedNoise's \"terrain\" factory stays public.\n"
       "        return this.positionalRandoms.computeIfAbsent(name, key ->\n"
       "            (io.rolia.secureseed.Globals.isPublicTerrainFactory(name) ? this.random : this.roliaSecretRandom).fromHashOf(name).forkPositional());\n",
-      "RandomState named-factory public/secret routing",
+      "RandomState named-factory public/secret routing", context="7336d7bb05bd5c53",
       hint="positionalRandoms")
 # The two legacy Nether climate noises are SECRET, and must not go through LegacyRandomSource's 48-bit
 # state. newLegacyInstance() itself is left alone because useLegacyInit also routes BlendedNoise (which
@@ -160,12 +228,12 @@ patch(RANDOMSTATE,
 patch(RANDOMSTATE,
       "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(this.newLegacyInstance(0L), noiseData.value());\n",
       "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(io.rolia.secureseed.Globals.isSecureSeedEnabled() ? io.rolia.secureseed.Globals.secretClimateSource(0L) : this.newLegacyInstance(0L), noiseData.value()); // Rolia - SECRET, full width (vanilla when secure-seed.enabled=false)\n",
-      "RandomState nether temperature climate under the secret",
+      "RandomState nether temperature climate under the secret", context="5ea8cc55701c6fcb",
       hint="TEMPERATURE_NETHER")
 patch(RANDOMSTATE,
       "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(this.newLegacyInstance(1L), noiseData.value());\n",
       "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(io.rolia.secureseed.Globals.isSecureSeedEnabled() ? io.rolia.secureseed.Globals.secretClimateSource(1L) : this.newLegacyInstance(1L), noiseData.value()); // Rolia - SECRET, full width (vanilla when secure-seed.enabled=false)\n",
-      "RandomState nether vegetation climate under the secret",
+      "RandomState nether vegetation climate under the secret", context="264930f2e13eb7f3",
       hint="VEGETATION_NETHER")
 
 # 6) (removed in build 40) TamableAnimal.canTeleportTo unloaded-chunk guard.
@@ -194,7 +262,7 @@ assert_contains(NBCG, "setDecorationSeed(",
 patch(NBCG,
       "new WorldgenRandom(new LegacyRandomSource(RandomSupport.generateUniqueSeed()))",
       "new io.rolia.secureseed.WorldgenCryptoRandom(0, 0, io.rolia.secureseed.Globals.Salt.CARVER, 0) /* Rolia - carvers + worldgen mob spawn under the secret seed; re-keyed by the setLargeFeatureSeed/setDecorationSeed call that follows */",
-      "NoiseBasedChunkGenerator carvers + mob spawn under the secret seed",
+      "NoiseBasedChunkGenerator carvers + mob spawn under the secret seed", context="e89063c52ddc2cec",
       hint="WorldgenRandom", count=2, marker="io.rolia.secureseed.WorldgenCryptoRandom")
 
 # 7) Bulk writeLongArray (from Leaf) - byte-identical output (uses source.order()), faster chunk serialization.
@@ -238,11 +306,18 @@ _BULK = (
 patch(FBB,
       "    public FriendlyByteBuf writeLongArray(final long[] longs) {\n        writeLongArray(this, longs);\n",
       _BULK + "    public FriendlyByteBuf writeLongArray(final long[] longs) {\n        writeLongArrayBulk(this, longs);\n",
-      "FriendlyByteBuf bulk writeLongArray + methods")
+      "FriendlyByteBuf bulk writeLongArray + methods", context="358493d6b9e6563b")
 patch(FBB,
       "        writeFixedSizeLongArray(this, longs);\n",
       "        writeFixedSizeLongArrayBulk(this, longs);\n",
-      "FriendlyByteBuf bulk writeFixedSizeLongArray call")
+      "FriendlyByteBuf bulk writeFixedSizeLongArray call", context="74f77d49a71f7fc7")
 
 
-print("Rolia DAB source hooks applied.")
+if PRINT_HASHES:
+    print("")
+    print("=== context hashes (paste into the context= arguments above) ===")
+    for what, h in _HASH_REPORT:
+        print("  %-60s %s" % (what, h))
+    sys.exit(0)
+
+print("Rolia source hooks applied.")

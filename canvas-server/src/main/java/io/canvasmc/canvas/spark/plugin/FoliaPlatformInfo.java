@@ -16,7 +16,9 @@ public record FoliaPlatformInfo(Server server) implements PlatformInfo {
     @Contract(pure = true)
     @Override
     public String getName() {
-        return "Folia";
+        // Rolia - spark shows this in /spark health, in sampler metadata and on every uploaded
+        // viewer page. It said "Folia", which is the base of our base.
+        return "Rolia";
     }
 
     @Override

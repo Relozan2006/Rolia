@@ -66,7 +66,7 @@ public class StructureTemplateOptimizer {
 
             return method.getDeclaringClass() != StructureProcessor.class;
         } catch (NoSuchMethodException e) {
-            throw new RuntimeException("Unable to find 'finalizeProcessing' method. Report this major issue to Canvas", e);
+            throw new RuntimeException("Unable to find 'finalizeProcessing' method. Report this major issue to Rolia", e);
         }
     }
 
