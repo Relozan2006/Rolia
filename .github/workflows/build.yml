@@ -814,7 +814,7 @@ jobs:
       - name: Build paperclip jar
         timeout-minutes: 90
         env:
-          BUILD_NUMBER: 40
+          BUILD_NUMBER: 41
         run: |
           set -e -o pipefail
           source /tmp/ci-helpers.sh
@@ -888,7 +888,7 @@ jobs:
         # once "NEW failures: 0" holds and the known one is fixed upstream.
         continue-on-error: true
         env:
-          BUILD_NUMBER: 40
+          BUILD_NUMBER: 41
         run: |
           set +e
           ./gradlew test --stacktrace 2>&1 | tee test.log
@@ -1492,7 +1492,7 @@ jobs:
           set -e -o pipefail
           source /tmp/ci-helpers.sh
           reap_servers pre
-          BUILD_NUMBER=40
+          BUILD_NUMBER=41
           TAG="v26.1.2-build.$BUILD_NUMBER"
           JAR=/tmp/out/rolia-paperclip-26.1.2.jar
           [ -f "$JAR" ] || { echo "FAIL: $JAR not found - the publish step did not produce a release jar"; ls -la /tmp/out; exit 1; }

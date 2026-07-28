@@ -77,14 +77,49 @@ public class Globals {
             }
         }
         // Rolia - refuse to keep generating into a world that was made with a different secret.
-        // Deliberately OUTSIDE the publish-once block: on the first boot of a brand-new world the world
-        // directory does not exist yet when the seed is published, so a one-shot check would never write
-        // the fingerprint and the guard would only arm on the second boot. verifyWorldFingerprint is
-        // idempotent and remembers which worlds it has already handled, so this touches the filesystem
-        // once per world however often setupGlobals is called. It is also placed after publication
-        // because computing a fingerprint needs the salt.
-        RoliaConfig.verifyWorldFingerprint(seedFingerprint());
+        //
+        // PERFORMANCE, read before touching this. setupGlobals is called from
+        // ServerChunkCache#getGenerator(), which runs constantly while chunks generate. Build 40.0 ran
+        // the fingerprint check unconditionally here, so every single call paid a full BLAKE2b MAC, a
+        // String.format, a DIRECTORY LISTING and several stat() syscalls. Chunk generation fell from
+        // ~44 chunks/s to ~7. Nothing on this path may touch the filesystem or allocate per call.
+        //
+        // It still cannot be a one-shot inside the publish block: on the first boot of a brand-new world
+        // the world directory does not exist yet at publication time, so the fingerprint would never be
+        // written and the guard would only arm on the second boot. So: retry until it actually handles a
+        // world, with a hard cap, then never look again.
+        if (!fingerprintDone) {
+            verifyFingerprintOnce();
+        }
         dimension.set(stableDimensionId(world.dimension()));
+    }
+
+    private static volatile boolean fingerprintDone = false;
+    private static final java.util.concurrent.atomic.AtomicInteger FINGERPRINT_ATTEMPTS = new java.util.concurrent.atomic.AtomicInteger();
+
+    private static void verifyFingerprintOnce() {
+        // Cap the scans so a server whose world directory never appears where we look cannot keep
+        // hitting the disk forever. 64 attempts is far more than the handful of getGenerator() calls
+        // that happen before the level storage exists.
+        if (FINGERPRINT_ATTEMPTS.incrementAndGet() > 64) {
+            fingerprintDone = true;
+            return;
+        }
+        if (RoliaConfig.verifyWorldFingerprint(seedFingerprintCached())) {
+            fingerprintDone = true;
+        }
+    }
+
+    // Rolia - the fingerprint is a pure function of the (immutable) seed and salt, so format it once.
+    private static volatile String cachedFingerprint;
+
+    private static String seedFingerprintCached() {
+        String fp = cachedFingerprint;
+        if (fp == null) {
+            fp = seedFingerprint();
+            cachedFingerprint = fp;
+        }
+        return fp;
     }
 
     /**

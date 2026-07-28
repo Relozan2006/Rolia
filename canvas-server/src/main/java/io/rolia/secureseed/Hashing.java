@@ -249,10 +249,47 @@ public final class Hashing {
         return out;
     }
 
-    /** Rolia - MAC an arbitrary message under the salt key into a caller-provided output buffer. */
+    // Rolia - the compression state AFTER the key block. In keyed BLAKE2b the key block is compressed
+    // first and depends only on the key, which is fixed for the server's lifetime - so it can be
+    // computed once instead of on every call.
+    private static volatile long[] keyedInitState;
+
+    private static long[] keyedInitState() {
+        final long[] cached = keyedInitState;
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (Hashing.class) {
+            if (keyedInitState == null) {
+                final byte[] key = getSaltKey();
+                final long[] h = BLAKE2B_IV.clone();
+                h[0] ^= 0x01010000L | ((long) KEY_BYTES << 8) | (OUT_LONGS * 8L);
+                final long[] m = new long[16];
+                packLittleEndian(key, 0, KEY_BYTES, m);
+                compress(h, m, BLOCK_BYTES, false);
+                keyedInitState = h;
+            }
+            return keyedInitState;
+        }
+    }
+
+    /**
+     * Rolia - MAC exactly one 128-byte block, supplied as 16 little-endian longs.
+     *
+     * <p>This is the hottest function in the whole core: {@code WorldgenCryptoRandom#moreRandomBits}
+     * calls it for every 512 bits of worldgen randomness consumed. Byte-for-byte identical to
+     * {@code mac(getSaltKey(), toLittleEndianBytes(message))} - the key block is simply resumed from
+     * {@link #keyedInitState()} instead of being recompressed. Build 40.0 went through the general
+     * path, which meant TWO compressions plus three array allocations per call where build 39 needed
+     * one and none; that showed up directly as chunk-generation throughput.</p>
+     */
     public static void hash(final long[] message, final long[] output) {
-        final long[] result = mac(getSaltKey(), toLittleEndianBytes(message));
-        System.arraycopy(result, 0, output, 0, Math.min(result.length, output.length));
+        final long[] h = keyedInitState().clone();
+        final long[] m = new long[16];
+        System.arraycopy(message, 0, m, 0, Math.min(message.length, 16));
+        // t counts the key block (128) plus this message block (128)
+        compress(h, m, BLOCK_BYTES * 2L, true);
+        System.arraycopy(h, 0, output, 0, Math.min(OUT_LONGS, output.length));
     }
 
     // ---------------------------------------------------------------------------------------------

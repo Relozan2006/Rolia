@@ -334,12 +334,13 @@ public final class RoliaConfig {
     // absolute path, so the filesystem is touched once per world rather than on every call.
     private static final Set<String> fingerprintChecked = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
-    public static void verifyWorldFingerprint(final String fingerprint) {
+    public static boolean verifyWorldFingerprint(final String fingerprint) {
+        boolean handledAny = false;
         try {
             final File dir = new File(FILE_NAME).getAbsoluteFile().getParentFile();
-            if (dir == null) return;
+            if (dir == null) return false;
             final File[] candidates = dir.listFiles();
-            if (candidates == null) return;
+            if (candidates == null) return false;
             for (final File world : candidates) {
                 if (!world.isDirectory()) continue;
                 // Rolia - session.lock, not level.dat: level.dat does not exist yet during the FIRST
@@ -347,6 +348,7 @@ public final class RoliaConfig {
                 // fingerprint was never written for a fresh world and the guard only armed itself on the
                 // second boot. session.lock is created the moment the level storage is opened.
                 if (!new File(world, "session.lock").isFile() && !new File(world, "level.dat").isFile()) continue;
+                handledAny = true;
                 if (!fingerprintChecked.add(world.getAbsolutePath())) continue;
                 final File fp = new File(world, "rolia-seed.fp");
                 if (!fp.isFile()) {
@@ -385,6 +387,7 @@ public final class RoliaConfig {
         } catch (final Exception e) {
             LOGGER.warn("Rolia: could not verify the world secret fingerprint", e);
         }
+        return handledAny;
     }
 
     /**
