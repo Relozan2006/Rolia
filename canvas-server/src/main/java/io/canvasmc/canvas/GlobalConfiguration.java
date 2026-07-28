@@ -403,6 +403,15 @@ public class GlobalConfiguration extends Part {
         public boolean optimizeAquifer = false;
         public boolean useEndBiomeCache = false;
         public int endBiomeCacheSize = 1024;
+        // Rolia - deliberately left at false. getBuryContribution's replacement was verified
+        // bit-identical to Vanilla (1.0 - d/6.0 == Mth.clampedMap(Mth.length(..), 0, 6, 1, 0),
+        // including the d > 6.0 vs d/6.0 > 1.0 edge), and the piece/junction iteration order is
+        // preserved by List#toArray. What could NOT be verified is the rest of the copied
+        // compute() body: the patch replaces the whole method and only three lines of the
+        // original survive as diff context, and Beardifier.java is not in the decompiled
+        // reference sources. compute() shapes the terrain around every structure, so an
+        // unverified copy is not acceptable on a seed-faithful core. Enable only after diffing
+        // the copied body against a real decompiled Beardifier.
         public boolean optimizeBeardifier = false;
 
         public StructureGen structureOptimizations = new StructureGen();
@@ -423,7 +432,21 @@ public class GlobalConfiguration extends Part {
                 );
             }
 
-            public boolean deduplicateShuffledTemplatePoolElementList = false;
+            public boolean deduplicateShuffledTemplatePoolElementList = false; // Rolia - keep off: documented above to lose Vanilla seed parity on structure layout
+            // Rolia - deliberately left at false. The TrojanArrayList skip path does re-prime the
+            // RNG ("Prime the random with the random calls we would've skipped. Maintains vanilla
+            // compat." in JigsawPlacement), but a different part of the same feature does not:
+            // SinglePoolElement#getShuffledJigsawBlocks is rerouted to GeneralUtils#shuffleAndPrioritize,
+            // which buckets the jigsaws by selection_priority and calls Util#shuffle once PER BUCKET.
+            // Util#shuffle draws (n - 1) times for a list of n, so k buckets draw (n - k) times where
+            // Vanilla ("shuffle the whole list, then stable-sort by priority") draws (n - 1). Any
+            // template with mixed selection_priority values therefore desynchronises the shared
+            // structure RandomSource and changes every layout decision after it. Vanilla 1.21+
+            // content does use mixed selection_priority (trial chambers), so this is reachable.
+            // Note also that the headline octree optimisation is dead code in this tree:
+            // structureLayoutOptimizer$replaceVoxelShape3/4 are defined in JigsawPlacement but never
+            // called, so childrenFree is never a TrojanVoxelShape and the BoxOctree fast paths never
+            // fire. The remaining upside does not justify the seed risk.
             public boolean enable = false;
         }
     }
@@ -524,7 +547,13 @@ public class GlobalConfiguration extends Part {
 
     {
         option("serverModName").docs("The server mod name displayed in server listings and client info").word();
-        option("restoreVanillaEnderPearlBehavior").docs("Restores and fixes Vanilla Ender Pearl behavior, broken by Folia");
+        // Rolia - default changed from false to true, see docs below
+        option("restoreVanillaEnderPearlBehavior").docs(
+            "Restores and fixes Vanilla Ender Pearl behavior, broken by Folia.",
+            "Rolia changed the default from false to true: Folia dropped Vanilla's per-player ender pearl",
+            "tracking, so a pearl still in flight is not saved with the player. Leaving this off is a live",
+            "deviation from Vanilla - relog or a server restart mid-throw silently voids the pearl."
+        );
 
         option("displayWorldLoadScreenForPortaling")
             .docs(
@@ -549,7 +578,7 @@ public class GlobalConfiguration extends Part {
     }
 
     public String serverModName = ServerBuildInfo.buildInfo().brandName();
-    public boolean restoreVanillaEnderPearlBehavior = false;
+    public boolean restoreVanillaEnderPearlBehavior = true; // Rolia - was false; Folia disabled per-player ender pearl tracking, so pearls in flight are not saved with the player - a live Vanilla deviation
     public boolean displayWorldLoadScreenForPortaling = true;
     public boolean displayWorldLoadScreenForTeleporting = true;
     public boolean cacheMinecraft2BukkitEntityTypeConversion = true; // Rolia - default ON: a pure memo, no behaviour change

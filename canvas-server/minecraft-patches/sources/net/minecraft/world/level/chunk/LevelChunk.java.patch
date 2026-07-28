@@ -28,11 +28,17 @@
  
      @Override
      public final BlockState moonrise$getBlock(final int x, final int y, final int z) {
-@@ -177,6 +_,7 @@
+@@ -177,6 +_,13 @@
          this.debug = !empty && this.level.isDebug();
          this.defaultBlockState = empty ? VOID_AIR_BLOCKSTATE : AIR_BLOCKSTATE;
          // Paper end - get block chunk optimisation
-+        this.lightningTick = new java.util.Random().nextInt(100000) << 1; // Pufferfish - initialize lightning tick
++        // Rolia start - ThreadLocalRandom instead of a fresh java.util.Random per chunk load
++        // `new java.util.Random()` CASes a single global AtomicLong seed uniquifier, so every
++        // region thread contends on the same cache line on every single chunk load. This value is
++        // only an arbitrary phase offset for Pufferfish's lightning countdown -- which RNG produced
++        // it is not observable, so the source can be swapped freely.
++        this.lightningTick = java.util.concurrent.ThreadLocalRandom.current().nextInt(100000) << 1; // Pufferfish - initialize lightning tick // Rolia - was: new java.util.Random()
++        // Rolia end - ThreadLocalRandom instead of a fresh java.util.Random per chunk load
      }
  
      public LevelChunk(final ServerLevel level, final ProtoChunk protoChunk, final LevelChunk.@Nullable PostLoadProcessor postLoad) {

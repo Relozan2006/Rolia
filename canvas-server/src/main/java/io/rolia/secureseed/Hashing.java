@@ -276,8 +276,8 @@ public final class Hashing {
     /**
      * Rolia - MAC exactly one 128-byte block, supplied as 16 little-endian longs.
      *
-     * <p>This is the hottest function in the whole core: {@code WorldgenCryptoRandom#moreRandomBits}
-     * calls it for every 512 bits of worldgen randomness consumed. Byte-for-byte identical to
+     * <p>Called once per reseed by {@code WorldgenCryptoRandom#setSecureSeed} - build 41 moved the
+     * per-draw work onto Xoroshiro, so this is no longer invoked per 512 bits. Byte-for-byte identical to
      * {@code mac(getSaltKey(), toLittleEndianBytes(message))} - the key block is simply resumed from
      * {@link #keyedInitState()} instead of being recompressed. Build 40.0 went through the general
      * path, which meant TWO compressions plus three array allocations per call where build 39 needed

@@ -419,6 +419,134 @@ public final class RoliaConfig {
         }
     }
 
+    // ------------------------------------------------------------------------------------------
+    // Rolia - chunk-system thread pool advisory
+    //
+    // Paper's config/paper-global.yml ships chunk-system.worker-threads: -1 and io-threads: -1, and
+    // -1 means "auto". Both autos are traps:
+    //
+    //   io-threads     Moonrise resolves it as `Math.max(1, configIoThreads)` (see
+    //                  MoonriseCommon#adjustWorkerThreads). -1 therefore resolves to exactly ONE I/O
+    //                  thread on every machine, no matter how many cores it has. All region file
+    //                  reads and writes for every world funnel through that single thread.
+    //
+    //   worker-threads Moonrise's auto ladder is roughly `d = cores / 2; d = d <= 4 ? (d <= 3 ? 1 : 2)
+    //                  : d / 2`, so anything with 7 or fewer cores gets exactly ONE chunk-generation
+    //                  worker, and 8-9 cores get two.
+    //
+    // Almost nobody discovers this, so say it out loud, once, at startup.
+    // ------------------------------------------------------------------------------------------
+    private static final java.util.concurrent.atomic.AtomicBoolean THREAD_ADVISORY_DONE =
+        new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** Rolia - recommended chunk-system worker threads for a dedicated box, leaving room for Folia's region threads. */
+    private static int recommendedWorkerThreads(final int cores) {
+        if (cores <= 2) return 1;
+        if (cores <= 4) return 2;
+        if (cores <= 8) return 3;
+        if (cores <= 12) return 4;
+        if (cores <= 16) return 6;
+        if (cores <= 24) return 7;
+        return 8;
+    }
+
+    /** Rolia - recommended chunk-system I/O threads. Disk-bound, so this saturates early. */
+    private static int recommendedIoThreads(final int cores) {
+        if (cores <= 12) return 2;
+        if (cores <= 24) return 3;
+        return 4;
+    }
+
+    /**
+     * Rolia - read the CONFIGURED chunk-system thread counts out of Paper's global config.
+     *
+     * <p>Done reflectively on purpose. {@code io.papermc.paper.configuration.GlobalConfiguration} is
+     * Paper-internal and its field names are not part of any API contract, so binding to them at
+     * compile time would let an upstream rename break the whole build for the sake of a log line.
+     * Returns {@code null} when the values cannot be reached, and the caller falls back to advising
+     * unconditionally.</p>
+     *
+     * @return {@code {workerThreads, ioThreads}} exactly as configured (may be -1), or null.
+     */
+    private static int[] readConfiguredChunkSystemThreads() {
+        try {
+            final Class<?> cfgClass = Class.forName("io.papermc.paper.configuration.GlobalConfiguration");
+            final Object cfg = cfgClass.getMethod("get").invoke(null);
+            if (cfg == null) return null;
+            final Object chunkSystem = cfgClass.getField("chunkSystem").get(cfg);
+            if (chunkSystem == null) return null;
+            final Class<?> csClass = chunkSystem.getClass();
+            final int worker = csClass.getField("workerThreads").getInt(chunkSystem);
+            final int io = csClass.getField("ioThreads").getInt(chunkSystem);
+            return new int[] { worker, io };
+        } catch (final Throwable ignored) {
+            // Paper config not loaded yet, renamed, or otherwise unreachable - advise unconditionally.
+            return null;
+        }
+    }
+
+    /**
+     * Rolia - warn once, loudly, when the chunk system is about to run on one worker and/or one I/O
+     * thread on a machine that clearly has cores to spare. Safe to call from anywhere; the first
+     * caller wins and every later call is a single volatile read.
+     */
+    public static void warnIfChunkSystemThreadsUnderconfigured() {
+        if (!THREAD_ADVISORY_DONE.compareAndSet(false, true)) return;
+        try {
+            final int cores = Runtime.getRuntime().availableProcessors();
+            if (cores < 4) return; // nothing useful to recommend on a 1-3 core box
+
+            final int recWorker = recommendedWorkerThreads(cores);
+            final int recIo = recommendedIoThreads(cores);
+
+            final int[] configured = readConfiguredChunkSystemThreads();
+            final String resolvedNote;
+            if (configured == null) {
+                // Could not reach the values - state the recommendation without claiming to know
+                // what is currently set.
+                resolvedNote = null;
+            } else {
+                final int cfgWorker = configured[0];
+                final int cfgIo = configured[1];
+                // Moonrise's own resolution, mirrored here.
+                final int resolvedIo = Math.max(1, cfgIo);
+                int resolvedWorker = cfgWorker;
+                if (resolvedWorker <= 0) {
+                    int d = cores / 2;
+                    d = d <= 4 ? (d <= 3 ? 1 : 2) : d / 2;
+                    resolvedWorker = d;
+                }
+                if (resolvedWorker != 1 && resolvedIo != 1) {
+                    return; // already configured sensibly, stay quiet
+                }
+                resolvedNote = "currently worker-threads=" + (cfgWorker <= 0 ? "-1 (auto -> " + resolvedWorker + ")" : String.valueOf(resolvedWorker))
+                    + ", io-threads=" + (cfgIo <= 0 ? "-1 (auto -> " + resolvedIo + ")" : String.valueOf(resolvedIo));
+            }
+
+            LOGGER.warn("Rolia: ############################################################");
+            LOGGER.warn("Rolia: CHUNK SYSTEM THREADS - this machine reports {} available processors.", cores);
+            if (resolvedNote != null) {
+                LOGGER.warn("Rolia: {}.", resolvedNote);
+                LOGGER.warn("Rolia: At least one of those pools is running on a SINGLE thread.");
+            } else {
+                LOGGER.warn("Rolia: Could not read the configured values, so check them by hand.");
+            }
+            LOGGER.warn("Rolia: Paper ships both of these as -1, and -1 does NOT mean 'use all cores':");
+            LOGGER.warn("Rolia:   io-threads     -1 resolves to max(1, -1) = 1 thread on EVERY machine.");
+            LOGGER.warn("Rolia:   worker-threads -1 resolves to 1 thread on any box with 7 or fewer cores.");
+            LOGGER.warn("Rolia: One I/O thread means every region-file read and write for every world");
+            LOGGER.warn("Rolia: queues behind one thread, which shows up as chunk-load stalls, not as MSPT.");
+            LOGGER.warn("Rolia: Set these in config/paper-global.yml and restart:");
+            LOGGER.warn("Rolia:     chunk-system:");
+            LOGGER.warn("Rolia:       worker-threads: {}", recWorker);
+            LOGGER.warn("Rolia:       io-threads: {}", recIo);
+            LOGGER.warn("Rolia: (sized for {} cores, deliberately leaving cores free for Folia's region threads)", cores);
+            LOGGER.warn("Rolia: ############################################################");
+        } catch (final Throwable t) {
+            LOGGER.warn("Rolia: could not run the chunk-system thread advisory", t);
+        }
+    }
+
     private static void writeConfig(File file) {
         String yaml = ""
             + "# Rolia configuration - everything Rolia adds on top of Canvas lives here.\n"
@@ -441,12 +569,21 @@ public final class RoliaConfig {
             + "  feature-seed: \"" + io.rolia.secureseed.Globals.seedToString(featureSeed) + "\"\n"
             + "\n"
             + "# Optimizations - Folia-safe performance toggles.\n"
-            + "# NOTE: dab is OFF by default; villager-lobotomize and faster-network are ON by default.\n"
-            + "# Only faster-network is fully behaviour-neutral - see the notes on each option below.\n"
+            + "# DEFAULTS: dab, villager-lobotomize and faster-network are ALL ON by default.\n"
+            + "# Of the three, only faster-network is behaviour-neutral. dab and villager-lobotomize DO\n"
+            + "# change mob behaviour; both are described honestly below. Turn them off if you want strictly\n"
+            + "# Vanilla mob behaviour everywhere and can afford the CPU.\n"
             + "optimizations:\n"
-            + "  # Dynamic Activation of Brain (DAB): throttles the AI of mobs far from ANY player\n"
-            + "  # (villagers/piglins/zombies/skeletons etc.). Mobs near players always tick full AI every\n"
-            + "  # tick, so there is no observable gameplay change - only a CPU saving on mob-heavy servers.\n"
+            + "  # Dynamic Activation of Brain (DAB): mobs far from every player think LESS OFTEN. A mob's\n"
+            + "  # AI (brain sensors + behaviours, or the goal selector) is run once every N ticks instead of\n"
+            + "  # every tick, where N scales from 1 up to max-tick-interval with distance to the nearest\n"
+            + "  # player. Mobs within start-distance blocks of a player are never throttled.\n"
+            + "  #\n"
+            + "  # This is NOT behaviour-neutral. A throttled mob reacts late: it notices targets, changes\n"
+            + "  # path, flees, and re-aims on a coarser clock, so distant mobs drift, wander and converge\n"
+            + "  # differently than in Vanilla. Movement, physics, damage, despawning and mob spawning are\n"
+            + "  # untouched, so mob-farm RATES are normally unaffected, but any farm that depends on\n"
+            + "  # precise distant pathing can change. Use blacklist below to exempt specific types.\n"
             + "  dab:\n"
             + "    enabled: " + dabEnabled + "\n"
             + "    # Mobs closer than this many blocks to a player always tick every tick (full AI).\n"
@@ -455,12 +592,15 @@ public final class RoliaConfig {
             + "    max-tick-interval: " + dabMaxTickInterval + "\n"
             + "    # Entity type ids never throttled (useful for mob farms), e.g. [\"minecraft:villager\"].\n"
             + "    blacklist: []\n"
-            + "  # Lobotomize stuck villagers: a villager boxed in a 1x1 cell cannot path anywhere, so its\n"
-            + "  # whole brain tick is skipped. Trades and RESTOCKING are preserved, so pure trading halls\n"
-            + "  # behave like vanilla.\n"
-            + "  # BUT skipping the brain also skips every sensor and behaviour: a lobotomized villager does\n"
-            + "  # NOT detect hostiles, panic, sleep, gossip, breed, or contribute to IRON GOLEM spawning.\n"
-            + "  # Set enabled: false if you run villager-based iron farms.\n"
+            + "  # Lobotomize stuck villagers (ON by default): a villager boxed in a 1x1 cell cannot path\n"
+            + "  # anywhere, so its whole brain tick is skipped. Trades and RESTOCKING are preserved, so pure\n"
+            + "  # trading halls behave like Vanilla.\n"
+            + "  #\n"
+            + "  # This is NOT behaviour-neutral either. Skipping the brain skips every sensor and behaviour:\n"
+            + "  # a lobotomized villager does NOT detect hostiles (so it will not flee or scream when a zombie\n"
+            + "  # arrives), does NOT sleep, does NOT gossip, does NOT breed, and does NOT count towards IRON\n"
+            + "  # GOLEM spawning. Set enabled: false if you run villager-based iron farms, breeders, or any\n"
+            + "  # design that relies on villager panic or gossip.\n"
             + "  villager-lobotomize:\n"
             + "    enabled: " + lobotomizeEnabled + "\n"
             + "    # Keep full AI for villagers that have not been traded with yet (0 xp) so they can still\n"

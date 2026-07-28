@@ -26,14 +26,16 @@
          }
  
          this.firstTick = false;
-@@ -1761,6 +_,11 @@
+@@ -1761,6 +_,13 @@
          boolean debugEntityBlockIntersections = this.level instanceof ServerLevel serverLevel
              && serverLevel.getServer().debugSubscribers().hasAnySubscriberFor(DebugSubscriptions.ENTITY_BLOCK_INTERSECTIONS);
          AtomicInteger iterations = new AtomicInteger();
 +        // Canvas start - optimize checkInsideBlocks
-+        // use element array for lambdas
-+        final net.minecraft.world.level.chunk.ChunkAccess[] cachedChunk = new  net.minecraft.world.level.chunk.ChunkAccess[] { null };
-+        final long[] lastChunkPos = { Long.MIN_VALUE };
++        // Rolia - was two 1-element capture arrays allocated per call; they are now transient
++        // Rolia - fields on Entity (declared next to collidedWithFluid). Reset here so every
++        // Rolia - invocation starts with a cold cache, exactly as the fresh arrays did.
++        this.rolia$insideBlocksCachedChunk = null;
++        this.rolia$insideBlocksLastChunkPos = Long.MIN_VALUE;
 +        // Canvas end - optimize checkInsideBlocks
          BlockGetter.forEachBlockIntersectedBetween(
              from,
@@ -64,12 +66,12 @@
 +                final int chunkX = blockIntersection.getX() >> 4;
 +                final int chunkZ = blockIntersection.getZ() >> 4;
 +                final long chunkLongPos = ((long) chunkZ << 32) | (chunkX & 0xFFFFFFFFL);
-+                if (lastChunkPos[0] != chunkLongPos) {
++                if (this.rolia$insideBlocksLastChunkPos != chunkLongPos) { // Rolia - field, not a capture array
 +                    // update cache, this is a different chunk than previous
-+                    lastChunkPos[0] = chunkLongPos;
-+                    cachedChunk[0] = this.level.getChunkIfLoaded(chunkX, chunkZ);
++                    this.rolia$insideBlocksLastChunkPos = chunkLongPos; // Rolia - field
++                    this.rolia$insideBlocksCachedChunk = this.level.getChunkIfLoaded(chunkX, chunkZ); // Rolia - field
 +                }
-+                net.minecraft.world.level.chunk.ChunkAccess chunk = cachedChunk[0];
++                net.minecraft.world.level.chunk.ChunkAccess chunk = this.rolia$insideBlocksCachedChunk; // Rolia - field
 +                if (chunk == null) {
 +                    // return as if it were air
 +                    return true;
@@ -88,9 +90,25 @@
                      if ((insideBlock || insideFluid) && visitedBlocks.add(blockIntersection.asLong())) {
                          if (insideBlock) {
                              try {
-@@ -1842,6 +_,7 @@
+@@ -1842,6 +_,23 @@
      }
  
++    // Rolia start - reuse two fields instead of allocating capture arrays in checkInsideBlocks
++    // Canvas needed a mutable box to carry the per-chunk lookup cache into the
++    // forEachBlockIntersectedBetween lambda and used a 1-element ChunkAccess[] plus a 1-element
++    // long[]. That is two allocations on one of the hottest paths in the server: every moving
++    // entity, every tick, up to three times per movement. Plain instance fields do the same job
++    // for free.
++    //
++    // Folia-safe for exactly the reason Entity.tickCount is a plain non-volatile int: an entity is
++    // owned by exactly one region thread at a time, and every ownership handoff goes through the
++    // region scheduler, which already establishes the happens-before edge. No other thread reads
++    // or writes these. They are reset at the top of checkInsideBlocks so each invocation starts
++    // with a cold cache, exactly as a freshly allocated array pair did.
++    private transient net.minecraft.world.level.chunk.ChunkAccess rolia$insideBlocksCachedChunk;
++    private transient long rolia$insideBlocksLastChunkPos;
++    // Rolia end - reuse two fields instead of allocating capture arrays in checkInsideBlocks
++
      public boolean collidedWithFluid(final FluidState fluidState, final BlockPos blockPos, final Vec3 from, final Vec3 to) {
 +        if (fluidState.isEmpty()) return false; // Canvas - optimize checkInsideBlocks
          AABB fluidAABB = fluidState.getAABB(this.level(), blockPos);

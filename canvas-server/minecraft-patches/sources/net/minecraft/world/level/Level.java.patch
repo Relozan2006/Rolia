@@ -93,7 +93,7 @@
          } catch (Throwable t) {
              // Paper start - Prevent block entity and entity crashes
              final String msg = String.format("Entity threw exception at %s:%s,%s,%s", io.papermc.paper.util.MCUtil.getLevelName(entity.level()), entity.getX(), entity.getY(), entity.getZ());
-@@ -2010,6 +_,35 @@
+@@ -2010,6 +_,44 @@
      public List<Entity> getPushableEntities(final Entity pusher, final AABB boundingBox) {
          return this.getEntities(pusher, boundingBox, EntitySelector.pushableBy(pusher));
      }
@@ -111,9 +111,18 @@
 +        }
 +
 +        final net.minecraft.server.level.ServerPlayer[] arr = players.getRawDataUnchecked();
++        // Rolia start - fix NPE: bound by size(), not by backing-array capacity
++        // getRawDataUnchecked() hands back ReferenceList's raw backing array. ReferenceList#remove
++        // nulls the tail slot, so every slot at or past size() is null. The filter below only skips
++        // `calling`, and `null != calling` is true, so a null slot went straight into
++        // player.getBoundingBox() and NPE'd. Every other Canvas user of this API already bounds by
++        // size() -- see EntityGetter#canvas$hasNearbyAlivePlayerThatAffectsSpawningForSpawner.
++        final int len = players.size();
++        java.util.Objects.checkFromIndexSize(0, len, arr.length);
++        // Rolia end - fix NPE: bound by size(), not by backing-array capacity
 +        final it.unimi.dsi.fastutil.objects.ObjectArrayList<net.minecraft.server.level.ServerPlayer> serverPlayers = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
-+        for (int i = 0; i < arr.length; i++) {
-+            net.minecraft.server.level.ServerPlayer player = arr[i];
++        for (int i = 0; i < len; i++) { // Rolia - was: i < arr.length
++            final net.minecraft.server.level.ServerPlayer player = arr[i]; // Rolia - non-null: i < size()
 +            if (
 +                player != calling
 +                && boundingBox.intersects(player.getBoundingBox())

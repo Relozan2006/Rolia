@@ -9,7 +9,7 @@
                  boolean sentPosition = false;
                  boolean sentRotation = false;
                  long xa = this.positionCodec.encodeX(currentPosition);
-@@ -181,21 +_,36 @@
+@@ -181,21 +_,50 @@
                      packet = ClientboundEntityPositionSyncPacket.of(this.entity);
                      sentPosition = true;
                      sentRotation = true;
@@ -54,7 +54,21 @@
                  }
  
 -                if (this.entity.needsSync || this.trackDelta || this.entity instanceof LivingEntity && ((LivingEntity)this.entity).isFallFlying()) {
-+                if (this.entity.needsSync || this.trackDelta || this.entity instanceof LivingEntity && ((LivingEntity)this.entity).isFallFlying() && this.entity.getDeltaMovement() != this.lastSentMovement) { // Canvas - reduce useless move packets
++                // Rolia start - fix operator precedence on Canvas's delta-movement guard
++                // `&&` binds tighter than `||`, so Canvas's `getDeltaMovement() != lastSentMovement`
++                // guard only applied to the `instanceof LivingEntity && isFallFlying()` clause and
++                // never to needsSync / trackDelta -- clearly not the intent. Parenthesised so the
++                // guard covers the whole condition.
++                //
++                // Observably identical either way: if the two Vec3s are the same object then
++                // movement.distanceToSqr(this.lastSentMovement) is exactly 0.0, so neither
++                // `diff > 1.0E-7` nor `diff > 0.0` holds and the whole body -- including the
++                // `this.lastSentMovement = movement` assignment -- is skipped. Nothing else in the
++                // block has a side effect (needsSync is not cleared in here). This is an
++                // intent/correctness fix; the work saved is a field read and a subtraction, i.e.
++                // nothing measurable.
++                // Rolia end - fix operator precedence on Canvas's delta-movement guard
++                if ((this.entity.needsSync || this.trackDelta || this.entity instanceof LivingEntity && ((LivingEntity)this.entity).isFallFlying()) && this.entity.getDeltaMovement() != this.lastSentMovement) { // Canvas - reduce useless move packets // Rolia - parenthesised
                      Vec3 movement = this.entity.getDeltaMovement();
                      double diff = movement.distanceToSqr(this.lastSentMovement);
                      if (diff > 1.0E-7 || diff > 0.0 && movement.lengthSqr() == 0.0) {

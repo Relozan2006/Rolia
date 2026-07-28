@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/level/chunk/ChunkAccess.java
 +++ b/net/minecraft/world/level/chunk/ChunkAccess.java
-@@ -73,10 +_,170 @@
+@@ -73,10 +_,212 @@
      protected final @Nullable BlendingData blendingData;
      public final Map<Heightmap.Types, Heightmap> heightmaps = Maps.newEnumMap(Heightmap.Types.class);
      // Paper - rewrite chunk system
@@ -20,6 +20,27 @@
 +    private static final BlockEntity[] EMPTY_ARRAY = new BlockEntity[0];
 +    private static final int SECTION_SIZE = 16 * 16;
 +    protected final BlockEntity[][] canvas$blockEntitySections;
++    // Rolia start - O(1) block-entity count and per-section occupancy
++    // canvas$getAllBlockEntities() used to walk every bucket twice: once through
++    // canvas$getBlockEntitiesCount() to size the result array, then a second time to fill it. And
++    // canvas$removeFromBuckets() rescanned a whole 256-slot bucket after every single removal, just
++    // to decide whether that bucket had become empty. Both are now O(1) off two incrementally
++    // maintained counters.
++    //
++    // Iteration ORDER is deliberately untouched: every loop below still walks sections from low Y
++    // to high Y and, within a section, in ((x & 15) | ((z & 15) << 4)) index order. That order is
++    // observable through CraftChunk#getTileEntities() and ClientboundLevelChunkPacketData, so this
++    // stays an array of buckets and does not become a dense list or a map.
++    //
++    // Invariants, established in the constructor and maintained by the four mutators below --
++    // canvas$setBlockEntityInBuckets, canvas$removeFromBuckets and the two canvas$removeAll
++    // overloads are the only writers of canvas$blockEntitySections anywhere in the tree:
++    //   canvas$blockEntityCount       == number of non-null slots across every bucket
++    //   canvas$sectionEntityCounts[i] == number of non-null slots in canvas$blockEntitySections[i],
++    //                                    and is 0 exactly when that bucket reference is null
++    private int canvas$blockEntityCount;
++    private final short[] canvas$sectionEntityCounts; // at most 256 per section, fits in a short
++    // Rolia end - O(1) block-entity count and per-section occupancy
 +    private final int canvas$minY;
 +    private final int canvas$maxY;
 +    private final int canvas$height;
@@ -58,18 +79,40 @@
 +        int i = canvas$sectionIndex(globalX, globalZ);
 +        BlockEntity old = bucket[i];
 +        bucket[i] = blockEntity;
++        // Rolia start - keep the counters in sync
++        // Mirrors what actually landed in the slot, including the contract-violating null argument
++        // the javadoc above warns against, so the counters can never disagree with the array.
++        if (old == null) {
++            if (blockEntity != null) {
++                ++this.canvas$blockEntityCount;
++                ++this.canvas$sectionEntityCounts[sectionIndex];
++            }
++        } else if (blockEntity == null) {
++            --this.canvas$blockEntityCount;
++            --this.canvas$sectionEntityCounts[sectionIndex];
++        }
++        // Rolia end - keep the counters in sync
 +        this.canvas$cachedBlockEntityMap = null;
 +        return old;
 +    }
 +
 +    public void canvas$removeAll(final int y) {
 +        if (y < this.canvas$minY || y > this.canvas$maxY) return;
-+        canvas$blockEntitySections[canvas$toSectionIndex(y)] = null;
++        // Rolia start - keep the counters in sync
++        final int sectionIndex = canvas$toSectionIndex(y);
++        this.canvas$blockEntityCount -= this.canvas$sectionEntityCounts[sectionIndex];
++        this.canvas$sectionEntityCounts[sectionIndex] = 0;
++        canvas$blockEntitySections[sectionIndex] = null;
++        // Rolia end - keep the counters in sync
 +        this.canvas$cachedBlockEntityMap = null;
 +    }
 +
 +    public void canvas$removeAll() {
 +        java.util.Arrays.fill(canvas$blockEntitySections, null);
++        // Rolia start - keep the counters in sync
++        java.util.Arrays.fill(this.canvas$sectionEntityCounts, (short) 0);
++        this.canvas$blockEntityCount = 0;
++        // Rolia end - keep the counters in sync
 +        this.canvas$cachedBlockEntityMap = null;
 +    }
 +
@@ -84,9 +127,15 @@
 +            bucket[i] = null;
 +            this.canvas$cachedBlockEntityMap = null;
 +
-+            for (final BlockEntity entry : bucket) {
-+                if (entry != null) return removed;
++            // Rolia start - O(1) emptiness test instead of rescanning the whole 256-slot bucket
++            // Exactly the old semantics: drop the bucket reference iff no non-null slot is left in
++            // it after this removal, and return the removed value either way.
++            if (removed != null) {
++                --this.canvas$blockEntityCount;
++                --this.canvas$sectionEntityCounts[sectionIndex];
 +            }
++            if (this.canvas$sectionEntityCounts[sectionIndex] > 0) return removed;
++            // Rolia end - O(1) emptiness test instead of rescanning the whole 256-slot bucket
 +
 +            // doesn't have anymore entries, remove from buckets
 +            canvas$blockEntitySections[sectionIndex] = null;
@@ -108,21 +157,11 @@
 +    }
 +
 +    public int canvas$getBlockEntitiesCount() {
-+        int total = 0;
-+
-+        for (BlockEntity[] bucket : this.canvas$blockEntitySections) {
-+            if (bucket == null) continue;
-+
-+            for (final BlockEntity blockEntity : bucket) {
-+                if (blockEntity != null) total++;
-+            }
-+        }
-+
-+        return total;
++        return this.canvas$blockEntityCount; // Rolia - O(1); was a full scan of all 384 buckets
 +    }
 +
 +    public BlockEntity[] canvas$getAllBlockEntities() {
-+        int total = canvas$getBlockEntitiesCount();
++        final int total = this.canvas$blockEntityCount; // Rolia - O(1); no separate counting pass
 +
 +        if (total == 0) return EMPTY_ARRAY;
 +
@@ -135,11 +174,14 @@
 +            for (BlockEntity blockEntity : bucket) {
 +                if (blockEntity != null) {
 +                    result[idx++] = blockEntity;
++                    if (idx == total) return result; // Rolia - all found, skip the empty tail
 +                }
 +            }
 +        }
 +
-+        return result;
++        // Rolia - defensive: reachable only if a counter ever drifted. Hand back exactly what was
++        // Rolia - found rather than an array padded with nulls. Dead code while the invariant holds.
++        return idx == total ? result : java.util.Arrays.copyOf(result, idx);
 +    }
 +
 +    public boolean canvas$containsPos(final int globalX, final int y, final int globalZ) {
@@ -175,7 +217,7 @@
      protected final LevelHeightAccessor levelHeightAccessor;
      protected final LevelChunkSection[] sections;
      // CraftBukkit start - SPIGOT-6814: move to ChunkAccess to account for 1.17 to 1.18 chunk upgrading.
-@@ -172,6 +_,12 @@
+@@ -172,6 +_,13 @@
          this.minSection = ca.spottedleaf.moonrise.common.util.WorldUtil.getMinSection(levelHeightAccessor);
          this.maxSection = ca.spottedleaf.moonrise.common.util.WorldUtil.getMaxSection(levelHeightAccessor);
          // Paper end - get block chunk optimisation
@@ -184,6 +226,7 @@
 +        this.canvas$maxY = this.getMaxY();
 +        this.canvas$height = canvas$maxY - canvas$minY + 1;
 +        this.canvas$blockEntitySections = new BlockEntity[this.canvas$height][];
++        this.canvas$sectionEntityCounts = new short[this.canvas$height]; // Rolia - per-section occupancy counters
 +        // Canvas end - optimize block entity fetching
      }
  

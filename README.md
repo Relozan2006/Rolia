@@ -71,11 +71,12 @@ secure-seed:
 
 Вся производительность Canvas и Folia: региональная многопоточность, оптимизации тиков, чанков и сущностей. Начиная со сборки 40 ускорения **включены по умолчанию**:
 
-- **DAB** (Dynamic Activation of Brain) — троттлинг ИИ дальних мобов. Моб ближе `start-distance` (по умолчанию 12 блоков) от игрока думает каждый тик; дальше интервал растёт с расстоянием до `max-tick-interval` (по умолчанию 20 тиков). Спектаторы не считаются, креативные игроки — считаются.
-  DAB **не меняет** правила спавна, мобкапы, дроп, физику, редстоун и работу воронок; мобы продолжают тикать, реже выполняется только их ИИ. Но ферма, работающая на передвижении мобов вдали от игрока, будет работать медленнее — внесите нужные типы в `optimizations.dab.blacklist` или выключите DAB.
+- **DAB** (Dynamic Activation of Brain), **включён по умолчанию** — мобы вдали от всех игроков **думают реже**. ИИ моба (сенсоры и поведения мозга либо goal selector) выполняется раз в N тиков вместо каждого тика; N растёт с расстоянием от 1 до `max-tick-interval` (по умолчанию 20). Мобы ближе `start-distance` (по умолчанию 12 блоков) не троттлятся никогда. Спектаторы не считаются, креативные игроки — считаются.
+  Это **не** поведенчески-нейтрально: троттлящийся моб **реагирует с задержкой** — позже замечает цель, реже перестраивает путь, убегает и доворачивается по более грубым часам, поэтому дальние мобы расходятся и сходятся не так, как в ванилле. Передвижение, физика, урон, деспавн, мобкапы и правила спавна не затронуты, так что *скорость* ферм обычно не меняется, но всё, что завязано на точный пасфайндинг вдали от игрока, поменяться может. Исключения — `optimizations.dab.blacklist`; либо выключите DAB целиком.
 - **Планировщик регионов AFFINITY** от Canvas (`threaded-regions.scheduler: AFFINITY` в `paper-global.yml`) — work-stealing и привязка задач региона к своему потоку.
-- **Сетевые фильтры пакетов** и ускоренная сериализация чанковых данных (bulk-запись длинных массивов) — байты на проводе идентичны, просто быстрее.
-- **Оптимизация запертых торговцев** (лоботомия, включена): торговец в 1×1 не тикает мозг, но **исправно пополняет сделки**. Учтите: он также не видит враждебных мобов, не спит, не сплетничает, не размножается и **не участвует в спавне железных големов** — выключите опцию, если у вас железные фермы на торговцах.
+- **Сетевые фильтры пакетов** и ускоренная сериализация чанковых данных (bulk-запись длинных массивов) — единственная из трёх оптимизаций, которая действительно ничего не меняет: байты на проводе идентичны, просто быстрее.
+- **Оптимизация запертых торговцев** (лоботомия), **включена по умолчанию**: торговец, зажатый в клетку 1×1, никуда не может пройти, поэтому его тик мозга пропускается целиком. Сделки и **пополнение товаров сохраняются**, так что чистые торговые залы ведут себя как в ванилле.
+  Это тоже **не** поведенчески-нейтрально: вместе с мозгом пропускаются все сенсоры и поведения. Лоботомированный торговец **не видит враждебных мобов** (не убегает и не кричит, когда приходит зомби), **не спит**, **не сплетничает**, **не размножается** и **не участвует в спавне железных големов**. Выключите опцию, если у вас железные фермы или разводилки на торговцах.
 
 Также в сборке 40 починены унаследованные от Canvas баги: полностью сломанное накопление снега, дистанция спавна мобов, честность spawn-чанков и защита от кросс-регионального доступа в Folia.
 
@@ -85,15 +86,44 @@ Java **25** или новее.
 
 ### Установка и запуск
 
-Скачайте `rolia-paperclip-26.1.2.jar` из раздела [Releases](../../releases/latest).
+Скачайте `rolia-paperclip-26.1.2.jar` из раздела [Releases](../../releases/latest) и положите рядом со скриптом запуска.
 
 ```bash
-# рекомендуется: с SIMD-ускорением (Java 25+)
-java -Xmx4G --add-modules=jdk.incubator.vector --sun-misc-unsafe-memory-access=allow -jar rolia-paperclip-26.1.2.jar --nogui
-
-# или готовый скрипт из репозитория
-bash start.sh
+bash start.sh          # Linux / macOS
+start.bat              # Windows
 ```
+
+Скрипты уже содержат нужные флаги JVM: `-Xms` = `-Xmx`, G1 с закреплённым `-XX:ConcGCThreads`, `-XX:+AlwaysPreTouch`, `-XX:+PerfDisableSharedMem`, набор Aikar под кучу 4–8 ГБ и обязательные `--add-modules=jdk.incubator.vector` (SIMD в Canvas) и `--sun-misc-unsafe-memory-access=allow`. Размер кучи меняется переменной `MEM` в начале скрипта. Подробный разбор каждого флага — в [LAUNCH.md](LAUNCH.md).
+
+### Первый запуск: чек-лист
+
+Флаги JVM — только половина дела. Сделайте это один раз и перезапустите сервер.
+
+1. Java **25+**.
+2. Запустите сервер один раз, чтобы он создал конфиги, и остановите.
+3. **`config/paper-global.yml` → `chunk-system`**: задайте `worker-threads` и `io-threads` явно. Paper ставит `-1`, и `-1` **не** значит «все ядра»: `io-threads` вычисляется как `max(1, значение)`, то есть `-1` — это **ровно один** поток ввода-вывода на любой машине, а `worker-threads` при `-1` превращается в **один** поток на машинах с 7 ядрами и меньше. Проявляется это подвисанием прогрузки чанков, а не высоким MSPT, поэтому почти никто это не находит. Rolia пишет об этом предупреждение при старте.
+4. **`config/paper-global.yml` → `threaded-regions.scheduler: AFFINITY`** — work-stealing и привязка задач региона к своему тик-потоку (нужно ≥2 ядра). Это же единственный планировщик, с которым работает профайлер регионов Canvas.
+5. **`server.properties` → `level-seed`** — публичный сид, задаёт **только форму рельефа**. Его можно называть кому угодно.
+6. **Сохраните `rolia.yml` в бэкап вместе с миром** — см. раздел ниже.
+7. Решите, оставлять ли `optimizations.dab` и `optimizations.villager-lobotomize` в `rolia.yml`. Обе **включены по умолчанию** и обе меняют поведение мобов — см. «Производительность».
+
+| Ядер CPU | `worker-threads` | `io-threads` |
+| --- | --- | --- |
+| 4 | 2 | 2 |
+| 8 | 3 | 2 |
+| 16 | 6 | 3 |
+| 32 | 8 | 4 |
+
+```yaml
+# config/paper-global.yml
+chunk-system:
+  worker-threads: 3    # пример для 8 ядер
+  io-threads: 2
+threaded-regions:
+  scheduler: AFFINITY
+```
+
+Значения намеренно **меньше** числа ядер: ядра нужны ещё и тик-потокам регионов Folia, и сборщику мусора (`-XX:ConcGCThreads` в скрипте запуска). Все три бюджета делят одни и те же ядра.
 
 ### Конфигурация
 
@@ -102,8 +132,10 @@ bash start.sh
 | `level-seed` | `server.properties` | Публичный сид. Определяет **только форму рельефа**. |
 | `secure-seed.salt` | `rolia.yml` | Секретная соль (64+ символов). Создаётся автоматически с правами `0600`. |
 | `optimizations.dab` | `rolia.yml` | DAB: `enabled` (по умолчанию `true`), `start-distance`, `max-tick-interval`, `blacklist`. |
-| `optimizations.villager-lobotomize` | `rolia.yml` | Лоботомия запертых торговцев. |
-| `optimizations.faster-network` | `rolia.yml` | Ускоренная сериализация чанковых данных. |
+| `optimizations.villager-lobotomize` | `rolia.yml` | Лоботомия запертых торговцев: `enabled` (по умолчанию `true`), `wait-until-trade-locked`, `check-interval`. |
+| `optimizations.faster-network` | `rolia.yml` | Ускоренная сериализация чанковых данных (по умолчанию `true`). |
+| `chunk-system.worker-threads` / `io-threads` | `config/paper-global.yml` | Потоки чанковой системы. **Задайте явно** — см. чек-лист выше. |
+| `threaded-regions.scheduler` | `config/paper-global.yml` | Планировщик регионов. Рекомендуется `AFFINITY`. |
 
 Примечание: слизнёвые чанки управляются секретным сидом, поэтому опция `slime-seed` из `spigot.yml` на Rolia не действует.
 
@@ -189,11 +221,12 @@ The honest security bound:
 
 All the performance of Canvas and Folia: regionized multithreading, tick/chunk/entity optimizations. As of build 40 the speedups are **on by default**:
 
-- **DAB** (Dynamic Activation of Brain) — throttles the AI of distant mobs. A mob within `start-distance` (12 blocks by default) of a player thinks every tick; beyond that the interval grows with distance up to `max-tick-interval` (20 ticks by default). Spectators do not count, creative-mode players do.
-  DAB does **not** change spawning rules, mob caps, drops, physics, redstone or hoppers; mobs keep ticking, only their AI runs less often. But a farm that depends on mobs moving far away from any player will run more slowly — add those types to `optimizations.dab.blacklist` or turn DAB off.
+- **DAB** (Dynamic Activation of Brain), **on by default** — mobs far from every player **think less often**. A mob's AI (its brain sensors and behaviours, or the goal selector) runs once every N ticks instead of every tick, where N grows with distance from 1 up to `max-tick-interval` (20 by default). Mobs within `start-distance` (12 blocks by default) are never throttled. Spectators do not count, creative-mode players do.
+  This is **not** behaviour-neutral: a throttled mob **reacts late** — it notices targets, repaths, flees and re-aims on a coarser clock, so distant mobs drift and converge differently than in Vanilla. Movement, physics, damage, despawning, mob caps and spawn rules are untouched, so farm *rates* are normally unaffected, but anything relying on precise distant pathfinding can change. Exempt specific types with `optimizations.dab.blacklist`, or turn DAB off entirely.
 - **Canvas's AFFINITY region scheduler** (`threaded-regions.scheduler: AFFINITY` in `paper-global.yml`) — work stealing plus keeping a region's tasks on their own tick thread.
-- **Network packet filters** and faster chunk-data serialization (bulk long-array writes) — the bytes on the wire are identical, just faster.
-- **Stuck-villager optimization** (lobotomize, on): a villager in a 1×1 skips its brain tick but **still restocks trades**. Note that it also does not detect hostiles, sleep, gossip, breed, or **contribute to iron-golem spawning** — turn it off if you run villager-based iron farms.
+- **Network packet filters** and faster chunk-data serialization (bulk long-array writes) — the only one of the three that genuinely changes nothing: the bytes on the wire are identical, just faster.
+- **Stuck-villager optimization** (lobotomize), **on by default**: a villager boxed into a 1×1 cell cannot path anywhere, so its whole brain tick is skipped. Trades and **restocking are preserved**, so pure trading halls behave like Vanilla.
+  This is not behaviour-neutral either: skipping the brain skips every sensor and behaviour. A lobotomized villager does **not detect hostiles** (it will not flee or scream when a zombie arrives), does **not sleep**, does **not gossip**, does **not breed**, and does **not contribute to iron-golem spawning**. Turn it off if you run villager-based iron farms or breeders.
 
 Build 40 also fixes bugs inherited from Canvas: completely broken snow accumulation, the mob spawn distance gate, spawn-chunk fairness, and a Folia cross-region safety guard.
 
@@ -203,15 +236,44 @@ Java **25** or newer.
 
 ### Install and run
 
-Download `rolia-paperclip-26.1.2.jar` from [Releases](../../releases/latest).
+Download `rolia-paperclip-26.1.2.jar` from [Releases](../../releases/latest) and put it next to the launch script.
 
 ```bash
-# recommended: with SIMD acceleration (Java 25+)
-java -Xmx4G --add-modules=jdk.incubator.vector --sun-misc-unsafe-memory-access=allow -jar rolia-paperclip-26.1.2.jar --nogui
-
-# or the ready-made script from the repository
-bash start.sh
+bash start.sh          # Linux / macOS
+start.bat              # Windows
 ```
+
+The scripts already carry the flags you want: `-Xms` = `-Xmx`, G1 with a pinned `-XX:ConcGCThreads`, `-XX:+AlwaysPreTouch`, `-XX:+PerfDisableSharedMem`, the Aikar set sized for a 4–8 GB heap, and the two required flags `--add-modules=jdk.incubator.vector` (Canvas SIMD) and `--sun-misc-unsafe-memory-access=allow`. Change the heap with the `MEM` variable at the top of the script. Every flag is explained in [LAUNCH.md](LAUNCH.md).
+
+### First run checklist
+
+The JVM flags are only half the job. Do this once, then restart.
+
+1. Java **25+**.
+2. Start the server once so it writes its configs, then stop it.
+3. **`config/paper-global.yml` → `chunk-system`**: set `worker-threads` and `io-threads` explicitly. Paper ships `-1` for both, and `-1` does **not** mean "use all cores": `io-threads` is resolved as `max(1, configured)`, so `-1` means **exactly one** I/O thread on every machine, and `worker-threads` auto-resolves to **one** thread on any box with 7 or fewer cores. It shows up as chunk-load stalls rather than high MSPT, which is why almost nobody finds it. Rolia warns about it at startup.
+4. **`config/paper-global.yml` → `threaded-regions.scheduler: AFFINITY`** — work stealing plus keeping a region's tasks on their own tick thread (needs ≥2 cores). It is also the only scheduler the Canvas region profiler supports.
+5. **`server.properties` → `level-seed`** — the public seed; it controls **only the shape of the terrain**. You may hand it out.
+6. **Back up `rolia.yml` together with your world** — see the section below.
+7. Decide whether to keep `optimizations.dab` and `optimizations.villager-lobotomize` in `rolia.yml`. Both are **on by default** and both change mob behaviour — see "Performance".
+
+| CPU cores | `worker-threads` | `io-threads` |
+| --- | --- | --- |
+| 4 | 2 | 2 |
+| 8 | 3 | 2 |
+| 16 | 6 | 3 |
+| 32 | 8 | 4 |
+
+```yaml
+# config/paper-global.yml
+chunk-system:
+  worker-threads: 3    # example for 8 cores
+  io-threads: 2
+threaded-regions:
+  scheduler: AFFINITY
+```
+
+These are deliberately **below** the core count. Folia also needs cores for its region tick threads, and G1 needs `-XX:ConcGCThreads` (set in the launch script) — all three budgets share the same CPUs.
 
 ### Configuration
 
@@ -220,8 +282,10 @@ bash start.sh
 | `level-seed` | `server.properties` | The public seed. Determines **the shape of the terrain only**. |
 | `secure-seed.salt` | `rolia.yml` | The secret salt (64+ chars). Created automatically with `0600` permissions. |
 | `optimizations.dab` | `rolia.yml` | DAB: `enabled` (`true` by default), `start-distance`, `max-tick-interval`, `blacklist`. |
-| `optimizations.villager-lobotomize` | `rolia.yml` | Stuck-villager lobotomization. |
-| `optimizations.faster-network` | `rolia.yml` | Faster chunk-data serialization. |
+| `optimizations.villager-lobotomize` | `rolia.yml` | Stuck-villager lobotomization: `enabled` (`true` by default), `wait-until-trade-locked`, `check-interval`. |
+| `optimizations.faster-network` | `rolia.yml` | Faster chunk-data serialization (`true` by default). |
+| `chunk-system.worker-threads` / `io-threads` | `config/paper-global.yml` | Chunk-system thread pools. **Set these explicitly** — see the checklist above. |
+| `threaded-regions.scheduler` | `config/paper-global.yml` | Region scheduler. `AFFINITY` recommended. |
 
 Note: slime chunks are driven by the secret seed, so the `slime-seed` option from `spigot.yml` has no effect on Rolia.
 

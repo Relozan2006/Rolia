@@ -206,13 +206,24 @@ public class WorldConfig extends Part {
     public static class RegionBars extends Part {
 
         {
-            option("enableTpsBar").docs("Enables a regionized TPS-Bar implementation for Canvas.");
+            // Rolia - default changed from true to false, see docs below
+            option("enableTpsBar").docs(
+                "Enables a regionized TPS-Bar implementation for Canvas.",
+                "Rolia changed the default from true to false: this is a Canvas extra, not a Vanilla feature,",
+                "and while enabled it ticks once a second for every region even when no player has ever run",
+                "/regionbar. Turn it on per world if you actually want it."
+            );
             option("tpsBarFormat")
                 .docs(
                     "MiniMessage-formatted line for the TPS bar. Placeholders are <tps>, <mspt>, <util>, and <players>.",
                     "Legacy tokens(%tps%, %mspt%, %util%, %players%) are also accepted and auto-converted."
                 ).greedyString();
-            option("enableRamBar").docs("Enables a regionized RAM-Bar implementation for Canvas.");
+            // Rolia - default changed from true to false, see docs below
+            option("enableRamBar").docs(
+                "Enables a regionized RAM-Bar implementation for Canvas.",
+                "Rolia changed the default from true to false: same reasoning as enableTpsBar - a Canvas extra",
+                "that costs a per-region tick every second whether or not anybody asked for it."
+            );
             option("ramBarFormat")
                 .docs(
                     "MiniMessage-formatted line for the RAM bar. Placeholders are <used>, <xmx>, <percent>.",
@@ -220,10 +231,10 @@ public class WorldConfig extends Part {
                 ).greedyString();
         }
 
-        public boolean enableTpsBar = true;
+        public boolean enableTpsBar = false; // Rolia - was true; Canvas extra that ticks once a second per region even when nobody enabled it
         public String tpsBarFormat = DEFAULT_TPSBAR_FORMAT;
 
-        public boolean enableRamBar = true;
+        public boolean enableRamBar = false; // Rolia - was true; Canvas extra that ticks once a second per region even when nobody enabled it
         public String ramBarFormat = DEFAULT_RAMBAR_FORMAT;
     }
 
@@ -393,11 +404,19 @@ public class WorldConfig extends Part {
 
             {
                 option("loadChunks").docs("Specify which projectiles should load chunks when moving. Only works when thrown by players");
+                // Rolia - default changed from false to true, see docs below
                 option("crossRegionRedirectableProjectileDeflection")
                     .docs(
                         Style.wrap(
                             "Restores Vanilla redirect behavior for arrow hits on redirectable projectiles",
                             "like wind charges and fireballs across region threads."
+                        )
+                        .blank()
+                        .wordWrap(
+                            "Rolia changed the default from false to true. With it off, an arrow that hits a wind",
+                            "charge or fireball owned by another region thread silently fails to deflect it, so the",
+                            "same shot works or does not work purely depending on where the region boundary happens",
+                            "to fall. That is a Vanilla deviation players can hit without ever knowing why."
                         )
                         .blank()
                         .wordWrap(
@@ -410,7 +429,7 @@ public class WorldConfig extends Part {
             public int maxProjectileChunkLoadsPerTick = 10;
             public int maxProjectileChunkLoadsPerProjectileBeforeRemoval = 10;
             public List<String> loadChunks = new ArrayList<>();
-            public boolean crossRegionRedirectableProjectileDeflection = false;
+            public boolean crossRegionRedirectableProjectileDeflection = true; // Rolia - was false; Vanilla arrow/wind-charge deflection silently fails across region boundaries
 
             private final CanonicalReference<Predicate<Projectile>> compiledPredicate = new CanonicalReference<>();
 
