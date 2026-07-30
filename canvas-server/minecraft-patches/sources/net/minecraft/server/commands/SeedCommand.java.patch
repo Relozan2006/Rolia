@@ -8,7 +8,7 @@
  import net.minecraft.commands.CommandSourceStack;
  import net.minecraft.commands.Commands;
  import net.minecraft.network.chat.Component;
-@@ -13,6 +_,13 @@
+@@ -13,6 +_,19 @@
                  long seed = c.getSource().getLevel().getSeed();
                  Component seedText = ComponentUtils.copyOnClickText(String.valueOf(seed));
                  c.getSource().sendSuccess(() -> Component.translatable("commands.seed.success", seedText), false);

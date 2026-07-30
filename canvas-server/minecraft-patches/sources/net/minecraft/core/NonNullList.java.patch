@@ -17,12 +17,14 @@
          Objects.requireNonNull(defaultValue);
          Object[] objects = new Object[size];
          Arrays.fill(objects, defaultValue);
-         return new NonNullList<>(Arrays.asList((E[])objects), defaultValue); // Rolia - Canvas swapped this for a growable ObjectArrayList. withSize/of back inventories and container contents, and Vanilla + CraftBukkit rely on add/remove THROWING there: a fixed-size list is what stops code silently growing an inventory past its declared slot count and desyncing the container packet and the save. Kept fixed-size; the growable swap in create()/createWithCapacity() above is unaffected and stays.
+-        return new NonNullList<>(Arrays.asList((E[])objects), defaultValue);
++        return new NonNullList<>(Arrays.asList((E[])objects), defaultValue); // Rolia - Canvas swapped this for a growable ObjectArrayList. withSize/of back inventories and container contents, and Vanilla + CraftBukkit rely on add/remove THROWING there: a fixed-size list is what stops code silently growing an inventory past its declared slot count and desyncing the container packet and the save. Kept fixed-size; the growable swap in create()/createWithCapacity() above is unaffected and stays.
      }
  
      @SafeVarargs
      public static <E> NonNullList<E> of(final E defaultValue, final E... values) {
-         return new NonNullList<>(Arrays.asList(values), defaultValue); // Rolia - same reasoning as withSize above
+-        return new NonNullList<>(Arrays.asList(values), defaultValue);
++        return new NonNullList<>(Arrays.asList(values), defaultValue); // Rolia - same reasoning as withSize above
      }
  
      protected NonNullList(final List<E> list, final @Nullable E defaultValue) {

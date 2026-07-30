@@ -114,6 +114,53 @@ jobs:
           git config --global user.email "ci@rolia.local"
           git config --global user.name "Rolia CI"
 
+      - name: Patch sanity (hunk counts + no new code as context)
+        # Rolia - build 44: these two checks cost two seconds and would have caught the failure that
+        # wasted a full three-hour run. A unified-diff CONTEXT line must match the upstream source byte
+        # for byte, so writing a newly added line with a leading space instead of a '+' rejects the
+        # whole hunk - and the line counts still add up, so an arithmetic-only check says it is fine.
+        run: |
+          set -e -o pipefail
+          python3 - <<'PATCHCHK'
+          import glob, re, sys
+          HDR = re.compile(r'^@@ -(\d+)(?:,(\d+))? \+(_|\d+)(?:,(\d+))? @@(.*)$')
+          MARK = re.compile(r'io\.rolia\.|// Rolia|RoliaConfig|rolia[A-Z]\w+')
+          files = sorted(glob.glob('canvas-server/**/*.patch', recursive=True) +
+                         glob.glob('canvas-api/**/*.patch', recursive=True))
+          bad_count = bad_ctx = hunks = 0
+          for p in files:
+              lines = open(p, encoding='utf-8', newline='').read().split('\n')
+              for n, line in enumerate(lines, 1):
+                  if line[:1] == ' ' and MARK.search(line):
+                      print("NEW CODE AS CONTEXT  %s:%d\n    %s" % (p, n, line[:160]))
+                      bad_ctx += 1
+              i = 0
+              while i < len(lines):
+                  m = HDR.match(lines[i])
+                  if not m:
+                      i += 1; continue
+                  _, ob, _, nb, _ = m.groups()
+                  body = []; j = i + 1
+                  while j < len(lines):
+                      l = lines[j]
+                      if HDR.match(l) or l.startswith(('--- ', '+++ ', 'diff ')): break
+                      body.append(l); j += 1
+                  while body and body[-1] == '':
+                      body.pop(); j -= 1
+                  oc = sum(1 for l in body if l[:1] in (' ', '-') or l == '') - sum(1 for l in body if l.startswith('\\'))
+                  nc = sum(1 for l in body if l[:1] in (' ', '+') or l == '') - sum(1 for l in body if l.startswith('\\'))
+                  hunks += 1
+                  if (ob and int(ob) != oc) or (nb and int(nb) != nc):
+                      print("HUNK COUNT  %s:%d  declared -%s,+%s  actual -%d,+%d" % (p, i + 1, ob, nb, oc, nc))
+                      bad_count += 1
+                  i = j
+          print("checked %d patch files, %d hunks" % (len(files), hunks))
+          if bad_count or bad_ctx:
+              print("FAIL: %d bad hunk count(s), %d new line(s) written as context" % (bad_count, bad_ctx))
+              sys.exit(1)
+          print("PATCH SANITY OK")
+          PATCHCHK
+
       - name: Apply patches
         id: apply
         run: |

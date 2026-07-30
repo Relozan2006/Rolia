@@ -225,7 +225,7 @@
  
      @VisibleForDebug
      public static void spawnCategoryForPosition(final MobCategory mobCategory, final ServerLevel level, final BlockPos start) {
-@@ -245,70 +_,125 @@
+@@ -245,61 +_,125 @@
          final NaturalSpawner.SpawnPredicate extraTest,
          final NaturalSpawner.AfterSpawnCallback spawnCallback
      ) {
@@ -266,15 +266,15 @@
              BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
              int clusterSize = 0;
  
-             // Rolia start - vanilla-parity.mob-spawn-placement
-             // Read once per call, not per pack member. The chunk bounds are plain arithmetic on the
-             // ChunkPos and are only consulted on the Canvas path.
-             final boolean roliaVanillaPlacement = io.rolia.RoliaConfig.parityMobSpawnPlacement();
-             final int roliaMinX = chunk.getPos().getMinBlockX();
-             final int roliaMinZ = chunk.getPos().getMinBlockZ();
-             final int roliaMaxX = chunk.getPos().getMaxBlockX();
-             final int roliaMaxZ = chunk.getPos().getMaxBlockZ();
-             // Rolia end - vanilla-parity.mob-spawn-placement
++            // Rolia start - vanilla-parity.mob-spawn-placement
++            // Read once per call, not per pack member. The chunk bounds are plain arithmetic on the
++            // ChunkPos and are only consulted on the Canvas path.
++            final boolean roliaVanillaPlacement = io.rolia.RoliaConfig.parityMobSpawnPlacement();
++            final int roliaMinX = chunk.getPos().getMinBlockX();
++            final int roliaMinZ = chunk.getPos().getMinBlockZ();
++            final int roliaMaxX = chunk.getPos().getMaxBlockX();
++            final int roliaMaxZ = chunk.getPos().getMaxBlockZ();
++            // Rolia end - vanilla-parity.mob-spawn-placement
              for (int groupCount = 0; groupCount < 3; groupCount++) {
                  int x = start.getX();
                  int z = start.getZ();
