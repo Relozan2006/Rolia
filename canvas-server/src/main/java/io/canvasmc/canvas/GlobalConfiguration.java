@@ -155,7 +155,7 @@ public class GlobalConfiguration extends Part {
      */
     private static void applyRoliaOverrides(final GlobalConfiguration c) {
         if (io.rolia.RoliaConfig.canvasGuardSeverityLog()) {
-            c.regionScheduler.guardSeverity = GuardSeverity.LOG;
+            c.regionScheduler.guardSeverity = RegionScheduler.GuardSeverity.LOG; // Rolia - GuardSeverity is nested in RegionScheduler, not in GlobalConfiguration
         }
         if (io.rolia.RoliaConfig.parityEnderPearl()) {
             c.restoreVanillaEnderPearlBehavior = true;
