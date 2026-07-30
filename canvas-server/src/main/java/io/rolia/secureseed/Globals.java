@@ -41,7 +41,14 @@ public class Globals {
     public static final int WORLD_SEED_LONGS = 16;
     public static final int WORLD_SEED_BITS = WORLD_SEED_LONGS * 64;
 
-    public static final long[] worldSeed = new long[WORLD_SEED_LONGS];
+    /**
+     * Rolia - build 44: private. This was {@code public static final}, and {@link #publishedWorldSeed}
+     * handed back the LIVE array, so any plugin could print the 1024-bit secret to chat with
+     * {@code Globals.seedToString(Globals.worldSeed)} - no reflection needed - or overwrite it and
+     * silently change worldgen mid-session. That is outside the "attacker observes the world" threat
+     * model but squarely inside "this server runs third-party plugins".
+     */
+    private static final long[] worldSeed = new long[WORLD_SEED_LONGS];
 
     /**
      * Rolia - the dimension domain separator for the CURRENT worldgen thread.
@@ -211,7 +218,7 @@ public class Globals {
      * Rolia - the correct way to read the shared seed from a thread that did not itself call
      * {@link #setupGlobals}. The branch consumes the volatile read, so it cannot be optimised away.
      */
-    public static long[] publishedWorldSeed() {
+    static long[] publishedWorldSeed() { // Rolia - build 44: package-private. It hands back the LIVE secret array; nothing outside io.rolia.secureseed has ever needed it, and leaving it public meant the private field above bought nothing.
         if (seedInitialized) {
             return worldSeed; // published - the volatile read above orders the writes before this point
         }
@@ -306,8 +313,48 @@ public class Globals {
      * terrain security funnelled through a single 64-bit long and two vanilla code paths truncated it
      * to 48 bits - a routinely-executed seed-cracking workload.</p>
      */
+    /**
+     * Rolia - build 44: pick the secret root for one worldgen domain, or the caller's VANILLA
+     * expression when {@code secure-seed.enabled} is false.
+     *
+     * <p>Every secret worldgen system now names its own domain and gets an independent 128-bit seed,
+     * instead of all of them being {@code fromHashOf} offsets of one shared root - see
+     * {@link #secretPositionalFactory}. Passing the vanilla expression in means the disabled path is
+     * literally the vanilla code, with no second copy of it to drift.</p>
+     *
+     * @param vanilla what Vanilla would have used here; evaluated either way, but only once per world
+     * @param domain  a stable name for this system, mixed into the key derivation
+     */
+    public static net.minecraft.world.level.levelgen.PositionalRandomFactory secretOr(
+        final net.minecraft.world.level.levelgen.PositionalRandomFactory vanilla, final String domain) {
+        return isSecureSeedEnabled() ? secretPositionalFactory(domain) : vanilla;
+    }
+
     public static net.minecraft.world.level.levelgen.PositionalRandomFactory secretPositionalFactory(final String domain) {
-        final long[] k = Hashing.derive(domain, publishedWorldSeed(), 0L);
+        // Rolia - build 44, two changes, both of which need a fresh world (which is why they land now).
+        //
+        // 1. THE LEVEL SEED IS MIXED IN. It was not, so the whole secret noise layer - biome climate,
+        //    caves, ore veins, aquifers, surface rules - was a function of the 1024-bit secret alone.
+        //    On a multiworld server that meant a "resource" world regenerated with a fresh level-seed
+        //    got new terrain shape but the SAME caves, the same ore and the same climate at the same
+        //    coordinates, where Vanilla changes all of it with the seed. It also weakened the threat
+        //    model: mapping world A's caves handed you world B's for free.
+        //
+        // 2. EVERY DOMAIN GETS ITS OWN ROOT. Callers used to take one "worldgen-root" factory and
+        //    derive from it with fromHashOf(...). Vanilla's XoroshiroPositionalRandomFactory is AFFINE
+        //    in its seed - fromHashOf and at() are public XOR offsets - so all ~40 secret noises and
+        //    every position in them were offsets of a single 128-bit unknown, and recovering it
+        //    anywhere recovered it everywhere. The worst case was SurfaceSystem, which received the
+        //    root directly and drew the badlands terracotta banding straight off it: ~200 draws whose
+        //    results you can read off the terrain with your eyes.
+        //
+        //    Each domain now gets an independent 128-bit seed from the keyed MAC, so breaking one
+        //    tells you nothing about the others. Within one domain at() is still affine, exactly as in
+        //    Vanilla - that is a deliberate limit, not an oversight: this is called once per noise or
+        //    per system (about forty times for a whole world), never per block, so it costs nothing,
+        //    whereas making at() cryptographic would put a BLAKE2b compression on the per-position
+        //    path and undo the build-41 performance work.
+        final long[] k = Hashing.derive(domain, publishedWorldSeed(), levelSeed());
         return new net.minecraft.world.level.levelgen.XoroshiroRandomSource(k[0], k[1]).forkPositional();
     }
 
@@ -319,7 +366,8 @@ public class Globals {
      * 48-bit funnel derived from anything public.</p>
      */
     public static net.minecraft.util.RandomSource secretClimateSource(final long offset) {
-        final long[] k = Hashing.derive("climate-legacy", publishedWorldSeed(), offset);
+        // Rolia - build 44: mix the level seed, same reasoning as secretPositionalFactory above.
+        final long[] k = Hashing.derive("climate-legacy", publishedWorldSeed(), offset ^ levelSeed());
         return new net.minecraft.world.level.levelgen.XoroshiroRandomSource(k[0], k[1]);
     }
 
@@ -332,6 +380,15 @@ public class Globals {
      * (loot random sequences, end spikes). Deterministic per (worldSeed, domain, salt).
      */
     public static long transformSeed(long levelSeed, long domain) {
+        if (!isSecureSeedEnabled()) {
+            // Rolia - build 44: this had NO enabled-check, and publishedWorldSeed() returns the real
+            // secret regardless of the switch. Its two callers are loot random sequences and the End
+            // spike layout, so with secure-seed.enabled=false a world still had non-Vanilla loot and
+            // non-Vanilla obsidian pillars, both keyed to rolia.yml - directly contradicting the
+            // config's own promise that such a world "is an ordinary Minecraft world and can be moved
+            // to any server". Vanilla's own mixing for these two call sites is the plain XOR.
+            return levelSeed ^ domain;
+        }
         return Hashing.derive("legacy-transform", publishedWorldSeed(), levelSeed ^ domain)[0];
     }
 

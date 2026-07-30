@@ -1,0 +1,8 @@
+Rolia includes patches derived from Luminol.
+
+Upstream project: https://github.com/LuminolMC/Luminol
+Licence: GNU General Public License, version 3 (GPL-3.0)
+
+Those patches are used under the terms of that licence and remain the copyright of
+their respective authors. Rolia's own patches are released under GPL-3.0; see LICENSE
+in the repository root.

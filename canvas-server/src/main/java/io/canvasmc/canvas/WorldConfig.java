@@ -165,7 +165,32 @@ public class WorldConfig extends Part {
         return result[0];
     }
 
+    /**
+     * Rolia - build 44: force the overrides the operator asked for in rolia.yml.
+     *
+     * <p>Same reasoning as {@code GlobalConfiguration#applyRoliaOverrides}: the field defaults above are
+     * only consulted when the config file does not exist yet. From the second boot onwards the file
+     * wins, so these four keys were inert while {@code /rolia status} reported them as changed.</p>
+     *
+     * <p>A key set to true forces the behaviour on; left false, Canvas's own file decides.</p>
+     */
+    private void applyRoliaOverrides() {
+        if (io.rolia.RoliaConfig.parityProjectileDeflection()) {
+            this.entities.projectiles.crossRegionRedirectableProjectileDeflection = true;
+        }
+        if (io.rolia.RoliaConfig.canvasSuffocationOptimization()) {
+            this.enableSuffocationOptimization = true;
+        }
+        if (io.rolia.RoliaConfig.canvasDisableRegionBars()) {
+            this.regionBars.enableTpsBar = false;
+            this.regionBars.enableRamBar = false;
+        }
+    }
+
     private void onLoad(final @NonNull ServerLevel level) {
+
+        // Rolia - apply the rolia.yml overrides BEFORE validation, so a forced value is validated too
+        applyRoliaOverrides();
 
         // validate the object here too, because some users may do
         // something stupid in the patch variant
@@ -206,7 +231,7 @@ public class WorldConfig extends Part {
     public static class RegionBars extends Part {
 
         {
-            // Rolia - default changed from true to false, see docs below
+            // Rolia - Canvas's default (true) is kept; canvas-overrides.disable-region-bars turns both bars off
             option("enableTpsBar").docs(
                 "Enables a regionized TPS-Bar implementation.",
                 "A Canvas extra, not a Vanilla feature. While enabled it ticks once a second for every region even",
@@ -218,7 +243,7 @@ public class WorldConfig extends Part {
                     "MiniMessage-formatted line for the TPS bar. Placeholders are <tps>, <mspt>, <util>, and <players>.",
                     "Legacy tokens(%tps%, %mspt%, %util%, %players%) are also accepted and auto-converted."
                 ).greedyString();
-            // Rolia - default changed from true to false, see docs below
+            // Rolia - Canvas's default (true) is kept; canvas-overrides.disable-region-bars turns both bars off
             option("enableRamBar").docs(
                 "Enables a regionized RAM-Bar implementation.",
                 "Same reasoning as enableTpsBar: a Canvas extra that costs a per-region tick every second whether",
@@ -405,7 +430,7 @@ public class WorldConfig extends Part {
 
             {
                 option("loadChunks").docs("Specify which projectiles should load chunks when moving. Only works when thrown by players");
-                // Rolia - default changed from false to true, see docs below
+                // Rolia - Canvas's default (false) is kept; see rolia.yml for the key that changes it
                 option("crossRegionRedirectableProjectileDeflection")
                     .docs(
                         Style.wrap(

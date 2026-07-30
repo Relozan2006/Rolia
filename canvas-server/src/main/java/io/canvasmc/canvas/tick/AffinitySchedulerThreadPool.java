@@ -313,9 +313,21 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
     private void insertFresh(final ScheduledState task) {
         final TickThreadRunner[] runners = this.runners;
 
+        // Rolia - build 44: this used to `return` unconditionally, dropping the task on the floor.
+        // schedule() has ALREADY called setState and tryMarkScheduled by this point, so the state was
+        // marked scheduled while sitting in no queue with no owner. That is harmless when the linked
+        // runner is mid-tick (its own returnTask picks the state up on the linked fast path) but fatal
+        // when the linked runner is parked idle: the region never ticks again, and it cannot even be
+        // re-scheduled, because SchedulableTick.setState refuses a second state. Hand it to the linked
+        // runner if that runner is idle; otherwise let it fall through to the queues as normal.
         for (final TickThreadRunner runner : runners) {
-            // if task is linked, don't insert to queues
-            if (runner.linked == task.tick) return;
+            if (runner.linked == task.tick) {
+                if (this.idleThreads.get(runner.id)) {
+                    this.idleThreads.clear(runner.id);
+                    runner.acceptTask(task);
+                }
+                return;
+            }
         }
 
         // iterate all idle threads, not just the first one
@@ -355,7 +367,13 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
             // not work stealing, not pinned, use global
             ret = globalQueue.poll();
         }
-        if (ret == null && runner.linked == null) {
+        // Rolia - build 44: the `&& runner.linked == null` conjunct is gone. A runner linked to a
+        // handle whose state is null - which is exactly what a region SPLIT produces while the spark
+        // region profiler is pinned - fell through to poll(), found nothing, and then parked in
+        // STATE_IDLE WITHOUT setting its idle bit. Nothing could ever wake it again: insertFresh only
+        // scans idleThreads, notifyTasks only unparks the owning runner, and unlink() neither sets the
+        // bit nor unparks. One region tick thread was lost for the remaining uptime of the server.
+        if (ret == null) {
             this.idleThreads.set(runner.id);
             final int s = runner.localQueue.size();
             if (s != 0) {
@@ -509,6 +527,29 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
                     throw new IllegalStateException("Runner already linked");
                 }
 
+                // Rolia - build 44: isSwapping skipped the ownership check above, and NO path here ever
+                // removed the state from globalQueue or any localQueue. So after a pin was transferred
+                // across a region merge, the same ScheduledState could be owned by this runner AND still
+                // sitting in a heap: this runner's next returnTask handed it back and threw "Already
+                // owned by another runner", which goes to onException -> crash report -> stopServer().
+                // A /spark profiler --region plus a routine merge stopped the server.
+                //
+                // Refuse the link instead when the target is owned by someone else, and take it out of
+                // the queues when it is merely queued, so it can only live in one place.
+                if (isSwapping && task.state != null) {
+                    final ScheduledState swapState = (ScheduledState) task.state;
+                    if (swapState.ownedBy != null && swapState.ownedBy != this) {
+                        // Owned by a live runner mid-tick. Leave it alone; profiling simply does not
+                        // follow this region. Losing a pin is a diagnostic inconvenience; stealing the
+                        // state is a stopped server.
+                        return;
+                    }
+                    scheduler.globalQueue.remove(swapState);
+                    for (final TickThreadRunner other : scheduler.runners) {
+                        other.localQueue.remove(swapState);
+                    }
+                }
+
                 this.linked = task;
 
                 if (task.state != null && scheduler.idleThreads.get(id)) {
@@ -581,6 +622,16 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         private void returnTask(final @NonNull ScheduledState task, final boolean reschedule) {
             synchronized (this.scheduler.scheduleLock) {
                 task.ownedBy = null;
+
+                // Rolia - build 44: when runTick() returns false the handle has been descheduled, but
+                // the linked fast path in the pool-level returnTask handed the very same dead
+                // ScheduledState straight back. Its deadline was already in the past, so
+                // waitUntilDeadline returned immediately, runTick() returned false again, and the
+                // runner span at 100% CPU emitting a "missed deadline" warning on every iteration.
+                // Drop the link here, where we still know WHICH task finished.
+                if (!reschedule && this.linked != null && this.linked.state == task) {
+                    this.linked = null;
+                }
 
                 final ScheduledState newWait = this.scheduler.returnTask(this, reschedule && task.isScheduled() ? task : null);
                 if (newWait == null) {

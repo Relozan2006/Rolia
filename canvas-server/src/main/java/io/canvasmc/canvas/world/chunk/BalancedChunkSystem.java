@@ -553,6 +553,15 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
                     ret = true;
                 } catch (final Throwable thrown) {
                     LOGGER.error("Exception thrown from thread \"{}\"", this.thread.getName(), thrown);
+                    // Rolia - build 44: an Error must NOT be swallowed here. Every chunk-system task
+                    // runs through this loop, including chunk SAVE tasks - so an OutOfMemoryError or a
+                    // StackOverflowError during a save was logged as one line among thousands while the
+                    // chunk had already been marked clean, and the block edits in it were simply gone.
+                    // Exceptions stay contained (one bad task should not take the server down); Errors
+                    // mean the JVM is in trouble and must propagate so the failure is visible.
+                    if (thrown instanceof Error) {
+                        throw (Error) thrown;
+                    }
                 }
             } while (System.nanoTime() - deadline <= 0L);
             return ret;

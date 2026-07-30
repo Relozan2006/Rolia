@@ -39,7 +39,7 @@
              if (this.lastStep != step) {
                  this.lastStep = step;
                  this.flushStep();
-@@ -53,46 +_,83 @@
+@@ -53,46 +_,82 @@
          public void applyAndClear(final Entity entity) {
              this.flushStep();
  
@@ -58,12 +58,19 @@
 +                return;
 +            }
 +
-+            int i = 0;
-+            while (i < size - 3) {
-+                effects.get(i++).accept(entity);
-+                effects.get(i++).accept(entity);
-+                effects.get(i++).accept(entity);
-+                effects.get(i++).accept(entity);
++            // Rolia - build 44: the 4x unroll checked isAlive() once per GROUP OF FOUR, where Vanilla
++            // checks before every effect. So up to three effects ran against an entity that had already
++            // been removed. isAlive() is !isRemoved(), not a health test, and LivingEntity.hurtServer
++            // has its own removed/dead guard - so the blast radius is non-living entities and
++            // non-damage effects: an item, boat, minecart or projectile that a block effect discarded
++            // still received up to three more consumers, which means a second lethal-damage attempt and
++            // a DUPLICATE Bukkit event (EntityDamageEvent, VehicleDestroyEvent) fired for an entity no
++            // longer in the world - and plugins act on those, including by dropping loot.
++            //
++            // finalEffects holds 0-4 entries in almost every case, so a group of four covered the WHOLE
++            // list: this was the common path, not a corner case, and the unroll bought nothing. Back to
++            // Vanilla's loop. The array-based flushStep/apply rewrite below is untouched and kept.
++            for (int i = 0; i < size; i++) {
                  if (!entity.isAlive()) {
                      break;
                  }
@@ -72,15 +79,7 @@
 -            }
 -
 -            this.finalEffects.clear();
-+            }
-+
-+            if (entity.isAlive()) {
-+                for (; i < size; i++) {
-+                    effects.get(i).accept(entity);
-+                    if (!entity.isAlive()) {
-+                        break;
-+                    }
-+                }
++                effects.get(i).accept(entity);
 +            }
 +
 +            effects.clear();

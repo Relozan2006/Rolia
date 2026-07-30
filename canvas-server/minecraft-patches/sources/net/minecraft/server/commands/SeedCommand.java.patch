@@ -16,8 +16,14 @@
 +                // Rolia start - print a one-way FINGERPRINT, never the seed itself. Printing the raw
 +                // 1024-bit feature seed handed the whole secret to any level-2 op as a copy-on-click
 +                // component and wrote it into logs/latest.log. The fp proves the seed is unchanged.
-+                Globals.setupGlobals(c.getSource().getLevel());
-+                c.getSource().sendSuccess(() -> Component.literal("Feature seed fp: " + Globals.seedFingerprint()), false);
++                // Rolia - build 44: honour secure-seed.seed-command. The key documented three modes and
++                // had ZERO readers, so setting it to "hidden" changed nothing while /rolia status
++                // reported it as changed - exactly the written-but-never-read drift the option registry
++                // exists to prevent.
++                if ("fingerprint".equals(io.rolia.RoliaConfig.seedCommandMode())) {
++                    Globals.setupGlobals(c.getSource().getLevel());
++                    c.getSource().sendSuccess(() -> Component.literal("Rolia: feature seed fp: " + Globals.seedFingerprint()), false);
++                }
 +                // Rolia end
                  return (int)seed;
              })

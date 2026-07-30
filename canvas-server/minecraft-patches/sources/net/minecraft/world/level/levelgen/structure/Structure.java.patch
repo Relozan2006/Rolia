@@ -1,15 +1,23 @@
 --- a/net/minecraft/world/level/levelgen/structure/Structure.java
 +++ b/net/minecraft/world/level/levelgen/structure/Structure.java
-@@ -248,9 +_,9 @@
+@@ -248,9 +_,17 @@
          }
  
          private static WorldgenRandom makeRandom(final long seed, final ChunkPos chunkPos) {
 -            WorldgenRandom random = new WorldgenRandom(new LegacyRandomSource(0L));
 -            random.setLargeFeatureSeed(seed, chunkPos.x(), chunkPos.z());
 -            return random;
-+            return new io.rolia.secureseed.WorldgenCryptoRandom(
++            final WorldgenRandom random = new io.rolia.secureseed.WorldgenCryptoRandom(
 +                    chunkPos.x(), chunkPos.z(), io.rolia.secureseed.Globals.Salt.GENERATE_FEATURE, seed ^ (seed >>> 32)
 +            );
++            // Rolia - build 44: with secure-seed.enabled=false the constructor above discards x/z/salt,
++            // so EVERY structure in EVERY chunk shared one stream - rotation, jitter and piece choice
++            // all identical. Restore Vanilla's re-seed on that path only; it is a no-op when the secret
++            // is on, because the override re-keys from the same domain the constructor already used.
++            if (!io.rolia.secureseed.Globals.isSecureSeedEnabled()) {
++                random.setLargeFeatureSeed(seed, chunkPos.x(), chunkPos.z());
++            }
++            return random;
          }
      }
  

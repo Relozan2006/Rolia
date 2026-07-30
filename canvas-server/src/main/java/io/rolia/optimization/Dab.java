@@ -57,13 +57,18 @@ public final class Dab {
             if (!(entity.level() instanceof ServerLevel level)) {
                 return true;
             }
-            // Rolia - NEVER throttle a mob that is in water. FloatGoal lives in goalSelector, and the
-            // DAB gate in Mob.serverAiStep wraps the whole goalSelector block - so a throttled land mob
-            // in water never runs FloatGoal, never calls jumpControl.jump(), and DROWNS. Paper's
+            // Rolia - NEVER throttle a mob that is in water OR LAVA. FloatGoal lives in goalSelector,
+            // and the DAB gate in Mob.serverAiStep wraps the whole goalSelector block - so a throttled
+            // mob in a fluid never runs FloatGoal, never calls jumpControl.jump(), and sinks. Paper's
             // goalFloat fallback only covers the !aware path, which returns before this code. This is
             // the same bug Pufferfish #58 reported and the reason Leaf ships a config for it.
-            // isInWater() is a single boolean field read - cheaper than the memo probe it precedes.
-            if (entity.isInWater()) {
+            //
+            // The lava half was missing until build 44, which is the same bug in the other fluid:
+            // vanilla FloatGoal#canUse is `isInWater() || isInLava()`, so the fire-immune mobs that
+            // float in lava in vanilla - zombified piglin, wither skeleton, magma cube, blaze, strider
+            // - sank and got stuck as soon as they were throttled. Both are single boolean field
+            // reads, cheaper than the memo probe they precede.
+            if (entity.isInWater() || entity.isInLava()) {
                 return true;
             }
             // never throttle blacklisted types (e.g. mobs used by farms). The blacklist is resolved
@@ -112,9 +117,30 @@ public final class Dab {
         if (interval <= 1) {
             return true;
         }
-        // stagger by entity id so distant mobs do not all tick on the same game-tick
+        // Rolia - build 44: the phase MUST be measured against the entity's own tickCount, not the
+        // world's gameTime. This gate wraps a block that contains Paper's own EAR 2 alternation:
+        //
+        //     int idBasedTickCount = this.tickCount + this.getId();
+        //     if (idBasedTickCount % 2 != 0 && this.tickCount > 1) { ...tickRunningGoals(false) }
+        //     else                                                 { ...goalSelector.tick() }
+        //
+        // tickCount advances alongside gameTime, so K = gameTime - tickCount is a constant of the
+        // entity, fixed when it spawned or its chunk loaded. Keying admission on gameTime meant that
+        // on every admitted tick `(tickCount + id) % 2` collapsed to `-K % 2` - a value that never
+        // changes. For ANY EVEN interval that froze the parity: half of all mobs (those whose K is
+        // odd) took the tickRunningGoals(false) branch on every single admitted tick and NEVER ran
+        // goalSelector.tick(). tickRunningGoals only ticks goals that are already running, so those
+        // mobs could not start a goal, stop one, or acquire a target - they sat frozen in whatever
+        // state they entered the band with. And because tickCount resets to 0 on chunk load, K is
+        // shared by a whole chunk, so it landed on half of all CHUNKS rather than being smeared per
+        // mob. Simulated over 2000 ticks at interval 20: 100 admitted ticks, 0 of them full.
+        //
+        // Keying on tickCount takes the world clock out of the equation entirely: with an even
+        // interval, `(tickCount + id) % interval == 0` implies `(tickCount + id)` is even, which is
+        // exactly Paper's full-tick branch. The stagger across entities is unchanged - two mobs with
+        // different ids still tick on different ticks.
         final long phase = (id & 0x7fffffffL) % interval;
-        return (gameTime + phase) % interval == 0L;
+        return ((long) entity.tickCount + phase) % interval == 0L;
     }
 
     /**

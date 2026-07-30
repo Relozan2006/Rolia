@@ -32,7 +32,7 @@ jobs:
       # Rolia - the ONE place the build number is written. It used to be hardcoded in three separate
       # places (the build step, the test step and the release step), and the release tag came from the
       # third, so editing two of them shipped a mislabelled release.
-      BUILD_NUMBER: 43
+      BUILD_NUMBER: 44
     defaults:
       run:
         shell: bash
@@ -136,7 +136,7 @@ jobs:
       - name: Dump reference sources
         run: |
           mkdir -p /tmp/out/refsrc
-          for f in net/minecraft/world/RandomSequences.java net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java net/minecraft/world/entity/Mob.java net/minecraft/world/entity/ai/Brain.java net/minecraft/world/entity/npc/villager/Villager.java net/minecraft/world/entity/LivingEntity.java net/minecraft/world/entity/Entity.java net/minecraft/world/entity/ai/goal/GoalSelector.java net/minecraft/world/entity/ai/goal/Goal.java net/minecraft/world/entity/ai/goal/WrappedGoal.java net/minecraft/world/entity/ai/sensing/Sensor.java net/minecraft/network/FriendlyByteBuf.java net/minecraft/network/VarInt.java net/minecraft/network/VarLong.java net/minecraft/network/syncher/SynchedEntityData.java net/minecraft/network/protocol/game/ClientboundLightUpdatePacketData.java net/minecraft/world/phys/shapes/Shapes.java net/minecraft/world/phys/shapes/CollisionContext.java net/minecraft/core/MappedRegistry.java net/minecraft/core/Holder.java net/minecraft/core/Registry.java net/minecraft/world/level/chunk/PalettedContainer.java net/minecraft/util/RandomSource.java net/minecraft/util/Mth.java net/minecraft/world/level/levelgen/RandomState.java net/minecraft/world/level/chunk/ChunkGenerator.java net/minecraft/world/entity/projectile/ThrownEnderpearl.java net/minecraft/world/entity/TamableAnimal.java net/minecraft/world/entity/Leashable.java net/minecraft/nbt/CompoundTag.java net/minecraft/world/entity/raid/Raid.java net/minecraft/world/level/chunk/storage/RegionFile.java net/minecraft/world/level/chunk/storage/RegionFileStorage.java net/minecraft/world/level/Level.java net/minecraft/server/level/ServerLevel.java net/minecraft/server/MinecraftServer.java net/minecraft/server/players/PlayerList.java net/minecraft/world/entity/npc/villager/VillagerTrades.java net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java net/minecraft/world/level/levelgen/carver/WorldCarver.java net/minecraft/server/level/ServerEntity.java net/minecraft/server/level/ChunkMap.java net/minecraft/world/entity/ai/sensing/Sensing.java net/minecraft/world/phys/shapes/CubeVoxelShape.java net/minecraft/world/entity/ai/attributes/AttributeMap.java net/minecraft/world/entity/ai/attributes/AttributeInstance.java net/minecraft/util/ClassInstanceMultiMap.java net/minecraft/world/level/block/ObserverBlock.java net/minecraft/world/entity/boss/enderdragon/EndCrystal.java net/minecraft/server/network/ServerGamePacketListenerImpl.java net/minecraft/world/item/HoeItem.java net/minecraft/world/inventory/AnvilMenu.java net/minecraft/world/level/block/SpawnerBlock.java net/minecraft/world/item/EnderpearlItem.java net/minecraft/world/level/redstone/CollectingNeighborUpdater.java net/minecraft/world/level/redstone/NeighborUpdater.java net/minecraft/world/level/block/CropBlock.java net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java net/minecraft/world/entity/ai/goal/GoalSelector.java net/minecraft/world/level/portal/PortalProcessor.java; do
+          for f in net/minecraft/world/RandomSequences.java net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java net/minecraft/world/entity/Mob.java net/minecraft/world/entity/ai/Brain.java net/minecraft/world/entity/npc/villager/Villager.java net/minecraft/world/entity/LivingEntity.java net/minecraft/world/entity/Entity.java net/minecraft/world/entity/ai/goal/GoalSelector.java net/minecraft/world/entity/ai/goal/Goal.java net/minecraft/world/entity/ai/goal/WrappedGoal.java net/minecraft/world/entity/ai/sensing/Sensor.java net/minecraft/network/FriendlyByteBuf.java net/minecraft/network/VarInt.java net/minecraft/network/VarLong.java net/minecraft/network/syncher/SynchedEntityData.java net/minecraft/network/protocol/game/ClientboundLightUpdatePacketData.java net/minecraft/world/phys/shapes/Shapes.java net/minecraft/world/phys/shapes/CollisionContext.java net/minecraft/core/MappedRegistry.java net/minecraft/core/Holder.java net/minecraft/core/Registry.java net/minecraft/world/level/chunk/PalettedContainer.java net/minecraft/util/RandomSource.java net/minecraft/util/Mth.java net/minecraft/world/level/levelgen/RandomState.java net/minecraft/world/level/chunk/ChunkGenerator.java net/minecraft/world/entity/projectile/ThrownEnderpearl.java net/minecraft/world/entity/TamableAnimal.java net/minecraft/world/entity/Leashable.java net/minecraft/nbt/CompoundTag.java net/minecraft/world/entity/raid/Raid.java net/minecraft/world/level/chunk/storage/RegionFile.java net/minecraft/world/level/chunk/storage/RegionFileStorage.java net/minecraft/world/level/Level.java net/minecraft/server/level/ServerLevel.java net/minecraft/server/MinecraftServer.java net/minecraft/server/players/PlayerList.java net/minecraft/world/entity/npc/villager/VillagerTrades.java net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java net/minecraft/world/level/levelgen/carver/WorldCarver.java net/minecraft/server/level/ServerEntity.java net/minecraft/server/level/ChunkMap.java net/minecraft/world/entity/ai/sensing/Sensing.java net/minecraft/world/phys/shapes/CubeVoxelShape.java net/minecraft/world/entity/ai/attributes/AttributeMap.java net/minecraft/world/entity/ai/attributes/AttributeInstance.java net/minecraft/util/ClassInstanceMultiMap.java net/minecraft/world/level/block/ObserverBlock.java net/minecraft/world/entity/boss/enderdragon/EndCrystal.java net/minecraft/server/network/ServerGamePacketListenerImpl.java net/minecraft/world/item/HoeItem.java net/minecraft/world/inventory/AnvilMenu.java net/minecraft/world/level/block/SpawnerBlock.java net/minecraft/world/item/EnderpearlItem.java net/minecraft/world/level/redstone/CollectingNeighborUpdater.java net/minecraft/world/level/redstone/NeighborUpdater.java net/minecraft/world/level/block/CropBlock.java net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java net/minecraft/world/entity/ai/goal/GoalSelector.java net/minecraft/world/level/portal/PortalProcessor.java net/minecraft/world/level/levelgen/XoroshiroRandomSource.java net/minecraft/world/level/levelgen/RandomSupport.java net/minecraft/core/NonNullList.java net/minecraft/world/entity/InsideBlockEffectApplier.java; do
             src="canvas-server/src/minecraft/java/$f"
             if [ -f "$src" ]; then cp "$src" "/tmp/out/refsrc/$(basename $f)"; else echo "MISSING $f" >> /tmp/out/refsrc/missing.txt; fi
           done
@@ -1097,11 +1097,11 @@ jobs:
 
       - name: Terrain is public (same level-seed => same landscape)
         timeout-minutes: 70
-        # Rolia - build 40: REPORT-ONLY for this release. This harness is new and parses region files
-        # with a hand-written NBT reader that has only been exercised against a stub, so a harness bug
-        # must not block the release or (as it did on the first build-40 run) skip every step after it.
-        # Flip back to a hard gate once it has produced one clean run.
-        continue-on-error: true
+        # Rolia - build 44: HARD GATE. It was report-only from build 40 while the NBT harness was new;
+        # it has produced clean runs since, and leaving it soft meant the single test of this project's
+        # central claim - terrain from the public level-seed, everything else from the secret - could
+        # fail while the release still went out, because a continue-on-error step reports success and
+        # the release condition only checks success().
         # Rolia - build 40's central claim, and the one that had no test at all: terrain SHAPE
         # (continentalness/erosion/ridge/offset/jagged + BlendedNoise) comes from the PUBLIC
         # level-seed, while climate, caves, ores, structures and slime chunks come from the
@@ -1484,7 +1484,11 @@ jobs:
           echo "=== registry ($(wc -l < /tmp/rolia-keys.txt) options) ==="
           cat /tmp/rolia-keys.txt
           [ -f rolia.yml ] || { echo "FAIL: the server generated no rolia.yml"; ls -la; exit 1; }
-          cp rolia.yml /tmp/out/rolia.yml.generated
+          # Rolia - build 44: publish the SHAPE of the generated file, never the file. It contains a
+          # live salt and a live 1024-bit feature seed, and /tmp/out is force-pushed to a git branch.
+          # It is only a throwaway CI secret today, but the mechanism was "copy the secret verbatim
+          # into the published artefacts" and it was one careless reuse away from shipping a real one.
+          sed -E 's/^([[:space:]]*(salt|feature-seed)):.*/\1: <redacted>/' rolia.yml > /tmp/out/rolia.yml.generated
           cp /tmp/rolia-keys.txt /tmp/out/rolia-config-keys.txt
 
           python3 - <<'CFGCHECK'
@@ -1702,41 +1706,43 @@ jobs:
           cat > /tmp/relnotes.md << NOTES
           ## Rolia 26.1.2 (build $BUILD_NUMBER)
 
-          **Rolia** — высокопроизводительное ядро Minecraft на базе Canvas (Paper + Folia) с секретным 1024-битным сидом генерации.
+          **Rolia** — высокопроизводительное ядро Minecraft на базе Canvas (Paper + Folia) с секретным
+          1024-битным сидом генерации.
 
           ### Модель защиты: что публично, а что секретно
 
-          Сборка 40 намеренно делит генерацию мира надвое.
+          - **Публично:** форма рельефа. Она считается от обычного `level-seed` из `server.properties`,
+            поэтому понравившийся ландшафт по-прежнему можно выбрать на сайте-искалке сидов.
+          - **Секретно:** климат биомов, пещеры, овраги, рудные жилы, водоносные слои, правила
+            поверхности, структуры, декорации, лут и слизнячьи чанки — всё выводится из 1024-битного
+            секрета, который лежит только в `rolia.yml`.
+          - **Честное ограничение:** с версии 1.18 выбор биома читает шесть параметров, и четыре из них —
+            те же шумы, что строят рельеф. Секретными остаются `temperature` и `vegetation` — именно они
+            решают, будет гора снежной или джунглями.
 
-          | Источник | Что от него зависит |
-          | --- | --- |
-          | **Публично** — \`level-seed\` из \`server.properties\` | Только **форма рельефа**: continentalness, erosion, ridge, offset, jagged, BlendedNoise и форма островов Энда. |
-          | **Секретно** — 1024-битный сид + соль (64+ символов) из \`rolia.yml\` | Всё остальное: климат биомов (temperature, vegetation — то есть **какой** биом лежит на данном рельефе), пещеры, овраги, аквиферы, рудные жилы, surface rules, структуры, данжи, декорации, лут, слизнёвые чанки. |
+          ### Правило дефолтов
 
-          Практический смысл: сообщив свой \`level-seed\`, вы даёте людям возможность увидеть **ландшафт** вашего мира — но не найти на нём структуры, руды, пещеры или данжи. Стойкость даёт соль и 1024-битный сид; рельеф секретным не является и это сделано осознанно.
+          Голая Rolia ведёт себя ровно как голый Canvas, плюс секретный сид. Каждое изменение поведения —
+          это ключ в `rolia.yml`, и **каждый такой ключ по умолчанию `false`**. Единственное исключение —
+          `secure-seed.enabled`. Исправления багов ключами не являются и включены всегда.
 
-          ### Что изменилось в сборке 40
+          Все опции описаны по-русски в `docs/rolia.yml.ru.md`; CI не даёт документации разойтись с кодом.
 
-          - **Рельеф вынесен в публичную часть.** До 40-й сборки от секрета зависел и он; теперь по \`level-seed\` мир воспроизводим по форме, а всё ценное — нет.
-          - **Секрет живёт только в \`rolia.yml\`** (права 0600). Параметр \`feature-level-seed\` в \`server.properties\` **УДАЛЁН**, в \`level.dat\` секрет больше не пишется.
-          - **Отпечаток в \`level.dat\`.** Хранится только односторонний отпечаток секрета: если запустить мир не с тем \`rolia.yml\`, сервер это увидит, а не сгенерирует молча шов на границе исследованного.
-          - **Хеширование — BLAKE2b в keyed-режиме RFC 7693** (настоящий MAC) вместо самодельного H(K xor M).
-          - **Производительность включена по умолчанию**: DAB (троттлинг ИИ дальних мобов), региональный планировщик Canvas AFFINITY, сетевые фильтры пакетов.
-          - Починены унаследованные от Canvas баги: полностью сломанное накопление снега, дистанция спавна мобов, честность spawn-чанков, кросс-региональная защита Folia.
+          ### Установка
 
-          ### Обновление со сборки 39
+          1. Скачайте `rolia-paperclip-26.1.2.jar`.
+          2. Нужна Java 25 или новее. Флаги запуска — в `start.sh` / `start.bat`.
+          3. При первом запуске рядом появится `rolia.yml` с правами `0600`.
 
-          Уберите \`feature-level-seed\` из \`server.properties\` — он больше не читается. Ваш 1024-битный сид должен лежать в \`rolia.yml\` рядом с солью; **сохраните этот файл вместе с миром**. Рельеф существующего мира при переходе на 40 изменится, поэтому сборка 40 предназначена для нового мира.
+          > **СДЕЛАЙТЕ РЕЗЕРВНУЮ КОПИЮ `rolia.yml` ВМЕСТЕ С МИРОМ.**
+          > Соль и feature-seed не хранятся больше нигде. Потеряете файл — пещеры, руда и структуры
+          > существующего мира потеряны безвозвратно.
 
-          ### Запуск
+          ### Проверка загруженного файла
 
-          Требуется Java 25+.
-          \`\`\`
-          java -Xmx4G --add-modules=jdk.incubator.vector --sun-misc-unsafe-memory-access=allow -jar rolia-paperclip-26.1.2.jar --nogui
-          \`\`\`
-
-          ### Контрольная сумма
-          SHA-256: \`$SHA\`
+          ```
+          sha256: $SHA
+          ```
           NOTES
           gh release create "$TAG" "$JAR" \
             --repo "$GITHUB_REPOSITORY" \

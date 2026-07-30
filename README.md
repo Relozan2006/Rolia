@@ -1,5 +1,22 @@
 <div align="center">
 
+
+<!-- ROLIA_RULE_44 -->
+> **Правило дефолтов (со сборки 43).** Голая Rolia ведёт себя ровно как голый Canvas, плюс секретный
+> сид. Каждое изменение поведения — это ключ в `rolia.yml`, и **каждый такой ключ по умолчанию
+> `false`**. Единственное исключение — `secure-seed.enabled`. Исправления багов ключами не являются и
+> включены всегда.
+>
+> Полное описание всех опций, которое CI держит в синхроне с кодом:
+> [`docs/rolia.yml.ru.md`](docs/rolia.yml.ru.md).
+
+> **Default rule (since build 43).** Stock Rolia behaves exactly like stock Canvas, plus the secure
+> seed. Every behaviour change is a key in `rolia.yml`, and **every one of those keys defaults to
+> `false`**. The only exception is `secure-seed.enabled`. Bug fixes are not keys and are always on.
+>
+> Full per-option documentation, kept in step with the code by CI:
+> [`docs/rolia.yml.ru.md`](docs/rolia.yml.ru.md).
+
 # Rolia
 
 Высокопроизводительное ядро Minecraft на базе Canvas: рельеф — публичный, всё ценное — под 1024-битным секретом
@@ -69,9 +86,9 @@ secure-seed:
 
 ### Производительность
 
-Вся производительность Canvas и Folia: региональная многопоточность, оптимизации тиков, чанков и сущностей. Начиная со сборки 40 ускорения **включены по умолчанию**:
+Вся производительность Canvas и Folia: региональная многопоточность, оптимизации тиков, чанков и сущностей. Начиная со сборки 40 ускорения **выключены по умолчанию**:
 
-- **DAB** (Dynamic Activation of Brain), **включён по умолчанию** — мобы вдали от всех игроков **думают реже**. ИИ моба (сенсоры и поведения мозга либо goal selector) выполняется раз в N тиков вместо каждого тика; N растёт с расстоянием от 1 до `max-tick-interval` (по умолчанию 20). Мобы ближе `start-distance` (по умолчанию 12 блоков) не троттлятся никогда. Спектаторы не считаются, креативные игроки — считаются.
+- **DAB** (Dynamic Activation of Brain), **выключен по умолчанию** (`optimizations.dab.enabled`) — мобы вдали от всех игроков **думают реже**. ИИ моба (сенсоры и поведения мозга либо goal selector) выполняется раз в N тиков вместо каждого тика; N растёт с расстоянием от 1 до `max-tick-interval` (по умолчанию 20). Мобы ближе `start-distance` (по умолчанию 12 блоков) не троттлятся никогда. Спектаторы не считаются, креативные игроки — считаются.
   Это **не** поведенчески-нейтрально: троттлящийся моб **реагирует с задержкой** — позже замечает цель, реже перестраивает путь, убегает и доворачивается по более грубым часам, поэтому дальние мобы расходятся и сходятся не так, как в ванилле. Передвижение, физика, урон, деспавн, мобкапы и правила спавна не затронуты, так что *скорость* ферм обычно не меняется, но всё, что завязано на точный пасфайндинг вдали от игрока, поменяться может. Исключения — `optimizations.dab.blacklist`; либо выключите DAB целиком.
 - **Планировщик регионов AFFINITY** от Canvas (`threaded-regions.scheduler: AFFINITY` в `paper-global.yml`) — work-stealing и привязка задач региона к своему потоку.
 - **Сетевые фильтры пакетов** и ускоренная сериализация чанковых данных (bulk-запись длинных массивов) — единственная из трёх оптимизаций, которая действительно ничего не меняет: байты на проводе идентичны, просто быстрее.
@@ -105,7 +122,7 @@ start.bat              # Windows
 4. **`config/paper-global.yml` → `threaded-regions.scheduler: AFFINITY`** — work-stealing и привязка задач региона к своему тик-потоку (нужно ≥2 ядра). Это же единственный планировщик, с которым работает профайлер регионов Canvas.
 5. **`server.properties` → `level-seed`** — публичный сид, задаёт **только форму рельефа**. Его можно называть кому угодно.
 6. **Сохраните `rolia.yml` в бэкап вместе с миром** — см. раздел ниже.
-7. Решите, оставлять ли `optimizations.dab` и `optimizations.villager-lobotomize` в `rolia.yml`. Обе **включены по умолчанию** и обе меняют поведение мобов — см. «Производительность».
+7. Решите, оставлять ли `optimizations.dab` и `optimizations.villager-lobotomize` в `rolia.yml`. Обе **выключены по умолчанию** и обе меняют поведение мобов — см. «Производительность».
 
 | Ядер CPU | `worker-threads` | `io-threads` |
 | --- | --- | --- |
@@ -219,13 +236,13 @@ The honest security bound:
 
 ### Performance
 
-All the performance of Canvas and Folia: regionized multithreading, tick/chunk/entity optimizations. As of build 40 the speedups are **on by default**:
+All the performance of Canvas and Folia: regionized multithreading, tick/chunk/entity optimizations. As of build 40 the speedups are **off by default** (`optimizations.dab.enabled`):
 
-- **DAB** (Dynamic Activation of Brain), **on by default** — mobs far from every player **think less often**. A mob's AI (its brain sensors and behaviours, or the goal selector) runs once every N ticks instead of every tick, where N grows with distance from 1 up to `max-tick-interval` (20 by default). Mobs within `start-distance` (12 blocks by default) are never throttled. Spectators do not count, creative-mode players do.
+- **DAB** (Dynamic Activation of Brain), **off by default** (`optimizations.dab.enabled`) — mobs far from every player **think less often**. A mob's AI (its brain sensors and behaviours, or the goal selector) runs once every N ticks instead of every tick, where N grows with distance from 1 up to `max-tick-interval` (20 by default). Mobs within `start-distance` (12 blocks by default) are never throttled. Spectators do not count, creative-mode players do.
   This is **not** behaviour-neutral: a throttled mob **reacts late** — it notices targets, repaths, flees and re-aims on a coarser clock, so distant mobs drift and converge differently than in Vanilla. Movement, physics, damage, despawning, mob caps and spawn rules are untouched, so farm *rates* are normally unaffected, but anything relying on precise distant pathfinding can change. Exempt specific types with `optimizations.dab.blacklist`, or turn DAB off entirely.
 - **Canvas's AFFINITY region scheduler** (`threaded-regions.scheduler: AFFINITY` in `paper-global.yml`) — work stealing plus keeping a region's tasks on their own tick thread.
 - **Network packet filters** and faster chunk-data serialization (bulk long-array writes) — the only one of the three that genuinely changes nothing: the bytes on the wire are identical, just faster.
-- **Stuck-villager optimization** (lobotomize), **on by default**: a villager boxed into a 1×1 cell cannot path anywhere, so its whole brain tick is skipped. Trades and **restocking are preserved**, so pure trading halls behave like Vanilla.
+- **Stuck-villager optimization** (lobotomize), **off by default** (`optimizations.dab.enabled`): a villager boxed into a 1×1 cell cannot path anywhere, so its whole brain tick is skipped. Trades and **restocking are preserved**, so pure trading halls behave like Vanilla.
   This is not behaviour-neutral either: skipping the brain skips every sensor and behaviour. A lobotomized villager does **not detect hostiles** (it will not flee or scream when a zombie arrives), does **not sleep**, does **not gossip**, does **not breed**, and does **not contribute to iron-golem spawning**. Turn it off if you run villager-based iron farms or breeders.
 
 Build 40 also fixes bugs inherited from Canvas: completely broken snow accumulation, the mob spawn distance gate, spawn-chunk fairness, and a Folia cross-region safety guard.
@@ -255,7 +272,7 @@ The JVM flags are only half the job. Do this once, then restart.
 4. **`config/paper-global.yml` → `threaded-regions.scheduler: AFFINITY`** — work stealing plus keeping a region's tasks on their own tick thread (needs ≥2 cores). It is also the only scheduler the Canvas region profiler supports.
 5. **`server.properties` → `level-seed`** — the public seed; it controls **only the shape of the terrain**. You may hand it out.
 6. **Back up `rolia.yml` together with your world** — see the section below.
-7. Decide whether to keep `optimizations.dab` and `optimizations.villager-lobotomize` in `rolia.yml`. Both are **on by default** and both change mob behaviour — see "Performance".
+7. Decide whether to keep `optimizations.dab` and `optimizations.villager-lobotomize` in `rolia.yml`. Both are **off by default** (`optimizations.dab.enabled`) and both change mob behaviour — see "Performance".
 
 | CPU cores | `worker-threads` | `io-threads` |
 | --- | --- | --- |
@@ -281,9 +298,9 @@ These are deliberately **below** the core count. Folia also needs cores for its 
 | --- | --- | --- |
 | `level-seed` | `server.properties` | The public seed. Determines **the shape of the terrain only**. |
 | `secure-seed.salt` | `rolia.yml` | The secret salt (64+ chars). Created automatically with `0600` permissions. |
-| `optimizations.dab` | `rolia.yml` | DAB: `enabled` (`true` by default), `start-distance`, `max-tick-interval`, `blacklist`. |
-| `optimizations.villager-lobotomize` | `rolia.yml` | Stuck-villager lobotomization: `enabled` (`true` by default), `wait-until-trade-locked`, `check-interval`. |
-| `optimizations.faster-network` | `rolia.yml` | Faster chunk-data serialization (`true` by default). |
+| `optimizations.dab` | `rolia.yml` | DAB: `enabled` (`false` by default), `start-distance`, `max-tick-interval`, `blacklist`. |
+| `optimizations.villager-lobotomize` | `rolia.yml` | Stuck-villager lobotomization: `enabled` (`false` by default), `wait-until-trade-locked`, `check-interval`. |
+| `optimizations.faster-network` | `rolia.yml` | Faster chunk-data serialization (`false` by default). |
 | `chunk-system.worker-threads` / `io-threads` | `config/paper-global.yml` | Chunk-system thread pools. **Set these explicitly** — see the checklist above. |
 | `threaded-regions.scheduler` | `config/paper-global.yml` | Region scheduler. `AFFINITY` recommended. |
 

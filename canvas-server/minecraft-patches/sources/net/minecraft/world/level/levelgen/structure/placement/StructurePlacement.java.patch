@@ -9,7 +9,7 @@
  
  public abstract class StructurePlacement {
      public static final Codec<StructurePlacement> CODEC = BuiltInRegistries.STRUCTURE_PLACEMENT
-@@ -119,34 +_,32 @@
+@@ -119,34 +_,44 @@
      public abstract StructurePlacementType<?> type();
  
      private static boolean probabilityReducer(final long seed, final int salt, final int sourceX, final int sourceZ, final float probability, final @org.jspecify.annotations.Nullable Integer saltOverride) { // Paper - Add missing structure set seed configs; ignore here
@@ -18,6 +18,12 @@
 +        WorldgenRandom random = new WorldgenCryptoRandom(
 +                sourceX, sourceZ, Globals.Salt.UNDEFINED, salt
 +        );
++            // Rolia - build 44: restore Vanilla's re-seed for the secure-seed:false path. With the
++            // switch off, WorldgenCryptoRandom's constructor early-returns and DISCARDS x/z/salt, so
++            // every instance in the process became the same LegacyRandomSource(levelSeed) stream -
++            // this reducer returned one constant boolean for the entire world. Guarded, so it stays
++            // a no-op when the secret is on (the override would otherwise re-key the domain).
++            if (!Globals.isSecureSeedEnabled()) random.setLargeFeatureWithSalt(seed, salt, sourceX, sourceZ);
          return random.nextFloat() < probability;
      }
  
@@ -33,6 +39,10 @@
 +        WorldgenRandom random = new WorldgenCryptoRandom(
 +                sourceX, sourceZ, Globals.Salt.MINESHAFT_FEATURE, saltOverride != null ? saltOverride : 0
 +        );
++            if (!Globals.isSecureSeedEnabled()) { // Rolia - build 44, see probabilityReducer above
++                if (saltOverride == null) random.setLargeFeatureSeed(seed, sourceX, sourceZ);
++                else random.setLargeFeatureWithSalt(seed, sourceX, sourceZ, saltOverride);
++            }
          return random.nextDouble() < probability;
      }
  
@@ -42,6 +52,7 @@
 +        WorldgenRandom random = new WorldgenCryptoRandom(
 +                sourceX, sourceZ, Globals.Salt.BURIED_TREASURE_FEATURE, saltOverride != null ? saltOverride : HIGHLY_ARBITRARY_RANDOM_SALT
 +        );
++            if (!Globals.isSecureSeedEnabled()) random.setLargeFeatureWithSalt(seed, sourceX, sourceZ, saltOverride != null ? saltOverride : HIGHLY_ARBITRARY_RANDOM_SALT); // Rolia - build 44, see probabilityReducer above
          return random.nextFloat() < probability;
      }
  
@@ -53,6 +64,7 @@
 +        WorldgenRandom random = new WorldgenCryptoRandom(
 +                cx, cz, Globals.Salt.PILLAGER_OUTPOST_FEATURE, 0
 +        );
++            if (!Globals.isSecureSeedEnabled()) random.setSeed(cx ^ cz << 4 ^ seed); // Rolia - build 44, see probabilityReducer above
          random.nextInt();
          return random.nextInt((int)(1.0F / probability)) == 0;
      }

@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/level/levelgen/structure/placement/RandomSpreadStructurePlacement.java
 +++ b/net/minecraft/world/level/levelgen/structure/placement/RandomSpreadStructurePlacement.java
-@@ -67,8 +_,9 @@
+@@ -67,8 +_,14 @@
      public ChunkPos getPotentialStructureChunk(final long seed, final int sourceX, final int sourceZ) {
          int spacedGridX = Math.floorDiv(sourceX, this.spacing);
          int spacedGridZ = Math.floorDiv(sourceZ, this.spacing);
@@ -9,6 +9,11 @@
 +        WorldgenRandom random = new io.rolia.secureseed.WorldgenCryptoRandom(
 +                spacedGridX, spacedGridZ, io.rolia.secureseed.Globals.Salt.POTENTIONAL_FEATURE, this.salt
 +        );
++        // Rolia - build 44: without this, secure-seed.enabled=false gave every grid cell the SAME
++        // spread offset, i.e. a perfectly regular structure lattice. No-op when the secret is on.
++        if (!io.rolia.secureseed.Globals.isSecureSeedEnabled()) {
++            random.setLargeFeatureWithSalt(seed, spacedGridX, spacedGridZ, this.salt());
++        }
          int limit = this.spacing - this.separation;
          int spreadX = this.spreadType.evaluate(random, limit);
          int spreadZ = this.spreadType.evaluate(random, limit);

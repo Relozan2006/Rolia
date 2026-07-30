@@ -225,7 +225,7 @@
  
      @VisibleForDebug
      public static void spawnCategoryForPosition(final MobCategory mobCategory, final ServerLevel level, final BlockPos start) {
-@@ -245,61 +_,103 @@
+@@ -245,70 +_,125 @@
          final NaturalSpawner.SpawnPredicate extraTest,
          final NaturalSpawner.AfterSpawnCallback spawnCallback
      ) {
@@ -266,6 +266,15 @@
              BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
              int clusterSize = 0;
  
+             // Rolia start - vanilla-parity.mob-spawn-placement
+             // Read once per call, not per pack member. The chunk bounds are plain arithmetic on the
+             // ChunkPos and are only consulted on the Canvas path.
+             final boolean roliaVanillaPlacement = io.rolia.RoliaConfig.parityMobSpawnPlacement();
+             final int roliaMinX = chunk.getPos().getMinBlockX();
+             final int roliaMinZ = chunk.getPos().getMinBlockZ();
+             final int roliaMaxX = chunk.getPos().getMaxBlockX();
+             final int roliaMaxZ = chunk.getPos().getMaxBlockZ();
+             // Rolia end - vanilla-parity.mob-spawn-placement
              for (int groupCount = 0; groupCount < 3; groupCount++) {
                  int x = start.getX();
                  int z = start.getZ();
@@ -279,20 +288,33 @@
                  for (int ll = 0; ll < max; ll++) {
 -                    x += level.random.nextInt(6) - level.random.nextInt(6);
 -                    z += level.random.nextInt(6) - level.random.nextInt(6);
-+                    // Rolia start - restore vanilla's cumulative triangular spread
-+                    // Canvas replaced these two lines with a single uniform draw around a FIXED
-+                    // centre and then clamped the result into the current chunk. That is two
-+                    // deviations at once: the shape of the distribution (uniform instead of
-+                    // triangular, so pack members sat further from the centre than vanilla) and the
-+                    // loss of accumulation (vanilla walks from the PREVIOUS member's position, so a
-+                    // pack legitimately drifts out of the origin chunk). Both are restored here.
-+                    // The only thing still not literally vanilla is the RandomSource: fastRandom is
-+                    // the region-local generator instead of level.random. Under Folia level.random is
-+                    // itself just ThreadLocalRandomSource.INSTANCE, i.e. unseeded and uniform, so the
-+                    // resulting distribution is identical and no seed-derived state is involved.
-+                    x += fastRandom.nextInt(6) - fastRandom.nextInt(6);
-+                    z += fastRandom.nextInt(6) - fastRandom.nextInt(6);
-+                    // Rolia end - restore vanilla's cumulative triangular spread
++                    // Rolia start - vanilla-parity.mob-spawn-placement (default false = Canvas)
++                    //
++                    // Canvas replaces vanilla's two lines with a single uniform draw around a FIXED
++                    // centre and then clamps the result into the current chunk. That is two deviations
++                    // at once: the shape of the distribution (uniform instead of triangular, so pack
++                    // members sit further from the centre than vanilla) and the loss of accumulation
++                    // (vanilla walks from the PREVIOUS member's position, so a pack legitimately
++                    // drifts out of the origin chunk). The clamp is why packs pile up on chunk borders.
++                    //
++                    // Both paths are kept. The one thing that is not literally vanilla even on the
++                    // parity path is the RandomSource: fastRandom is the region-local generator rather
++                    // than level.random. Under Folia level.random is itself just
++                    // ThreadLocalRandomSource.INSTANCE - unseeded and uniform - so the distribution is
++                    // identical and no seed-derived state is involved either way.
++                    //
++                    // The two paths draw DIFFERENT amounts from fastRandom (four nextInt vs one
++                    // nextLong). That is fine here and only here: fastRandom is an unseeded per-region
++                    // generator, so nothing downstream is reproducible from it in the first place.
++                    if (roliaVanillaPlacement) {
++                        x += fastRandom.nextInt(6) - fastRandom.nextInt(6);
++                        z += fastRandom.nextInt(6) - fastRandom.nextInt(6);
++                    } else {
++                        final long roliaPair = fastRandom.nextLong();
++                        x = roliaClampToChunk(start.getX() + (int) ((roliaPair & 0xFFFFL) * 11L >> 16) - 5, roliaMinX, roliaMaxX);
++                        z = roliaClampToChunk(start.getZ() + (int) (((roliaPair >>> 32) & 0xFFFFL) * 11L >> 16) - 5, roliaMinZ, roliaMaxZ);
++                    }
++                    // Rolia end - vanilla-parity.mob-spawn-placement
                      pos.set(x, yStart, z);
                      double xx = x + 0.5;
                      double zz = z + 0.5;
@@ -353,15 +375,21 @@
                                  if (isValidPositionForMob(level, mob, nearestPlayerDistanceSqr)) {
                                      groupData = mob.finalizeSpawn(
                                          level, level.getCurrentDifficultyAt(mob.blockPosition()), EntitySpawnReason.NATURAL, groupData
-@@ -364,8 +_,20 @@
+@@ -364,8 +_,26 @@
              return false;
          }
  
-+        // Rolia - Canvas replaced this whole check with `return true;` and justified it with
-+        // "'pos' is a mutable block pos clamped to the passed ChunkAccess". That clamp is gone (see
-+        // spawnCategoryForPosition), so pos can once again land in a neighbouring chunk and this
-+        // check is load-bearing again: without it mobs spawn into chunks that are not entity-ticking
-+        // ready. Restored verbatim.
++        // Rolia start - vanilla-parity.mob-spawn-placement
++        // Canvas replaces this whole check with `return true;`, justified by "'pos' is a mutable block
++        // pos clamped to the passed ChunkAccess". That justification is exactly right AS LONG AS the
++        // clamp is in place - which is why this check is tied to the same switch as the clamp rather
++        // than having one of its own. With vanilla placement restored, pos can land in a neighbouring
++        // chunk and this check becomes load-bearing again: without it mobs spawn into chunks that are
++        // not entity-ticking ready.
++        if (!io.rolia.RoliaConfig.parityMobSpawnPlacement()) {
++            return true;
++        }
++        // Rolia end - vanilla-parity.mob-spawn-placement
          ChunkPos chunkPos = ChunkPos.containing(pos);
          return Objects.equals(chunkPos, chunk.getPos()) || level.canSpawnEntitiesInChunk(chunkPos);
      }

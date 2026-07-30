@@ -184,7 +184,7 @@ index 825d69075ef95586d187e79eea0fc200aaf888bb..880ed8cbae969366cd58bdb6bc19fbcc
          Preconditions.checkState(this.console.getAllLevels().iterator().hasNext(), "Cannot create additional worlds on STARTUP");
          //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot create a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
          Preconditions.checkArgument(creator != null, "WorldCreator cannot be null");
-@@ -1345,6 +1357,121 @@ public final class CraftServer implements Server {
+@@ -1345,6 +1357,133 @@ public final class CraftServer implements Server {
  
          return serverLevel.getWorld();
      }
@@ -296,6 +296,18 @@ index 825d69075ef95586d187e79eea0fc200aaf888bb..880ed8cbae969366cd58bdb6bc19fbcc
 +            worldShutdownThread.start();
 +        } catch (Throwable thrown) {
 +            MinecraftServer.LOGGER.error("Failed to prepare unload for world", thrown);
++            // Rolia - build 44: release the unload ticket. It is propagated a few lines above, BEFORE
++            // the shutdown thread is constructed and started, and TicketHolder.propagate is one-shot -
++            // only pop() clears it. So if the constructor or start() threw (OOM, thread limit), the
++            // failure was reported to the caller while the ticket stayed set, and the world became a
++            // permanent zombie: every region bails out of its tick, the server marks it
++            // non-schedulable and skips its global tasks, yet it is still in the level list holding
++            // loaded dirty chunks - and it would never be saved again.
++            try {
++                handle.canvas$unloadTicket.pop();
++            } catch (final Throwable popFailed) {
++                MinecraftServer.LOGGER.error("Could not release the unload ticket for world", popFailed);
++            }
 +            callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNKNOWN);
 +        } finally {
 +            handle.canvas$releaseWorldStageLock();

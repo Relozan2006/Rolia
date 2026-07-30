@@ -81,14 +81,45 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
                 }
                 return CODEC.decode(NbtOps.INSTANCE, tag).getOrThrow().getFirst();
             } catch (Throwable e) {
-                throw new RuntimeException("Couldn't read pearl save data", e);
+                // Rolia - build 44: this used to rethrow, and read() is called from the MinecraftServer
+                // CONSTRUCTOR - so one torn pearls.dat stopped the server booting at all, with no
+                // quarantine, no fallback and no flag to get past it. Given the write path was neither
+                // atomic nor serialised (both fixed below), that was a reachable state.
+                //
+                // Quarantine the bad file and carry on with an empty map. Losing pearls in flight is
+                // bad; losing the whole server is worse, and the operator now has the file to inspect.
+                GlobalConfiguration.LOGGER.error("Couldn't read pearl save data from {} - quarantining it and continuing with no stored pearls.", resolved, e);
+                try {
+                    final Path quarantine = resolved.resolveSibling(SAVE_NAME + ".corrupt." + System.currentTimeMillis());
+                    Files.move(resolved, quarantine);
+                    GlobalConfiguration.LOGGER.error("The unreadable file has been moved to {}", quarantine.getFileName());
+                } catch (final Throwable moveFailed) {
+                    GlobalConfiguration.LOGGER.error("Could not move the unreadable pearl file aside either", moveFailed);
+                }
+                return new EnderPearls(new ConcurrentHashMap<>());
             }
         }
         return new EnderPearls(new ConcurrentHashMap<>());
     }
 
+    // Rolia - build 44: serialise every write. There are FOUR independent triggers (the global-tick
+    // autosave, /save-all, RegionShutdownThread.savePlayers and WorldShutdownThread) and Util.ioPool()
+    // is an unbounded cached pool, so two of them overlapping - a world unload during an autosave, say
+    // - put two threads inside writeCompressed on the same path and interleaved their gzip frames.
+    private static final Object SAVE_LOCK = new Object();
+
     public CompletableFuture<Boolean> save(@Nullable BooleanConsumer callback) {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
+        // Rolia - build 44: the READ was gated on restoreVanillaEnderPearlBehavior and the WRITE was
+        // not. With the feature off (Rolia's default) the in-memory map stays permanently empty and
+        // the autosave timer then wrote an EMPTY pearls.dat over real data. Anyone migrating from a
+        // Canvas server that had the feature on lost every stored pearl on the first autosave, and
+        // turning the option back on recovered nothing. If the feature is off, do not touch the file.
+        if (!GlobalConfiguration.getInstance().restoreVanillaEnderPearlBehavior) {
+            if (callback != null) callback.accept(true);
+            future.complete(true);
+            return future;
+        }
         Util.ioPool().execute(() -> {
             try {
                 // create directories first or else we fail to save
@@ -98,29 +129,52 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
                 root.putInt("DataVersion", CURRENT_DATA_VERSION);
                 Tag tag = CODEC.encodeStart(NbtOps.INSTANCE, this).getOrThrow();
                 root.merge((CompoundTag) tag);
-                NbtIo.writeCompressed(root, resolved);
+                // Rolia - build 44: write to a temp file and move it into place, so a crash, a full
+                // disk or a kill mid-write cannot leave a truncated pearls.dat behind. Same pattern as
+                // io.rolia.RoliaConfig#writeConfig. The lock covers encode+write+move as one unit.
+                synchronized (SAVE_LOCK) {
+                    final Path tmp = resolved.resolveSibling(SAVE_NAME + ".tmp");
+                    Files.deleteIfExists(tmp);
+                    NbtIo.writeCompressed(root, tmp);
+                    try {
+                        Files.move(tmp, resolved, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                    } catch (final java.nio.file.AtomicMoveNotSupportedException e) {
+                        Files.move(tmp, resolved, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }
+                }
                 future.complete(true);
             } catch (Throwable thrown) {
                 future.completeExceptionally(thrown);
             }
         });
+        // Rolia - build 44: handle() turns an exceptional completion into a NORMAL one carrying null,
+        // so a caller doing .join() could never see a failure - and WorldShutdownThread went on to
+        // report the whole unload as SUCCESS after the pearl write threw. Log here, but hand back a
+        // future that still answers truthfully.
         return future.handle((result, thrown) -> {
-            if (result == null || !result) {
-                GlobalConfiguration.LOGGER.warn("Could not save to pearls.dat", thrown);
+            final boolean ok = thrown == null && Boolean.TRUE.equals(result);
+            if (!ok) {
+                GlobalConfiguration.LOGGER.error("Could not save pearls.dat - ender pearls in flight may be lost", thrown);
             }
-            if (callback != null) callback.accept(thrown == null);
-            return result;
+            if (callback != null) callback.accept(ok);
+            return ok;
         });
     }
 
     public void spawnPearls(final ServerPlayer player) {
-        pearls.computeIfPresent(player.getUUID(), (uuid, enderPearls) -> {
-            for (final Pearl enderPearl : new ArrayList<>(enderPearls)) {
-                enderPearl.spawn();
-                enderPearls.remove(enderPearl);
-            }
-            return null;
-        });
+        // Rolia - build 44: this used to run inside computeIfPresent, i.e. under the map's bin lock.
+        // spawn() deserializes an entity and calls canvas$loadOrRunAtChunksAsync, and ConcurrentHashMap
+        // explicitly forbids updating other mappings from a remapping function - anything re-entering
+        // pearls() on a colliding bin gives "Recursive update" or a stalled bin, on the login path.
+        // Take the list out first, then do the work outside the map.
+        final List<Pearl> mine = pearls.remove(player.getUUID());
+        if (mine == null) {
+            return;
+        }
+        for (final Pearl enderPearl : mine) {
+            enderPearl.spawn();
+        }
     }
 
     public void addPearl(final UUID uuid, final ThrownEnderpearl thrownEnderpearl) {

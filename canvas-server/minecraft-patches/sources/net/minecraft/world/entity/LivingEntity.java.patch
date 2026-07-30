@@ -197,7 +197,7 @@
          }
  
 -        this.pushEntities();
-+        if (level().canvasConfig().entities.entityCollisionMode.allEntitiesCanBePushed()) this.pushEntities(); // Canvas - entity collision mode config
++        this.pushEntities(); // Rolia - was gated on allEntitiesCanBePushed(), which is true ONLY for VANILLA. aiStep() is the sole caller of pushEntities(), so both ONLY_PUSHABLE_PLAYERS_* modes never entered the method at all and behaved exactly like NO_COLLISIONS - the canvas$getIntersectingPlayers branch inside was unreachable dead code. pushEntities() already early-returns on noCollisions(), so NO_COLLISIONS still costs nothing and the two player-only modes now do what their descriptions say.
          // Paper start - Add EntityMoveEvent
          if (((ServerLevel) this.level()).getCurrentWorldData().hasEntityMoveEvent && !(this instanceof Player)) { // Folia - region threading
              if (this.xo != this.getX() || this.yo != this.getY() || this.zo != this.getZ() || this.yRotO != this.getYRot() || this.xRotO != this.getXRot()) {

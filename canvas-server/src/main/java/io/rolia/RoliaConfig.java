@@ -600,7 +600,20 @@ public final class RoliaConfig {
         // Only (re)write the file on first generation or migration - never clobber a user-edited file.
         if (firstGen) {
             createPrivate(file); // owner-only (0600) BEFORE the secret is written into it
-            writeConfig(file);
+            if (!writeConfig(file)) {
+                // Rolia - build 44: refuse to start. See writeConfig's javadoc - continuing here means
+                // generating a world against a secret that was never persisted, which is exactly the
+                // unrecoverable state the fingerprint guard exists to report after the fact. Better to
+                // stop now, while the operator can still fix the permissions and lose nothing.
+                LOGGER.error("############################################################");
+                LOGGER.error("A new secret was generated but {} could NOT be written.", file);
+                LOGGER.error("The secret currently exists only in memory. If the server kept running it");
+                LOGGER.error("would generate a world from a secret that is lost the moment it stops, and");
+                LOGGER.error("that world could never be extended consistently again.");
+                LOGGER.error("Fix write access to that path and start again.");
+                LOGGER.error("############################################################");
+                throw new IllegalStateException("Rolia: could not persist a newly generated secret to " + file);
+            }
             LOGGER.info("settings saved to {}", file);
             LOGGER.warn("[IMPORTANT] {} holds the secret. Keep it secret and back it up with your world!", FILE_NAME);
         }
@@ -649,7 +662,20 @@ public final class RoliaConfig {
         }
         SECURE_SEED_SALT.apply(cfgSalt, false);
 
-        long[] cfgSeed = parseFeatureSeed(root == null ? null : Opt.resolve(root, SECURE_SEED_FEATURE_SEED.path));
+        // Rolia - build 44: distinguish ABSENT from PRESENT-BUT-UNPARSEABLE. A too-short salt has always
+        // been a hard refusal ("refusing to start rather than replacing it, which would re-generate the
+        // world") while a corrupt feature seed was silently regenerated - and the feature seed IS the
+        // 1024-bit secret. One stray character in a 309-digit number (a truncated line, an editor that
+        // wrapped it, a bad merge) destroyed the world just as thoroughly as losing the salt, and the
+        // salt surviving made the file look fine. The asymmetry was not defensible.
+        final Object rawSeed = root == null ? null : Opt.resolve(root, SECURE_SEED_FEATURE_SEED.path);
+        long[] cfgSeed = parseFeatureSeed(rawSeed);
+        if (cfgSeed == null && rawSeed != null) {
+            LOGGER.error("the stored secure-seed.feature-seed in {} could not be parsed.", file);
+            LOGGER.error("Refusing to start rather than replacing it, which would re-generate the world.");
+            LOGGER.error("Restore {} from backup, or delete the feature-seed line to accept a new world.", FILE_NAME);
+            throw new IllegalStateException("Rolia: secure-seed.feature-seed is present but malformed");
+        }
         if (cfgSeed == null) {
             LOGGER.info("no 1024-bit feature seed found. Generating a new cryptographically secure one...");
             cfgSeed = io.rolia.secureseed.Globals.createRandomWorldSeed();
@@ -773,10 +799,23 @@ public final class RoliaConfig {
         return new ReloadResult(applied, needsRestart, null);
     }
 
-    /** Rolia - every option with its current value, for /rolia status. Secrets are never included. */
+    /**
+     * Rolia - every NON-SECRET option with its current value, for /rolia status and the startup line.
+     *
+     * <p>Build 44: the filter used to live in each of the two callers, so the javadoc's promise that
+     * "secrets are never included" was true only by the good behaviour of everyone who called it. A
+     * method whose contract says "no secrets" and which hands you the secrets is a leak waiting for
+     * its third caller.</p>
+     */
     public static List<Opt<?>> allOptions() {
         load();
-        return Opt.options();
+        final List<Opt<?>> out = new ArrayList<>();
+        for (final Opt<?> o : Opt.options()) {
+            if (!o.isSecret()) {
+                out.add(o);
+            }
+        }
+        return out;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -806,7 +845,18 @@ public final class RoliaConfig {
         "UP together with the world folder.",
     };
 
-    private static void writeConfig(final File file) {
+    /**
+     * Rolia - write the file. Returns false when it could not be written.
+     *
+     * <p>Build 44 made this report its outcome. It used to be {@code void} and swallow every failure
+     * into a log line, while {@code loadOnce} logged "settings saved to ..." immediately afterwards
+     * and carried on. On the FIRST run that is catastrophic: a brand-new 1024-bit secret has just been
+     * generated, and if the write failed (read-only mount, full disk, a panel-managed volume) that
+     * secret exists only in this JVM's heap. The server generates a world with it, the next restart
+     * generates a different one, and the world is unrecoverable - by a condition the code had already
+     * detected and merely written to the log.</p>
+     */
+    private static boolean writeConfig(final File file) {
         final String yaml = ConfigWriter.render(HEADER);
         // Write atomically via a temp file, and never replace an existing config without first copying
         // it aside. A half-written or clobbered rolia.yml means a lost secret.
@@ -832,8 +882,10 @@ public final class RoliaConfig {
             } catch (final java.nio.file.AtomicMoveNotSupportedException e) {
                 java.nio.file.Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
+            return true;
         } catch (final Exception e) {
             LOGGER.error("failed to save {}", file, e);
+            return false;
         }
     }
 

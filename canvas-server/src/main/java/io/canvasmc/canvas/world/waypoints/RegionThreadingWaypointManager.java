@@ -89,9 +89,25 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
         if (isLocatorBarDisabled()) return;
         if (!waypoints.contains(waypoint)) return;
 
-        final ServerPlayer updating = (ServerPlayer) waypoint;
+        // Rolia - build 44: this was `(ServerPlayer) waypoint`, and WaypointTransmitter is implemented
+        // by LivingEntity, not just ServerPlayer. Vanilla calls trackWaypoint for ANY living entity
+        // whose waypoint_transmit_range attribute goes above zero, so a single vanilla command -
+        //     /attribute @e[type=zombie] minecraft:waypoint_transmit_range base set 100
+        // made the next movement tick throw ClassCastException straight out of the region tick loop.
+        // No plugin, no config flag, no profiler required. Vanilla handles mob waypoints fine; only
+        // this override did not.
+        //
+        // The distance filter below is an optimisation, so a non-player transmitter simply skips it
+        // and takes the unconditional path - correctness first, and mob waypoints are rare.
+        final ServerPlayer updating = waypoint instanceof ServerPlayer sp ? sp : null;
 
         for (ServerPlayer player : players) {
+            if (updating == null) {
+                player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
+                    updateWaypoint(waypoint, entityPlayer);
+                });
+                continue;
+            }
             if (player == updating) continue;
 
             if (updating.distanceTo(player) > 332.0F && !shouldScheduleBasedOnDistance(updating, player)) {

@@ -243,8 +243,24 @@ public class ConfigurationProvider {
 
         // now that we wrote the header, write to file
         Files.createDirectories(pathAbsolute.getParent());
-        try (FileWriter fw = new FileWriter(pathAbsolute.toFile())) {
+        // Rolia - build 44: this was `new FileWriter(file)`, which TRUNCATES the operator's live config
+        // before a single byte is written - and buildSolidConfiguration rewrites the file on every
+        // start, not just when something changed. A crash, an OOM, a kill or a full disk between the
+        // truncate and the flush left canvas-server.yml empty or half-written, and the next boot then
+        // saw a null document, flood-filled defaults, and silently discarded every setting the operator
+        // had tuned. Write to a temp file and move it into place instead - the same pattern
+        // io.rolia.RoliaConfig#writeConfig already uses. Also pin UTF-8 explicitly: YAML is defined as
+        // UTF-8, the old code used the platform default on both read and write, and this project ships
+        // Russian documentation and operators put Cyrillic in MOTD and message options.
+        final Path tmp = pathAbsolute.resolveSibling(pathAbsolute.getFileName() + ".tmp");
+        try (java.io.Writer fw = Files.newBufferedWriter(tmp, java.nio.charset.StandardCharsets.UTF_8)) {
             YAML.serialize(representation, fw);
+        }
+        try {
+            Files.move(tmp, pathAbsolute, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (final java.nio.file.AtomicMoveNotSupportedException e) {
+            Files.move(tmp, pathAbsolute, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

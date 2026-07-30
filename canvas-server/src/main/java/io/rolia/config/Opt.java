@@ -167,7 +167,12 @@ public abstract class Opt<T> {
 
     @Override
     public String toString() {
-        return path + "=" + yamlValue();
+        // Rolia - build 44: a secret option must never render its value here. Nothing prints an Opt
+        // today, but this is the one accessor a future LOGGER.warn("bad option {}", opt) would reach
+        // for, and that single line would put the 1024-bit secret into latest.log and into every bug
+        // report pasted from it. Every other secret-handling site in this codebase is defended; this
+        // one was not.
+        return path + "=" + (this.secret ? "<secret>" : yamlValue());
     }
 
     // ---------------------------------------------------------------------------------------------

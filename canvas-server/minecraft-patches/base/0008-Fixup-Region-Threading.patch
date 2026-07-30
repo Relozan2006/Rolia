@@ -634,21 +634,32 @@ index 3c646d9d594cbead75a30150b7e03124e2beaaf8..1fd029da66dee52d63d24fd9af7a4588
          // prevent further ticks from occurring
          // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
          this.scheduler.halt();
-@@ -251,6 +289,19 @@ public final class TickRegionScheduler {
+@@ -251,6 +289,30 @@ public final class TickRegionScheduler {
      private void regionFailed(final RegionScheduleHandle handle, final boolean executingTasks, final Throwable thr) {
          // when a region fails, we need to shut down the server gracefully
  
 +        // Canvas start - region threading
-+        net.minecraft.CrashReport crashReport = net.minecraft.CrashReport.forThrowable(thr, "Region Crash");
-+        net.minecraft.server.MinecraftServer.getServer().fillSystemReport(crashReport.getSystemReport());
-+        net.minecraft.CrashReportCategory crashReportCategory = crashReport.addCategory("Region Context");
-+        crashReportCategory.setDetail("Executing Tasks", () -> String.valueOf(executingTasks));
-+        crashReportCategory.setDetail("RegionScheduleHandle", handle.region == null ? "Not available" : handle.region.region);
-+        java.nio.file.Path path = net.minecraft.server.MinecraftServer.getServer().getServerDirectory().resolve("crash-reports").resolve("crash-" + net.minecraft.util.Util.getFilenameFormattedDateTime() + "-server.txt");
-+        if (crashReport.saveToFile(path, net.minecraft.ReportType.CRASH)) {
-+            LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
-+        } else {
-+            LOGGER.error("We were unable to save this crash report to disk.");
++        // Rolia - build 44: the report generation is wrapped, because halting must NOT depend on it.
++        // fillSystemReport walks the player list and the pack repository from a scheduler thread that
++        // has just failed - cross-region reads that can trip the very TickThread assertions we are here
++        // to report - and saveToFile is synchronous IO into a directory that may be full or read-only.
++        // If any of that threw, halt() and stopServer() below were never reached: the region stayed
++        // broken, the server kept ticking, and nothing was ever saved. Diagnostics are worth having,
++        // but not at the price of the fail-safe they precede.
++        try {
++            net.minecraft.CrashReport crashReport = net.minecraft.CrashReport.forThrowable(thr, "Region Crash");
++            net.minecraft.server.MinecraftServer.getServer().fillSystemReport(crashReport.getSystemReport());
++            net.minecraft.CrashReportCategory crashReportCategory = crashReport.addCategory("Region Context");
++            crashReportCategory.setDetail("Executing Tasks", () -> String.valueOf(executingTasks));
++            crashReportCategory.setDetail("RegionScheduleHandle", handle.region == null ? "Not available" : handle.region.region);
++            java.nio.file.Path path = net.minecraft.server.MinecraftServer.getServer().getServerDirectory().resolve("crash-reports").resolve("crash-" + net.minecraft.util.Util.getFilenameFormattedDateTime() + "-server.txt");
++            if (crashReport.saveToFile(path, net.minecraft.ReportType.CRASH)) {
++                LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
++            } else {
++                LOGGER.error("We were unable to save this crash report to disk.");
++            }
++        } catch (final Throwable reportFailed) {
++            LOGGER.error("Could not write the region crash report; halting anyway.", reportFailed);
 +        }
 +        // Canvas end - region threading
          // prevent further ticks from occurring

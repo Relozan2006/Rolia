@@ -19,13 +19,14 @@
          super(commonInfo, bookInfo);
          this.result = result;
          this.ingredients = ingredients;
-@@ -74,6 +_,27 @@
+@@ -74,6 +_,41 @@
  
      @Override
      public boolean matches(final CraftingInput input, final Level level) {
 +        // Pufferfish start
 +        if (!this.isBukkit) {
 +            java.util.List<Ingredient> ingredients = com.google.common.collect.Lists.newArrayList(this.ingredients.toArray(new Ingredient[0]));
++            boolean matched = true; // Rolia - see below; greedy is a fast ACCEPT path, never a reject
 +
 +            inventory: for (int index = 0; index < input.size(); index++) {
 +                ItemStack item = input.getItem(index);
@@ -37,11 +38,24 @@
 +                            continue inventory;
 +                        }
 +                    }
-+                    return false;
++                    // Rolia - build 44: this used to `return false`. Greedy first-fit is NOT a correct
++                    // bipartite match: when two ingredient predicates overlap (a tag plus a specific
++                    // item, which datapack recipes do constantly) it can consume the wrong item first
++                    // and reject an input that has a perfectly valid assignment - and the outcome
++                    // depends on the order the player happened to place items in the grid. Vanilla
++                    // uses RecipeMatcher precisely to avoid this.
++                    //
++                    // Greedy SUCCEEDING is proof of a valid assignment, so the fast path is kept.
++                    // Greedy FAILING proves nothing, so fall through to the exact matcher below
++                    // instead of answering "no".
++                    matched = false;
++                    break inventory;
 +                }
 +            }
 +
-+            return ingredients.isEmpty();
++            if (matched && ingredients.isEmpty()) {
++                return true;
++            }
 +        }
 +        // Pufferfish end
          // Paper start - Improve exact choice recipe ingredients & unwrap ternary

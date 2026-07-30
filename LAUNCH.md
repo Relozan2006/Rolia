@@ -40,9 +40,9 @@ The JVM flags are only half the job. Do these once, then restart.
    зависит всё, кроме формы рельефа. Потеряете — уже существующий мир нельзя будет
    корректно достроить. Файл создаётся с правами `0600`.
 7. **Decide about `optimizations.dab` and `optimizations.villager-lobotomize`**
-   in `rolia.yml`. Both are **ON by default** and both change mob behaviour —
+   in `rolia.yml`. Both are **off by default** and both change mob behaviour —
    see "Defaults that change behaviour" below.
-   Обе опции **включены по умолчанию** и обе меняют поведение мобов — см. ниже.
+   Обе опции **выключены по умолчанию** и обе меняют поведение мобов — см. ниже.
 
 ---
 
@@ -145,11 +145,11 @@ script: `G1NewSizePercent=40`, `G1MaxNewSizePercent=50`, `G1HeapRegionSize=16M`,
 
 ## Defaults that change behaviour / Умолчания, меняющие поведение
 
-Both live in `rolia.yml` and both are **ON by default**. Neither is
+Both live in `rolia.yml` and both are **off by default**. Neither is
 behaviour-neutral — turn them off if you want strictly Vanilla mob behaviour
 everywhere and can afford the CPU.
 
-Обе опции живут в `rolia.yml` и **включены по умолчанию**. Ни одна не является
+Обе опции живут в `rolia.yml` и **выключены по умолчанию**. Ни одна не является
 поведенчески-нейтральной.
 
 **`optimizations.dab` — Dynamic Activation of Brain.** Mobs far from every player

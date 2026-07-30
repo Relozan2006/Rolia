@@ -37,22 +37,35 @@ _HASH_REPORT = []
 CONTEXT_LINES = 12
 
 
-def _context_hash(text, anchor):
-    """Checksum the source around `anchor`. Returns (hash, window_text, first_line_number).
+def _context_hash(text, anchor, search_from=0, context_lines=None):
+    """Checksum the source around ONE occurrence of `anchor`.
+
+    Returns (hash, window_text, first_line_number, index_of_this_occurrence).
 
     Whitespace at end of line is stripped before hashing so a stray trailing space in the decompiler
     output cannot fail a build on its own.
+
+    Build 44: `search_from` exists because a hook may substitute at SEVERAL sites (the carver /
+    worldgen-mob-spawn hook does two). Until now only the FIRST occurrence was ever checksummed, so
+    the second site was a bare str.replace with no guard at all - exactly the failure mode the module
+    docstring claims is impossible. Each occurrence now carries its own hash.
+
+    `context_lines` overrides the default window. The carver hook needs it: its re-seed call sits 27
+    lines and three nested loops below the anchor, i.e. outside a 12-line window, so an upstream edit
+    that moved or deleted that re-seed would have changed nothing the guard looks at - and every chunk
+    in the world would then share one carver stream (identical caves everywhere).
     """
-    idx = text.find(anchor)
+    span = CONTEXT_LINES if context_lines is None else context_lines
+    idx = text.find(anchor, search_from)
     if idx < 0:
-        return None, None, 0
+        return None, None, 0, -1
     start_line = text.count("\n", 0, idx)
     end_line = start_line + anchor.count("\n")
     lines = text.split("\n")
-    lo = max(0, start_line - CONTEXT_LINES)
-    hi = min(len(lines), end_line + CONTEXT_LINES + 1)
+    lo = max(0, start_line - span)
+    hi = min(len(lines), end_line + span + 1)
     window = "\n".join(l.rstrip() for l in lines[lo:hi])
-    return hashlib.sha256(window.encode("utf-8")).hexdigest()[:16], window, lo + 1
+    return hashlib.sha256(window.encode("utf-8")).hexdigest()[:16], window, lo + 1, idx
 
 def _dump_context(path, hint, label):
     """Print every line containing `hint` with its number, so a CI failure shows the real
@@ -78,7 +91,7 @@ def _dump_context(path, hint, label):
         print("  (no line contains %r either)" % hint, file=sys.stderr)
 
 
-def patch(path, old, new, what, hint=None, count=1, marker=None, context=None):
+def patch(path, old, new, what, hint=None, count=1, marker=None, context=None, context_lines=None):
     """Replace `old` with `new` exactly `count` times. Fails loudly so a silent miss can never ship.
 
     `marker` makes the hook idempotent: if it is already present the hook is skipped instead of
@@ -99,20 +112,42 @@ def patch(path, old, new, what, hint=None, count=1, marker=None, context=None):
         _dump_context(path, hint, what)
         sys.exit(1)
 
-    actual, window, firstline = _context_hash(s, old)
+    # Build 44: one hash PER OCCURRENCE. `context` is a string when count == 1 and a list/tuple of
+    # `count` hashes otherwise.
+    actuals = []
+    windows = []
+    firstlines = []
+    pos = 0
+    for _ in range(count):
+        a, w, fl, idx = _context_hash(s, old, pos, context_lines)
+        if idx < 0:
+            break
+        actuals.append(a)
+        windows.append(w)
+        firstlines.append(fl)
+        pos = idx + 1
     if PRINT_HASHES:
-        _HASH_REPORT.append((what, actual))
-    elif context is not None and actual != context:
-        print("ERROR: %s - the source AROUND the anchor changed." % what, file=sys.stderr)
-        print("       expected context %s, found %s" % (context, actual), file=sys.stderr)
-        print("       The anchor still matches, so the substitution would have been applied silently", file=sys.stderr)
-        print("       into a method upstream has rewritten. Read the window below, decide whether the", file=sys.stderr)
-        print("       hook is still correct, then update the context hash in scripts/apply_dab_hooks.py", file=sys.stderr)
-        print("       (run it with --print-context-hashes to get the new values).", file=sys.stderr)
-        print("       --- %s lines %d.. ---" % (path, firstline), file=sys.stderr)
-        for i, line in enumerate(window.split("\n")):
-            print("       %5d: %s" % (firstline + i, line), file=sys.stderr)
-        sys.exit(1)
+        _HASH_REPORT.append((what, actuals[0] if count == 1 else list(actuals)))
+    elif context is not None:
+        expected = [context] if isinstance(context, str) else list(context)
+        if len(expected) != count:
+            print("ERROR: %s - declares count=%d but %d context hash(es); they must match."
+                  % (what, count, len(expected)), file=sys.stderr)
+            sys.exit(1)
+        for i, (exp, act) in enumerate(zip(expected, actuals)):
+            if exp == act:
+                continue
+            print("ERROR: %s - the source AROUND occurrence %d of %d changed."
+                  % (what, i + 1, count), file=sys.stderr)
+            print("       expected context %s, found %s" % (exp, act), file=sys.stderr)
+            print("       The anchor still matches, so the substitution would have been applied silently", file=sys.stderr)
+            print("       into a method upstream has rewritten. Read the window below, decide whether the", file=sys.stderr)
+            print("       hook is still correct, then update the context hash in scripts/apply_dab_hooks.py", file=sys.stderr)
+            print("       (run it with --print-context-hashes to get the new values).", file=sys.stderr)
+            print("       --- %s lines %d.. ---" % (path, firstlines[i]), file=sys.stderr)
+            for k, line in enumerate(windows[i].split("\n")):
+                print("       %5d: %s" % (firstlines[i] + k, line), file=sys.stderr)
+            sys.exit(1)
 
     open(path, "w", encoding="utf-8").write(s.replace(old, new, count))
     print("OK: " + what + (" (x%d)" % count if count != 1 else "") + ("" if context is None else " [ctx %s]" % context))
@@ -197,30 +232,43 @@ patch(RANDOMSTATE,
       "        this.aquiferRandom = this.random.fromHashOf(Identifier.withDefaultNamespace(\"aquifer\")).forkPositional();\n"
       "        this.oreRandom = this.random.fromHashOf(Identifier.withDefaultNamespace(\"ore\")).forkPositional();\n",
       "        this.random = settings.getRandomSource().newInstance(seed).forkPositional(); // Rolia - PUBLIC: terrain shape stays on the level seed\n"
-      "        this.roliaSecretRandom = io.rolia.secureseed.Globals.isSecureSeedEnabled() ? io.rolia.secureseed.Globals.secretPositionalFactory(\"worldgen-root\") : this.random; // Rolia - secure-seed.enabled=false routes every SECRET system back through the public root, i.e. vanilla\n"
+      "        // Rolia - build 44: each secret system names its OWN domain and gets an independent\n"
+      "        // 128-bit root. They used to be fromHashOf() offsets of one shared \"worldgen-root\", and\n"
+      "        // vanilla's positional factory is affine in its seed, so recovering the state of any one\n"
+      "        // of them recovered all of them. secretOr(vanillaExpression, domain) returns the vanilla\n"
+      "        // expression verbatim when secure-seed.enabled is false.\n"
+      "        this.roliaSecretRandom = io.rolia.secureseed.Globals.secretOr(this.random, \"worldgen-root\"); // Rolia\n"
       "        this.noises = noises;\n"
-      "        this.aquiferRandom = this.roliaSecretRandom.fromHashOf(Identifier.withDefaultNamespace(\"aquifer\")).forkPositional(); // Rolia - SECRET\n"
-      "        this.oreRandom = this.roliaSecretRandom.fromHashOf(Identifier.withDefaultNamespace(\"ore\")).forkPositional(); // Rolia - SECRET\n",
+      "        this.aquiferRandom = io.rolia.secureseed.Globals.secretOr(this.random.fromHashOf(Identifier.withDefaultNamespace(\"aquifer\")).forkPositional(), \"aquifer\"); // Rolia - SECRET, own root\n"
+      "        this.oreRandom = io.rolia.secureseed.Globals.secretOr(this.random.fromHashOf(Identifier.withDefaultNamespace(\"ore\")).forkPositional(), \"ore\"); // Rolia - SECRET, own root\n",
       "RandomState aquifer+ore under the secret", context="aa03c4885be73c83",
       hint="aquiferRandom")
 patch(RANDOMSTATE,
       "        this.surfaceSystem = new SurfaceSystem(this, settings.defaultBlock(), settings.seaLevel(), this.random);\n",
-      "        this.surfaceSystem = new SurfaceSystem(this, settings.defaultBlock(), settings.seaLevel(), this.roliaSecretRandom); // Rolia - SECRET: surface rules\n",
-      "RandomState surface rules under the secret", context="f069d615b323915e",
+      "        // Rolia - SECRET, own root. This is the most exposed consumer of all: SurfaceSystem takes\n"
+      "        // the factory DIRECTLY and draws the badlands terracotta banding from it - about 200 draws\n"
+      "        // whose results you can read straight off the terrain. Sharing a root with every other\n"
+      "        // noise made that a readable constraint on all of them.\n"
+      "        this.surfaceSystem = new SurfaceSystem(this, settings.defaultBlock(), settings.seaLevel(), io.rolia.secureseed.Globals.secretOr(this.random, \"surface\")); // Rolia\n",
+      "RandomState surface rules under the secret", context="20e682c2d81715c8",
       hint="surfaceSystem")
 patch(RANDOMSTATE,
       "        return this.noiseIntances.computeIfAbsent(noise, key -> Noises.instantiate(this.noises, this.random, noise));\n",
       "        // Rolia - route each noise to the public or the secret root. Whitelist: unknown noises are SECRET.\n"
       "        return this.noiseIntances.computeIfAbsent(noise, key -> Noises.instantiate(this.noises,\n"
-      "            io.rolia.secureseed.Globals.isPublicTerrainNoise(noise) ? this.random : this.roliaSecretRandom, noise));\n",
+      "            io.rolia.secureseed.Globals.isPublicTerrainNoise(noise)\n"
+      "                ? this.random\n"
+      "                : io.rolia.secureseed.Globals.secretOr(this.roliaSecretRandom, \"noise:\" + noise.identifier()), noise));\n",
       "RandomState per-noise public/secret routing", context="374470dcfbee24e3",
       hint="noiseIntances")
 patch(RANDOMSTATE,
       "        return this.positionalRandoms.computeIfAbsent(name, key -> this.random.fromHashOf(name).forkPositional());\n",
       "        // Rolia - same split for named factories; only BlendedNoise's \"terrain\" factory stays public.\n"
       "        return this.positionalRandoms.computeIfAbsent(name, key ->\n"
-      "            (io.rolia.secureseed.Globals.isPublicTerrainFactory(name) ? this.random : this.roliaSecretRandom).fromHashOf(name).forkPositional());\n",
-      "RandomState named-factory public/secret routing", context="7336d7bb05bd5c53",
+      "            io.rolia.secureseed.Globals.isPublicTerrainFactory(name)\n"
+      "                ? this.random.fromHashOf(name).forkPositional()\n"
+      "                : io.rolia.secureseed.Globals.secretOr(this.roliaSecretRandom.fromHashOf(name).forkPositional(), \"factory:\" + name));\n",
+      "RandomState named-factory public/secret routing", context="7ecba93f08a2b3e2",
       hint="positionalRandoms")
 # The two legacy Nether climate noises are SECRET, and must not go through LegacyRandomSource's 48-bit
 # state. newLegacyInstance() itself is left alone because useLegacyInit also routes BlendedNoise (which
@@ -262,8 +310,12 @@ assert_contains(NBCG, "setDecorationSeed(",
 patch(NBCG,
       "new WorldgenRandom(new LegacyRandomSource(RandomSupport.generateUniqueSeed()))",
       "new io.rolia.secureseed.WorldgenCryptoRandom(0, 0, io.rolia.secureseed.Globals.Salt.CARVER, 0) /* Rolia - carvers + worldgen mob spawn under the secret seed; re-keyed by the setLargeFeatureSeed/setDecorationSeed call that follows */",
-      "NoiseBasedChunkGenerator carvers + mob spawn under the secret seed", context="e89063c52ddc2cec",
-      hint="WorldgenRandom", count=2, marker="io.rolia.secureseed.WorldgenCryptoRandom")
+      "NoiseBasedChunkGenerator carvers + mob spawn under the secret seed",
+      hint="WorldgenRandom", count=2, marker="io.rolia.secureseed.WorldgenCryptoRandom",
+      # Build 44: 30 lines of context, not 12. applyCarvers constructs the random at its anchor but
+      # re-seeds it 27 lines and three nested loops later, so a 12-line window did not contain the one
+      # statement the whole hook depends on. Both occurrences are now checksummed (see _context_hash).
+      context_lines=30, context=["f24baae1b478b3fa", "c0042a246a7f6d47"])
 
 # 7) Bulk writeLongArray (from Leaf) - byte-identical output (uses source.order()), faster chunk serialization.
 #    Build 38: the nio branch is now `nioBufferCount() == 1 && !isReadOnly()`, not `> 0`.
@@ -394,7 +446,7 @@ if PRINT_HASHES:
     print("")
     print("=== context hashes (paste into the context= arguments above) ===")
     for what, h in _HASH_REPORT:
-        print("  %-60s %s" % (what, h))
+        print("  %-60s %s" % (what, h if isinstance(h, str) else ", ".join('"%s"' % x for x in h)))
     sys.exit(0)
 
 print("Rolia source hooks applied.")

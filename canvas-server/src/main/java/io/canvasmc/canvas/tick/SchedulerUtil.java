@@ -305,8 +305,15 @@ public class SchedulerUtil {
 
         @Override
         public void onRegionMerge(final TickRegions.TickRegionData from, final TickRegions.TickRegionData to, final ServerLevel level) {
-            if (!isRunningRegionProfiler()) return;
-            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = RegionProfiler.STATE.get().threadRunner();
+            // Rolia - build 44: snapshot RegionProfiler.STATE once. This was check-then-act:
+            // isRunningRegionProfiler() reads STATE != null, then STATE.get() was dereferenced
+            // AGAIN - and RegionProfiler.endPinning nulls it from spark's own thread. Stopping a
+            // profiler while any region merged or split gave an NPE on a region TICK thread, which
+            // goes to onException -> crash report -> stopServer(). The same fix was already applied
+            // above in isRunningRegionProfilerOnThread; these three call sites were missed.
+            final RegionProfiler.ProfilingState state = RegionProfiler.STATE.get();
+            if (state == null) return;
+            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = state.threadRunner();
             if (!threadRunner.isLinkedTo(from.tickHandle)) return;
             tryTransferPinningState(from.tickHandle, to.tickHandle);
         }
@@ -316,11 +323,37 @@ public class SchedulerUtil {
         //       because the global tick can't call split
         @Override
         public void onRegionSplit(final TickRegions.TickRegionData from, final Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> into, final ServerLevel level) {
-            if (!isRunningRegionProfiler()) return;
-            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = RegionProfiler.STATE.get().threadRunner();
+            // Rolia - build 44: snapshot RegionProfiler.STATE once. This was check-then-act:
+            // isRunningRegionProfiler() reads STATE != null, then STATE.get() was dereferenced
+            // AGAIN - and RegionProfiler.endPinning nulls it from spark's own thread. Stopping a
+            // profiler while any region merged or split gave an NPE on a region TICK thread, which
+            // goes to onException -> crash report -> stopServer(). The same fix was already applied
+            // above in isRunningRegionProfilerOnThread; these three call sites were missed.
+            final RegionProfiler.ProfilingState state = RegionProfiler.STATE.get();
+            if (state == null) return;
+            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = state.threadRunner();
             if (!threadRunner.isLinkedTo(from.tickHandle)) return;
-            ChunkPos center = ((RegionScheduleHandlePinner.RegionPinner) RegionProfiler.STATE.get().handlePinner()).getCenter();
-            tryTransferPinningState(from.tickHandle, into.get(center.longKey()).getData().tickHandle);
+            // Rolia - build 44: `into` is Folia's post-split map and its key is a REGION-SECTION
+            // coordinate, while ChunkPos.longKey() is a raw CHUNK key. Those only coincide at a section
+            // origin, so this lookup returned null for essentially every profiled area and .getData()
+            // NPE'd inside TickRegionData.split - on a region tick thread, i.e. straight into
+            // stopServer(). Any split of the pinned region with /spark --region active stopped the
+            // server. Look the region up by coordinate instead of guessing at the key encoding, and
+            // treat "not found" as "profiling simply does not follow this split" rather than a crash.
+            final ChunkPos center = ((RegionScheduleHandlePinner.RegionPinner) state.handlePinner()).getCenter();
+            final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> target =
+                into.get(center.longKey());
+            if (target == null || target.getData() == null) {
+                // The lookup misses in practice: `into` is keyed by REGION-SECTION coordinate while
+                // ChunkPos.longKey() is a raw CHUNK key, and those only coincide at a section origin.
+                // Unguarded, .getData() therefore NPE'd inside TickRegionData.split on a region tick
+                // thread, which goes to onException -> crash report -> stopServer(). Dropping the pin
+                // is the right severity: the profiler stops following this region across the split,
+                // which is a diagnostic inconvenience, where the alternative was a stopped server.
+                threadRunner.unlink();
+                return;
+            }
+            tryTransferPinningState(from.tickHandle, target.getData().tickHandle);
         }
 
         // both destroy and inactive only happen on split and merge
@@ -336,8 +369,15 @@ public class SchedulerUtil {
 
         private void tryDestroyLink(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
             final TickRegions.TickRegionData data = region.getData();
-            if (!isRunningRegionProfiler()) return;
-            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = RegionProfiler.STATE.get().threadRunner();
+            // Rolia - build 44: snapshot RegionProfiler.STATE once. This was check-then-act:
+            // isRunningRegionProfiler() reads STATE != null, then STATE.get() was dereferenced
+            // AGAIN - and RegionProfiler.endPinning nulls it from spark's own thread. Stopping a
+            // profiler while any region merged or split gave an NPE on a region TICK thread, which
+            // goes to onException -> crash report -> stopServer(). The same fix was already applied
+            // above in isRunningRegionProfilerOnThread; these three call sites were missed.
+            final RegionProfiler.ProfilingState state = RegionProfiler.STATE.get();
+            if (state == null) return;
+            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = state.threadRunner();
             if (data.tickHandle.state != null && threadRunner.isLinkedTo(data.tickHandle)) {
                 threadRunner.unlink();
             }

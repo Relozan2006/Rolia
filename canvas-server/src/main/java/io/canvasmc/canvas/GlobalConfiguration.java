@@ -139,8 +139,44 @@ public class GlobalConfiguration extends Part {
         );
     }
 
+    /**
+     * Rolia - build 44: force the overrides the operator asked for in rolia.yml.
+     *
+     * <p>These options are ALSO set as field defaults above, which is correct and sufficient on a
+     * virgin config directory: ConfigurationProvider flood-fills the defaults object and persists it.
+     * But on every later boot the file wins - NodeDiff only ADDS keys that are missing, and the loaded
+     * file object is what reaches postLoad. So from the second start onwards, flipping any of these
+     * nine keys in rolia.yml did precisely nothing, while /rolia status cheerfully reported the new
+     * value. Nine of twenty-eight keys were inert and said otherwise.</p>
+     *
+     * <p>The semantics are the honest ones: a Rolia key set to true FORCES the behaviour on; left at
+     * false, Rolia does not touch the setting and Canvas's own file decides. That is what the config
+     * text and the Russian documentation say.</p>
+     */
+    private static void applyRoliaOverrides(final GlobalConfiguration c) {
+        if (io.rolia.RoliaConfig.canvasGuardSeverityLog()) {
+            c.regionScheduler.guardSeverity = GuardSeverity.LOG;
+        }
+        if (io.rolia.RoliaConfig.parityEnderPearl()) {
+            c.restoreVanillaEnderPearlBehavior = true;
+        }
+        if (io.rolia.RoliaConfig.canvasTileEntitySnapshot()) {
+            c.tileEntitySnapshotCreation = true;
+        }
+        if (io.rolia.RoliaConfig.canvasCacheEntityTypeConversion()) {
+            c.cacheMinecraft2BukkitEntityTypeConversion = true;
+        }
+        if (io.rolia.RoliaConfig.canvasFilterMovePackets()) {
+            c.networking.filterMovePackets = true;
+        }
+        if (io.rolia.RoliaConfig.canvasAltPlayerListTick()) {
+            c.networking.alternativePlayerListTick = true;
+        }
+    }
+
     private static void postLoad(final GlobalConfiguration configuration) {
         INSTANCE = configuration;
+        applyRoliaOverrides(configuration); // Rolia - see applyRoliaOverrides; must run before validation
 
         // validate the configuration so users don't end up doing a stupid
         Validator.validateObject(configuration);
@@ -333,7 +369,7 @@ public class GlobalConfiguration extends Part {
                 .docs(
                     Style.wrap(
                         "Rolia introduces extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are.",
-                        // Rolia - default changed from THROW to LOG, see below
+                        // Rolia - Canvas's THROW is kept; canvas-overrides.log-instead-of-throwing-on-guard-violation switches it
                         "Canvas's default is THROW, and Canvas's own documentation for it says THROW can crash the server."
                             + " Rolia leaves that default alone. Set canvas-overrides.log-instead-of-throwing-on-guard-violation"
                             + " in rolia.yml to make LOG the default instead, so a misbehaving plugin degrades the server rather"
@@ -551,7 +587,7 @@ public class GlobalConfiguration extends Part {
 
     {
         option("serverModName").docs("The server mod name displayed in server listings and client info").word();
-        // Rolia - default changed from false to true, see docs below
+        // Rolia - Canvas's default (false) is kept; see rolia.yml for the key that changes it
         option("restoreVanillaEnderPearlBehavior").docs(
             "Restores and fixes Vanilla Ender Pearl behavior, broken by Folia.",
             "Folia dropped Vanilla's per-player ender pearl tracking, so a pearl still in flight is not saved",
@@ -566,7 +602,7 @@ public class GlobalConfiguration extends Part {
                 "instead shows an empty void. With this enabled, the server will display the proper world loading screen"
             );
         option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
-        // Rolia - default changed from false to true, see docs below
+        // Rolia - Canvas's default (false) is kept; see rolia.yml for the key that changes it
         option("tileEntitySnapshotCreation").docs(
             "Enables creation of tile entity snapshots on retrieving blockstates.",
             "CraftBukkit's contract is that getOwner() returns a SNAPSHOT; with this off, plugins get a",
