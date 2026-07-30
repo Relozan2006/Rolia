@@ -1337,6 +1337,15 @@ jobs:
           #     same level-seed, all secrets changed : exact 78%  median 0  mean 1.14  p90 3   land 99%  biome  9%
           #     different level-seed, same secrets   : exact  1%  median 29 mean 35.91 p90 72  land 63%  biome  0%
           #
+          # Second run, which is the one that went green - each run draws a fresh random secret, so
+          # these move a little and the bounds have to survive that:
+          #     same level-seed, all secrets changed : exact 75%  median 0  mean 1.80  p90 5   land 98%  biome  7%
+          #     different level-seed, same secrets   : exact  1%  median 30 mean 36.47 p90 73  land 65%  biome  0%
+          # Spread across the two: exact 75-78, mean 1.14-1.80, p90 3-5, land 98-99, biome 7-9, while
+          # the control sat at exact 1 and median 29-30 both times. The bounds below clear the worse
+          # of the two on every metric; if a third sample lands outside them the right response is to
+          # look at why the secret is moving the surface more, not to widen them again.
+          #
           # The claim holds and the separation is not marginal. What the guessed 85% missed is that
           # carvers are secret: caves and ravines that break the surface move the highest terrain
           # block, so a fraction of columns MUST differ, and 22% of them do - at a median of zero
@@ -1901,6 +1910,15 @@ jobs:
           > **СДЕЛАЙТЕ РЕЗЕРВНУЮ КОПИЮ `rolia.yml` ВМЕСТЕ С МИРОМ.**
           > Соль и feature-seed не хранятся больше нигде. Потеряете файл — пещеры, руда и структуры
           > существующего мира потеряны безвозвратно.
+
+          ### Чем это подтверждено
+
+          Сборка не выходит, пока не пройдёт проверка, которая генерирует три мира и сравнивает 36864
+          колонки рельефа. При смене **всего** секрета и том же \`level-seed\`: медиана расхождения высоты
+          — **0** блоков, средняя — **1.8**, маска суша/океан совпадает на **98 %**, а биом сохраняется
+          лишь у **7 %** колонок. При смене \`level-seed\` тот же замер даёт медиану **30** блоков и
+          совпадение маски **65 %**. Иначе говоря: ландшафт берётся из публичного сида, климат — из
+          секрета, и это измерено, а не заявлено.
 
           ### Проверка загруженного файла
 
