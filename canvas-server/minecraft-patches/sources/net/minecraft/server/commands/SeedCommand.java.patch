@@ -22,7 +22,7 @@
 +                // exists to prevent.
 +                if ("fingerprint".equals(io.rolia.RoliaConfig.seedCommandMode())) {
 +                    Globals.setupGlobals(c.getSource().getLevel());
-+                    c.getSource().sendSuccess(() -> Component.literal("Rolia: feature seed fp: " + Globals.seedFingerprint()), false);
++                    c.getSource().sendSuccess(() -> Component.literal("Rolia: Feature seed fp: " + Globals.seedFingerprint()), false);
 +                }
 +                // Rolia end
                  return (int)seed;
