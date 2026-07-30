@@ -246,7 +246,7 @@ jobs:
             _hits=$(grep -nE "$ROLIA_ERR_RE" "$_log" | grep -vEi "$ROLIA_ERR_ALLOW" || true)
             if [ -n "$_hits" ]; then
               echo "[$_tag] ERRORS DETECTED in $_log:"
-              printf '%s\n' "$_hits" | head -60
+              printf '%s\n' "$_hits" | head -60 || true   # Rolia - build 44: || true, or SIGPIPE from head aborts before the diagnostics are read
               return 1
             fi
             echo "[$_tag] no errors in $_log"
@@ -1005,7 +1005,7 @@ jobs:
           cp -r canvas-server/build/reports/tests /tmp/out/test-reports 2>/dev/null || true
           if [ "$rc" != "0" ]; then
             echo "FAIL: the test suite did not pass. Failures are listed above."
-            grep -nE 'FAILED|tests? (completed|failed)' test.log | head -40
+            grep -nE 'FAILED|tests? (completed|failed)' test.log | head -40 || true   # Rolia - build 44: same SIGPIPE trap
           fi
           exit "$rc"
 
@@ -1200,14 +1200,23 @@ jobs:
               echo "save-all flush" >&3 || true
               sleep 8
               extract_out=$(python3 /tmp/terrain_sig.py extract world "sig_$tag.json" --x0 0 --z0 0 --x1 11 --z1 11 2>&1) || true
-              printf '%s\n' "$extract_out" | head -20
-              n=$(printf '%s\n' "$extract_out" | sed -nE 's/.*columns=([0-9]+).*/\1/p' | head -1)
+              # Rolia - build 44: every one of these pipelines used to be able to KILL the step.
+              # Under `set -e -o pipefail`, `... | head -N` makes head close the pipe as soon as it has
+              # its N lines; the writer then gets EPIPE, returns non-zero, pipefail promotes that to the
+              # pipeline's status and set -e aborts. The `n=$(... | head -1)` line hit it essentially
+              # every time, which is why terr_w1.log exists in every build and terr_w2/w3 never do -
+              # this step has never once finished. continue-on-error hid it until build 44 made the
+              # step a hard gate. `tail -1` reads its input to the end and cannot orphan the writer.
+              printf '%s\n' "$extract_out" | head -20 || true
+              n=$(printf '%s\n' "$extract_out" | sed -nE 's/.*columns=([0-9]+).*/\1/p' | tail -1)
               if [ -z "${n:-}" ]; then
                 echo "[terr_$tag] extract produced no column count. Diagnostics:"
                 echo "  cwd=$(pwd)"
-                ls -la . 2>&1 | head -20
-                echo "  world/:"; ls -la world 2>&1 | head -20
-                echo "  world/region/:"; ls -la world/region 2>&1 | head -20
+                ls -la . 2>&1 | head -20 || true
+                echo "  world/:"; ls -la world 2>&1 | head -20 || true
+                echo "  world/region/:"; ls -la world/region 2>&1 | head -20 || true
+                cp -f "terr_$tag.log" "/tmp/out/terr_$tag.log" 2>/dev/null || true
+                printf '%s\n' "$extract_out" > "/tmp/out/terr_${tag}_extract.txt" 2>/dev/null || true
               fi
               echo "[terr_$tag] wait $attempt: ${n:-0} of 36864 columns on disk"
               if [ "${n:-0}" -ge 36000 ]; then break; fi
@@ -1216,6 +1225,7 @@ jobs:
             wait_exit "terr_$tag" "terr_$tag.log"
             exec 3>&- 2>/dev/null || true
             grep -iE 'forceload|Added .* forced' "terr_$tag.log" | head -5 || true
+            cp -f "terr_$tag.log" "/tmp/out/terr_$tag.log" 2>/dev/null || true  # Rolia - publish every world's log, not just the first
             scan_errors "terr_$tag" "terr_$tag.log" || exit 1
             python3 /tmp/terrain_sig.py extract world "sig_$tag.json" --x0 0 --z0 0 --x1 11 --z1 11
           }
@@ -1231,6 +1241,12 @@ jobs:
           . ./cmp13.env
           echo "=== same level-seed, DIFFERENT secrets  : common=$AB_COMMON exact=${AB_EXACT_PCT}% median|dh|=$AB_MEDIAN_ABS mean|dh|=${AB_MEAN_ABS_X100}/100 p90=$AB_P90_ABS land=${AB_LAND_PCT}% biome=${AB_BIOME_PCT}%"
           echo "=== DIFFERENT level-seed, same secrets  : common=$AC_COMMON exact=${AC_EXACT_PCT}% median|dh|=$AC_MEDIAN_ABS mean|dh|=${AC_MEAN_ABS_X100}/100 p90=$AC_P90_ABS land=${AC_LAND_PCT}% biome=${AC_BIOME_PCT}%"
+          # Rolia - build 44: publish the AGGREGATES (never the per-column signatures - those carry
+          # secret-derived biome ids). Until this build the step died before it ever reached these
+          # assertions, so not one of the thresholds below has ever actually been evaluated against a
+          # real run. If one of them is miscalibrated, these two files say by how much, without
+          # costing another 40-minute build to find out.
+          cp -f cmp12.env cmp13.env /tmp/out/ 2>/dev/null || true
 
           # A test with no data must never be a green test.
           for v in "$AB_COMMON" "$AC_COMMON"; do
