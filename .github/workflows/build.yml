@@ -626,24 +626,31 @@ jobs:
                   parent = os.path.dirname(os.path.abspath(world)) or "."
                   print("Tree of %s:\n%s" % (parent, _tree(parent)))
                   return None
-              # The overworld is the one that is NOT in a dimension subfolder and NOT one of the
-              # sidecar stores. entities/ and poi/ are .mca files too and would silently produce a
-              # signature with no terrain in it at all - a green test measuring nothing.
+              # Classify by what the path MEANS, not by its first segment. This server writes
+              #     world/dimensions/minecraft/overworld/region
+              #     world/dimensions/minecraft/the_nether/region
+              # so "starts with dimensions" says nothing about which dimension it is - the previous
+              # version of this rejected the overworld along with the nether. Decide on the last
+              # segment (terrain vs sidecar) and on whether any segment names a non-overworld
+              # dimension.
               SIDECAR = ("entities", "poi")
+              OTHER_DIM = ("the_nether", "the_end", "dim-1", "dim1", "nether", "end")
               def rank(item):
-                  rel = item[0].replace("\\", "/")
-                  head = rel.split("/")[0]
-                  if head in ("DIM-1", "DIM1", "dimensions"):
-                      return 3                      # nether / end - never what we are measuring
-                  if head in SIDECAR:
-                      return 2                      # entity and point-of-interest stores, not terrain
-                  if rel == "region":
-                      return 0                      # Bukkit / Paper / vanilla overworld
-                  return 1                          # an unfamiliar layout, but terrain-shaped
+                  parts = [p.lower() for p in item[0].replace("\\", "/").split("/")]
+                  last = parts[-1]
+                  if last in SIDECAR:
+                      return 3                      # entity / point-of-interest stores, not terrain
+                  if any(p in OTHER_DIM for p in parts):
+                      return 3                      # nether or end - never what we are measuring
+                  if last != "region":
+                      return 2                      # unfamiliar name, but nothing says it is not terrain
+                  if parts == ["region"] or "overworld" in parts:
+                      return 0                      # Bukkit/Paper flat layout, or .../overworld/region
+                  return 1                          # a region dir we cannot attribute - still terrain
               found.sort(key=lambda it: (rank(it), it[0]))
               print("region dirs under %s: %s" % (world, [(f[0], f[2]) for f in found]))
               chosen = found[0]
-              if rank(chosen) >= 2:
+              if rank(chosen) >= 3:          # 2 is "unfamiliar folder name", which is still terrain
                   print("FAIL: the only .mca files are in dimension or sidecar folders (%s) - "
                         "there is no overworld terrain to measure" % [f[0] for f in found])
                   return None
