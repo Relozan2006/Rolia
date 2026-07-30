@@ -582,13 +582,81 @@ jobs:
                           print("WARN: chunk %d,%d in %s unreadable: %s" % (cx, cz, os.path.basename(path), e))
 
 
+          def _tree(base, limit=400):
+              """Everything under base, so a failure explains itself in one build instead of three."""
+              out = []
+              for root, dirs, files in os.walk(base):
+                  dirs.sort(); files.sort()
+                  out.append("  %s/  (%d files)" % (root, len(files)))
+                  for f in files[:6]:
+                      out.append("      %s" % f)
+                  if len(files) > 6:
+                      out.append("      ... and %d more" % (len(files) - 6))
+                  if len(out) > limit:
+                      out.append("  ... truncated"); break
+              return "\n".join(out)
+
+
+          def find_region_dir(world):
+              """Locate the overworld region files instead of assuming <world>/region.
+
+              Rolia - build 44: the hardcoded path is why this step reported
+              'world/region does not exist' while the server had plainly saved the world. The
+              layout is not ours to assume - Bukkit puts the overworld at <world>/region and the
+              other dimensions in sibling folders, vanilla puts them at <world>/DIM-1 and
+              <world>/DIM1, and a chunk-system change upstream can move any of it. Find the .mca
+              files, prefer the overworld, and say exactly what was found if there are none.
+              """
+              if not os.path.isdir(world):
+                  # the world folder itself is missing - maybe it is not called "world"
+                  here = os.path.dirname(os.path.abspath(world)) or "."
+                  alt = [os.path.join(here, d) for d in sorted(os.listdir(here))
+                         if os.path.isfile(os.path.join(here, d, "level.dat"))]
+                  print("FAIL: %s is not a directory. Directories holding a level.dat: %s" % (world, alt or "none"))
+                  print("Tree of %s:\n%s" % (here, _tree(here)))
+                  return None
+              found = []
+              for root, dirs, files in os.walk(world):
+                  if any(f.endswith(".mca") for f in files):
+                      found.append((os.path.relpath(root, world), root,
+                                    sum(1 for f in files if f.endswith(".mca"))))
+              if not found:
+                  print("FAIL: no .mca files anywhere under %s" % world)
+                  print("Tree of %s:\n%s" % (world, _tree(world)))
+                  parent = os.path.dirname(os.path.abspath(world)) or "."
+                  print("Tree of %s:\n%s" % (parent, _tree(parent)))
+                  return None
+              # The overworld is the one that is NOT in a dimension subfolder and NOT one of the
+              # sidecar stores. entities/ and poi/ are .mca files too and would silently produce a
+              # signature with no terrain in it at all - a green test measuring nothing.
+              SIDECAR = ("entities", "poi")
+              def rank(item):
+                  rel = item[0].replace("\\", "/")
+                  head = rel.split("/")[0]
+                  if head in ("DIM-1", "DIM1", "dimensions"):
+                      return 3                      # nether / end - never what we are measuring
+                  if head in SIDECAR:
+                      return 2                      # entity and point-of-interest stores, not terrain
+                  if rel == "region":
+                      return 0                      # Bukkit / Paper / vanilla overworld
+                  return 1                          # an unfamiliar layout, but terrain-shaped
+              found.sort(key=lambda it: (rank(it), it[0]))
+              print("region dirs under %s: %s" % (world, [(f[0], f[2]) for f in found]))
+              chosen = found[0]
+              if rank(chosen) >= 2:
+                  print("FAIL: the only .mca files are in dimension or sidecar folders (%s) - "
+                        "there is no overworld terrain to measure" % [f[0] for f in found])
+                  return None
+              print("using region dir %s (%d .mca files)" % (chosen[1], chosen[2]))
+              return chosen[1]
+
+
           def extract(world, x0, z0, x1, z1):
               want = {(cx, cz) for cx in range(x0, x1 + 1) for cz in range(z0, z1 + 1)}
-              region = os.path.join(world, "region")
               cols = {}
               stats = Counter()
-              if not os.path.isdir(region):
-                  print("FAIL: %s does not exist" % region)
+              region = find_region_dir(world)
+              if region is None:
                   return None, stats
               for fn in sorted(os.listdir(region)):
                   if not fn.endswith(".mca"):
