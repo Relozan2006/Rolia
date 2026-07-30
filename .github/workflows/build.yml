@@ -1329,9 +1329,28 @@ jobs:
           done
 
           # 1. TERRAIN IS PUBLIC: change every secret, keep the level-seed, get the same landscape.
-          [ "$AB_EXACT_PCT" -ge 85 ]      || { echo "FAIL: only ${AB_EXACT_PCT}% of columns have the SAME height with the same level-seed - terrain is not reproducible from level-seed alone"; exit 1; }
-          [ "$AB_MEDIAN_ABS" -eq 0 ]      || { echo "FAIL: median height difference is $AB_MEDIAN_ABS, expected 0"; exit 1; }
-          [ "$AB_MEAN_ABS_X100" -le 300 ] || { echo "FAIL: mean height difference is ${AB_MEAN_ABS_X100}/100 blocks, expected <= 3.00"; exit 1; }
+          #
+          # Rolia - build 44. Every threshold in this block used to be a guess, because the step
+          # died in its own plumbing before reaching a single one of them and had never produced a
+          # number. The first real measurement is:
+          #
+          #     same level-seed, all secrets changed : exact 78%  median 0  mean 1.14  p90 3   land 99%  biome  9%
+          #     different level-seed, same secrets   : exact  1%  median 29 mean 35.91 p90 72  land 63%  biome  0%
+          #
+          # The claim holds and the separation is not marginal. What the guessed 85% missed is that
+          # carvers are secret: caves and ravines that break the surface move the highest terrain
+          # block, so a fraction of columns MUST differ, and 22% of them do - at a median of zero
+          # and a 90th percentile of three blocks, against a median of 29 and a p90 of 72 when the
+          # landscape itself is different.
+          #
+          # So the floor is set from data, and the block is made STRONGER rather than merely looser:
+          # the mean bound is tightened 3.00 -> 2.50, p90 is asserted where it was not, and two
+          # separation requirements are added that hold no matter how the absolute rates drift,
+          # since the point of this test is the gap between the two columns, not either one alone.
+          [ "$AB_EXACT_PCT" -ge 65 ]      || { echo "FAIL: only ${AB_EXACT_PCT}% of columns have the SAME height with the same level-seed (first measured run: 78%) - terrain is not reproducible from level-seed alone"; exit 1; }
+          [ "$AB_MEDIAN_ABS" -eq 0 ]      || { echo "FAIL: median height difference is $AB_MEDIAN_ABS, expected 0 - the typical column must not move at all"; exit 1; }
+          [ "$AB_MEAN_ABS_X100" -le 250 ] || { echo "FAIL: mean height difference is ${AB_MEAN_ABS_X100}/100 blocks, expected <= 2.50 (measured 1.14)"; exit 1; }
+          [ "$AB_P90_ABS" -le 8 ]         || { echo "FAIL: 10% of columns moved by more than ${AB_P90_ABS} blocks (measured p90 = 3) - that is more than secret carvers can account for"; exit 1; }
           [ "$AB_LAND_PCT" -ge 97 ]       || { echo "FAIL: the land/ocean mask agrees on only ${AB_LAND_PCT}% of columns - the landmass moved"; exit 1; }
 
           # 2. CONTROL: the same measurement must clearly separate two different level-seeds,
@@ -1342,9 +1361,16 @@ jobs:
           # coin flip on the world-seed. Compare the two measurements against each other instead.
           [ "$AC_MEAN_ABS_X100" -ge $((AB_MEAN_ABS_X100 * 4 + 100)) ] || { echo "FAIL: a different level-seed moved the surface by only ${AC_MEAN_ABS_X100}/100 blocks on average, against ${AB_MEAN_ABS_X100}/100 for a mere secret change - the two are not distinguishable"; exit 1; }
           [ "$AC_MEDIAN_ABS" -ge 1 ] || { echo "FAIL: the MEDIAN column height is unchanged by a different level-seed - the level-seed is not driving terrain at all"; exit 1; }
+          # Absolute-rate-independent separation: whatever the rates drift to, the same-level-seed
+          # pair must beat the different-level-seed pair by a wide margin on both observables.
+          # Measured: 78 vs 1 on exact height, 99 vs 63 on the land mask.
+          [ "$AB_EXACT_PCT" -ge $((AC_EXACT_PCT + 40)) ] || { echo "FAIL: same level-seed scored ${AB_EXACT_PCT}% exact against ${AC_EXACT_PCT}% for a different one - too close to call terrain public"; exit 1; }
+          [ "$AB_LAND_PCT"  -ge $((AC_LAND_PCT  + 20)) ] || { echo "FAIL: the land mask agrees ${AB_LAND_PCT}% within a level-seed and ${AC_LAND_PCT}% across level-seeds - the coastline is not coming from the public seed"; exit 1; }
 
           # 3. CLIMATE IS SECRET: the same landscape must be wearing different biomes.
-          [ "$AB_BIOME_PCT" -le 85 ]      || { echo "FAIL: ${AB_BIOME_PCT}% of columns kept the SAME biome after every secret changed - biome climate is not under the secret seed"; exit 1; }
+          # Measured 9%. 85 was a guess with no data behind it; at 9% the honest bound is far tighter,
+          # and a jump back toward the old value would mean climate had stopped following the secret.
+          [ "$AB_BIOME_PCT" -le 40 ]      || { echo "FAIL: ${AB_BIOME_PCT}% of columns kept the SAME biome after every secret changed (measured 9%) - biome climate is not under the secret seed"; exit 1; }
 
           # 4. Slime chunks move with the secret (see the smoke test for restart stability).
           SL1=$(grep -oE 'slime-selftest [0-9a-f]{8,}' terr_w1.log | awk '{print $2}' | head -1 || true)
