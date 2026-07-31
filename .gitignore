@@ -20,7 +20,3 @@ build
 
 /*-debug/
 /*-plugin/
-
-# Rolia - build-time helper bytecode; never belongs in the repository
-__pycache__/
-*.py[cod]

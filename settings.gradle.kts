@@ -2,9 +2,7 @@ import java.util.*
 
 pluginManagement {
     repositories {
-        // Rolia - mavenLocal() was FIRST here, which means any artifact sitting in the developer's or
-        // runner's ~/.m2 silently shadows the real plugin of the same coordinates. That is a genuine
-        // supply-chain hole and it buys nothing for a project nobody builds plugins for locally.
+        mavenLocal()
         gradlePluginPortal()
         maven {
             name = "canvasmc"
@@ -21,17 +19,17 @@ if (!file(".git").exists()) {
     val errorText = """
         
         =====================[ ERROR ]=====================
-         The Rolia project directory is not a properly cloned Git repository.
+         The Canvas project directory is not a properly cloned Git repository.
          
-         In order to build Rolia from source you must clone
-         the Rolia repository using Git, not download a code
+         In order to build Canvas from source you must clone
+         the Canvas repository using Git, not download a code
          zip from GitHub.
          
-         Built Rolia jars are available for download at
-         https://github.com/Relozan2006/Rolia/releases
+         Built Canvas jars are available for download at
+         https://canvasmc.io/downloads
          
-         See https://github.com/Relozan2006/Rolia/blob/HEAD/policies/CONTRIBUTING.md
-         for further information on building and modifying Rolia.
+         See https://github.com/CraftCanvasMC/Canvas/blob/HEAD/CONTRIBUTING.md
+         for further information on building and modifying Canvas.
         ===================================================
     """.trimIndent()
     error(errorText)
@@ -39,7 +37,7 @@ if (!file(".git").exists()) {
 
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
-rootProject.name = "rolia"
+rootProject.name = "Canvas"
 for (name in listOf("canvas-api", "canvas-server")) {
     val projName = name.lowercase(Locale.ENGLISH)
     include(projName)

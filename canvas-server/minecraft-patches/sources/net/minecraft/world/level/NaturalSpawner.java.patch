@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/level/NaturalSpawner.java
 +++ b/net/minecraft/world/level/NaturalSpawner.java
-@@ -69,24 +_,60 @@
+@@ -69,24 +_,49 @@
          final LocalMobCapCalculator localMobCapCalculator
      ) {
          // Paper start - Optional per player mob spawns
@@ -44,18 +44,7 @@
 +        // Canvas start - optimize natural spawning
 +        final boolean perPlayerMobSpawning = worldData.world.paperConfig().entities.spawning.perPlayerMobSpawns;
 +        // optimized iteration path, go by chunks
-+        // Rolia start - bound by size(), not by backing-array capacity
-+        // getRawDataUnchecked() hands back ReferenceList's raw backing array; ReferenceList#remove
-+        // nulls the tail slot, so every slot at or past size() is null. The enhanced-for below used
-+        // to walk the whole capacity and lean on the null guard to skip the dead tail. Behaviour is
-+        // identical (those slots are null either way) -- we just stop scanning dead capacity.
-+        final var loadedChunks = worldData.getChunks();
-+        final LevelChunk[] rawChunks = loadedChunks.getRawDataUnchecked();
-+        final int loadedChunkCount = loadedChunks.size();
-+        java.util.Objects.checkFromIndexSize(0, loadedChunkCount, rawChunks.length);
-+        // Rolia end - bound by size(), not by backing-array capacity
-+        for (int chunkIdx = 0; chunkIdx < loadedChunkCount; chunkIdx++) { // Rolia - was: for (LevelChunk chunk : worldData.getChunks().getRawDataUnchecked())
-+            final LevelChunk chunk = rawChunks[chunkIdx]; // Rolia
++        for (LevelChunk chunk : worldData.getChunks().getRawDataUnchecked()) {
 +            if (chunk == null) continue; // unlikely, but check to be sure
 +            for (Entity entity : chunk.moonrise$getChunkHolder().getEntityChunk().getEntityArr()) {
 +                if (entity == null) continue; // very likely, must check
@@ -102,7 +91,7 @@
 -                        mobCounts.addTo(category, 1);
 -                        // Paper start - Optional per player mob spawns
 -                        if (countMobs) {
--                            chunk.level.getChunkSource().chunkMap.updatePlayerMobTypeMap(entity);
+-                            ((ServerLevel) chunk.getLevel()).getChunkSource().chunkMap.updatePlayerMobTypeMap(entity);
 -                        }
 -                        // Paper end - Optional per player mob spawns
 -                    });
@@ -116,7 +105,7 @@
 +                    mobCounts.addTo(category, 1);
 +                    // Paper start - Optional per player mob spawns
 +                    if (countMobs) {
-+                        chunk.level.getChunkSource().chunkMap.updatePlayerMobTypeMap(entity);
++                        ((ServerLevel) chunk.getLevel()).getChunkSource().chunkMap.updatePlayerMobTypeMap(entity);
 +                    }
 +                    // Paper end - Optional per player mob spawns
                  }
@@ -129,50 +118,49 @@
      }
  
      private static Biome getRoughBiome(final BlockPos pos, final ChunkAccess chunk) {
-@@ -160,6 +_,13 @@
+@@ -157,6 +_,11 @@
      public static void spawnForChunk(
          final ServerLevel level, final LevelChunk chunk, final NaturalSpawner.SpawnState state, final List<MobCategory> spawningCategories
      ) {
 +        // Canvas start - optimize natural spawning
 +        final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> inRange =
 +            level.moonrise$getNearbyPlayers().getPlayers(chunk.getPos(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE);
++        net.minecraft.server.level.ServerPlayer closestPlayer = null;
 +        // Canvas end - optimize natural spawning
-+        // Rolia - Canvas also cached a "closestPlayer" here: an argmin over mob-cap headroom, not over
-+        // Rolia - distance, and declared outside this loop so the pick leaked between MobCategories. Removed.
-+        // Rolia - The nearby set is passed down instead and the true nearest is picked per candidate position.
          for (MobCategory mobCategory : spawningCategories) {
              // Paper start - Optional per player mob spawns
              final boolean canSpawn;
-@@ -174,12 +_,13 @@
+@@ -171,12 +_,17 @@
  
                  // Apply per-player limit
                  int minDiff = Integer.MAX_VALUE;
 -                final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> inRange =
 -                    level.moonrise$getNearbyPlayers().getPlayers(chunk.getPos(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE);
 +                // Canvas - move up
-+                // Rolia - this loop is the MOB-CAP decision only; Canvas piggybacked a "closest player" pick
-+                // Rolia - on it, which is an argmin over cap headroom rather than distance. Back to Paper's.
                  if (inRange != null) {
                      final net.minecraft.server.level.ServerPlayer[] backingSet = inRange.getRawDataUnchecked();
                      for (int k = 0, len = inRange.size(); k < len; k++) {
-                         minDiff = Math.min(limit - level.getChunkSource().chunkMap.getMobCountNear(backingSet[k], mobCategory), minDiff);
+-                        minDiff = Math.min(limit - level.getChunkSource().chunkMap.getMobCountNear(backingSet[k], mobCategory), minDiff);
++                        // Canvas start - optimize natural spawning
++                        int diff = limit - level.getChunkSource().chunkMap.getMobCountNear(backingSet[k], mobCategory);
++                        if (diff < minDiff) {
++                            minDiff = diff;
++                            closestPlayer = backingSet[k];
++                        }
++                        // Canvas end - optimize natural spawning
                      }
                  }
  
-@@ -189,8 +_,10 @@
+@@ -186,7 +_,7 @@
                  canSpawn = state.canSpawnForCategoryLocal(mobCategory, chunk.getPos());
              }
              if (canSpawn) {
 -                spawnCategoryForChunk(mobCategory, level, chunk, state::canSpawn, state::afterSpawn,
--                    maxSpawns, level.paperConfig().entities.spawning.perPlayerMobSpawns ? level.getChunkSource().chunkMap::updatePlayerMobTypeMap : null);
-+                // Canvas start - optimize natural spawning
-+                spawnCategoryForChunk(mobCategory, state, chunk, state::canSpawn, state::afterSpawn,
-+                    maxSpawns, level.paperConfig().entities.spawning.perPlayerMobSpawns ? level.getChunkSource().chunkMap::updatePlayerMobTypeMap : null, inRange); // Rolia - pass the nearby-player set, not a cap-based pick
-+                // Canvas end - optimize natural spawning
++                spawnCategoryForChunk(mobCategory, state, chunk, state::canSpawn, state::afterSpawn, // Canvas - optimize natural spawning
+                     maxSpawns, level.paperConfig().entities.spawning.perPlayerMobSpawns ? level.getChunkSource().chunkMap::updatePlayerMobTypeMap : null);
                  // Paper end - Optional per player mob spawns
              }
-         }
-@@ -206,31 +_,34 @@
+@@ -203,31 +_,34 @@
      }
      // Paper end - Add mobcaps commands
  
@@ -197,8 +185,7 @@
          final NaturalSpawner.SpawnPredicate extraTest,
          final NaturalSpawner.AfterSpawnCallback spawnCallback,
          final int maxSpawns,
--        final Consumer<Entity> trackEntity
-+        final Consumer<Entity> trackEntity, final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> nearbyPlayers // Rolia - take the nearby-player set so the true nearest can be picked per position
+         final Consumer<Entity> trackEntity
      ) {
 -        // Paper end - Optional per player mob spawns
 -        BlockPos start = getRandomPosWithin(level, chunk);
@@ -208,7 +195,7 @@
 +        final ServerLevel world = regionizedWorldData.world;
 +
 +        final ChunkPos pos = chunk.getPos();
-+        final RandomSource random = regionizedWorldData.simpleUnsafeLocalRandom;
++        final RandomSource random = regionizedWorldData.getCanvasWorldData().simpleUnsafeLocalRandom;
 +
 +        // using the min bounds and then adding an RNG with bound of 16 means it won't escape this chunk
 +        int randomX = pos.getMinBlockX() + random.nextInt(16);
@@ -218,14 +205,14 @@
 +
 +        BlockPos start = new BlockPos(randomX, randomY, randomZ);
 +        if (start.getY() >= world.getMinY() + 1) {
-+            spawnCategoryForPosition(mobCategory, spawnState, chunk, start, extraTest, spawnCallback, maxSpawns, trackEntity, nearbyPlayers); // Paper - Optional per player mob spawns // Rolia - forward the nearby-player set
++            spawnCategoryForPosition(mobCategory, spawnState, chunk, start, extraTest, spawnCallback, maxSpawns, trackEntity); // Paper - Optional per player mob spawns
          }
      }
 +    // Canvas end - optimize natural spawning
  
      @VisibleForDebug
      public static void spawnCategoryForPosition(final MobCategory mobCategory, final ServerLevel level, final BlockPos start) {
-@@ -245,61 +_,125 @@
+@@ -242,13 +_,18 @@
          final NaturalSpawner.SpawnPredicate extraTest,
          final NaturalSpawner.AfterSpawnCallback spawnCallback
      ) {
@@ -236,6 +223,10 @@
 +    }
 +    // Canvas start - optimize natural spawning
 +
++    private static int clamp(final int val, final int min, final int max) {
++        return Math.max(min, Math.min(val, max));
++    }
++
      public static void spawnCategoryForPosition(
          final MobCategory mobCategory,
 -        final ServerLevel level,
@@ -245,14 +236,19 @@
          final BlockPos start,
          final NaturalSpawner.SpawnPredicate extraTest,
          final NaturalSpawner.AfterSpawnCallback spawnCallback,
-         final int maxSpawns,
--        final @Nullable Consumer<Entity> trackEntity
-+        final @Nullable Consumer<Entity> trackEntity, final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> nearbyPlayers // Canvas - pass player // Rolia - pass the whole nearby set
+@@ -256,47 +_,73 @@
+         final @Nullable Consumer<Entity> trackEntity
      ) {
          // Paper end - Optional per player mob spawns
 +        final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = spawnState.regionizedWorldData;
 +        final ServerLevel level = regionizedWorldData.world;
-+        final RandomSource fastRandom = regionizedWorldData.simpleUnsafeLocalRandom;
++        final RandomSource fastRandom = regionizedWorldData.getCanvasWorldData().simpleUnsafeLocalRandom;
++        final net.minecraft.world.level.border.WorldBorder border = level.getWorldBorder();
++
++        final int minX = chunk.getPos().getMinBlockX();
++        final int minZ = chunk.getPos().getMinBlockZ();
++        final int maxX = chunk.getPos().getMaxBlockX();
++        final int maxZ = chunk.getPos().getMaxBlockZ();
 +
          StructureManager structureManager = level.structureManager();
          ChunkGenerator generator = level.getChunkSource().getGenerator();
@@ -266,18 +262,11 @@
              BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
              int clusterSize = 0;
  
-+            // Rolia start - vanilla-parity.mob-spawn-placement
-+            // Read once per call, not per pack member. The chunk bounds are plain arithmetic on the
-+            // ChunkPos and are only consulted on the Canvas path.
-+            final boolean roliaVanillaPlacement = io.rolia.RoliaConfig.parityMobSpawnPlacement();
-+            final int roliaMinX = chunk.getPos().getMinBlockX();
-+            final int roliaMinZ = chunk.getPos().getMinBlockZ();
-+            final int roliaMaxX = chunk.getPos().getMaxBlockX();
-+            final int roliaMaxZ = chunk.getPos().getMaxBlockZ();
-+            // Rolia end - vanilla-parity.mob-spawn-placement
              for (int groupCount = 0; groupCount < 3; groupCount++) {
-                 int x = start.getX();
-                 int z = start.getZ();
+-                int x = start.getX();
+-                int z = start.getZ();
++                int centerX = start.getX(); // Canvas - rename
++                int centerZ = start.getZ(); // Canvas - rename
                  int ss = 6;
                  MobSpawnSettings.SpawnerData currentSpawnData = null;
                  SpawnGroupData groupData = null;
@@ -288,64 +277,30 @@
                  for (int ll = 0; ll < max; ll++) {
 -                    x += level.random.nextInt(6) - level.random.nextInt(6);
 -                    z += level.random.nextInt(6) - level.random.nextInt(6);
-+                    // Rolia start - vanilla-parity.mob-spawn-placement (default false = Canvas)
-+                    //
-+                    // Canvas replaces vanilla's two lines with a single uniform draw around a FIXED
-+                    // centre and then clamps the result into the current chunk. That is two deviations
-+                    // at once: the shape of the distribution (uniform instead of triangular, so pack
-+                    // members sit further from the centre than vanilla) and the loss of accumulation
-+                    // (vanilla walks from the PREVIOUS member's position, so a pack legitimately
-+                    // drifts out of the origin chunk). The clamp is why packs pile up on chunk borders.
-+                    //
-+                    // Both paths are kept. The one thing that is not literally vanilla even on the
-+                    // parity path is the RandomSource: fastRandom is the region-local generator rather
-+                    // than level.random. Under Folia level.random is itself just
-+                    // ThreadLocalRandomSource.INSTANCE - unseeded and uniform - so the distribution is
-+                    // identical and no seed-derived state is involved either way.
-+                    //
-+                    // The two paths draw DIFFERENT amounts from fastRandom (four nextInt vs one
-+                    // nextLong). That is fine here and only here: fastRandom is an unseeded per-region
-+                    // generator, so nothing downstream is reproducible from it in the first place.
-+                    if (roliaVanillaPlacement) {
-+                        x += fastRandom.nextInt(6) - fastRandom.nextInt(6);
-+                        z += fastRandom.nextInt(6) - fastRandom.nextInt(6);
-+                    } else {
-+                        final long roliaPair = fastRandom.nextLong();
-+                        x = roliaClampToChunk(start.getX() + (int) ((roliaPair & 0xFFFFL) * 11L >> 16) - 5, roliaMinX, roliaMaxX);
-+                        z = roliaClampToChunk(start.getZ() + (int) (((roliaPair >>> 32) & 0xFFFFL) * 11L >> 16) - 5, roliaMinZ, roliaMaxZ);
-+                    }
-+                    // Rolia end - vanilla-parity.mob-spawn-placement
++                    // Canvas start - optimize natural spawning
++                    // this cuts random calls in half, which is def a micro-opt, but
++                    // reduces possible random calls from 48 -> 24, while almost preserving
++                    // the vanilla spread logic. the vanilla logic uses triangular
++                    // distribution, and this one uses uniform distribution, meaning
++                    // mob clusters will spawn slightly more spread out, rather than clustered
++                    // more towards the center. barely noticeable, but worth mentioning
++                    long randomPair = fastRandom.nextLong();
++                    int x = centerX + (int)((randomPair & 0xFFFF) * 11L >> 16) - 5;
++                    int z = centerZ + (int)(((randomPair >>> 32) & 0xFFFF) * 11L >> 16) - 5;
++
++                    // clamp to the chunk bounds, so we can reduce chunk lookup calls since
++                    // all blocks will be within this chunk
++                    x = clamp(x, minX, maxX);
++                    z = clamp(z, minZ, maxZ);
++                    // Canvas end - optimize natural spawning
                      pos.set(x, yStart, z);
                      double xx = x + 0.5;
                      double zz = z + 0.5;
--                    Player nearestPlayer = level.getNearestPlayer(xx, yStart, zz, -1.0, false);
-+                    // Rolia start - use the TRUE nearest player, not the one furthest from its own mob cap
-+                    // Canvas substituted an argmin over "limit - getMobCountNear(player)" for
-+                    // level.getNearestPlayer(). That value drives all three vanilla distance gates,
-+                    // including the 24-block no-spawn radius, so mobs spawned right on top of a nearby
-+                    // player whenever some other player happened to have fewer mobs. Canvas's cheap
-+                    // nearby-player set is kept, but it is now argmin'd by real distance to this position.
-+                    Player nearestPlayer = null;
-+                    if (nearbyPlayers != null) {
-+                        final net.minecraft.server.level.ServerPlayer[] nearbyBacking = nearbyPlayers.getRawDataUnchecked();
-+                        double bestDistSqr = Double.MAX_VALUE;
-+                        for (int pi = 0, plen = nearbyPlayers.size(); pi < plen; pi++) {
-+                            final net.minecraft.server.level.ServerPlayer candidate = nearbyBacking[pi];
-+                            // level.getNearestPlayer(..., false) filters with EntitySelector.NO_SPECTATORS
-+                            if (candidate == null || candidate.isSpectator()) continue;
-+                            final double candidateDistSqr = candidate.distanceToSqr(xx, yStart, zz);
-+                            if (candidateDistSqr < bestDistSqr) {
-+                                bestDistSqr = candidateDistSqr;
-+                                nearestPlayer = candidate;
-+                            }
-+                        }
-+                    }
-+                    // empty or spectator-only nearby set: fall back to vanilla's global scan
-+                    if (nearestPlayer == null) nearestPlayer = level.getNearestPlayer(xx, yStart, zz, -1.0, false);
-+                    // Rolia end - use the TRUE nearest player
+                     Player nearestPlayer = level.getNearestPlayer(xx, yStart, zz, -1.0, false);
                      if (nearestPlayer != null) {
                          double nearestPlayerDistanceSqr = nearestPlayer.distanceToSqr(xx, yStart, zz);
-                         if (level.isLoadedAndInBounds(pos) && isRightDistanceToPlayerAndSpawnPoint(level, chunk, pos, nearestPlayerDistanceSqr)) { // Paper - don't load chunks for mob spawn
+-                        if (level.isLoadedAndInBounds(pos) && isRightDistanceToPlayerAndSpawnPoint(level, chunk, pos, nearestPlayerDistanceSqr)) { // Paper - don't load chunks for mob spawn
++                        if (border.isWithinBounds(pos) && isRightDistanceToPlayerAndSpawnPoint(level, chunk, pos, nearestPlayerDistanceSqr)) { // Paper - don't load chunks for mob spawn // Canvas - reduce chunk lookups
                              if (currentSpawnData == null) {
                                  Optional<MobSpawnSettings.SpawnerData> nextSpawnData = getRandomSpawnMobAt(
 -                                    level, structureManager, generator, mobCategory, level.random, pos
@@ -366,7 +321,7 @@
                              // Paper start - per player mob count backoff
                              if (doSpawning == PreSpawnStatus.ABORT || doSpawning == PreSpawnStatus.CANCELLED) {
                                  level.getChunkSource().chunkMap.updateFailurePlayerMobTypeMap(pos.getX() >> 4, pos.getZ() >> 4, mobCategory);
-@@ -316,7 +_,7 @@
+@@ -313,7 +_,7 @@
                                      return;
                                  }
  
@@ -375,34 +330,22 @@
                                  if (isValidPositionForMob(level, mob, nearestPlayerDistanceSqr)) {
                                      groupData = mob.finalizeSpawn(
                                          level, level.getCurrentDifficultyAt(mob.blockPosition()), EntitySpawnReason.NATURAL, groupData
-@@ -364,8 +_,26 @@
+@@ -361,8 +_,12 @@
              return false;
          }
  
-+        // Rolia start - vanilla-parity.mob-spawn-placement
-+        // Canvas replaces this whole check with `return true;`, justified by "'pos' is a mutable block
-+        // pos clamped to the passed ChunkAccess". That justification is exactly right AS LONG AS the
-+        // clamp is in place - which is why this check is tied to the same switch as the clamp rather
-+        // than having one of its own. With vanilla placement restored, pos can land in a neighbouring
-+        // chunk and this check becomes load-bearing again: without it mobs spawn into chunks that are
-+        // not entity-ticking ready.
-+        if (!io.rolia.RoliaConfig.parityMobSpawnPlacement()) {
-+            return true;
-+        }
-+        // Rolia end - vanilla-parity.mob-spawn-placement
-         ChunkPos chunkPos = ChunkPos.containing(pos);
-         return Objects.equals(chunkPos, chunk.getPos()) || level.canSpawnEntitiesInChunk(chunkPos);
+-        ChunkPos chunkPos = ChunkPos.containing(pos);
+-        return Objects.equals(chunkPos, chunk.getPos()) || level.canSpawnEntitiesInChunk(chunkPos);
++        // Canvas start - optimize natural spawning
++        // 'pos' is a mutable block pos clamped to the passed ChunkAccess, so this check is stupid
++        // ChunkPos chunkPos = ChunkPos.containing(pos);
++        // return Objects.equals(chunkPos, chunk.getPos()) || level.canSpawnEntitiesInChunk(chunkPos);
++        return true;
++        // Canvas end - optimize natural spawning
      }
-+
-+    // Rolia - Canvas's clamp helper, needed again by the Canvas placement path in
-+    // spawnCategoryForPosition. Named roliaClampToChunk rather than clamp so it cannot collide with
-+    // anything upstream adds later.
-+    private static int roliaClampToChunk(final int val, final int min, final int max) {
-+        return val < min ? min : (val > max ? max : val);
-+    }
  
      // Paper start - PreCreatureSpawnEvent
-@@ -383,6 +_,8 @@
+@@ -380,6 +_,8 @@
          final ChunkGenerator generator,
          final MobSpawnSettings.SpawnerData currentSpawnData,
          final BlockPos.MutableBlockPos pos,
@@ -411,7 +354,7 @@
          final double nearestPlayerDistanceSqr
      ) {
          // Paper start - PreCreatureSpawnEvent
-@@ -401,9 +_,9 @@
+@@ -398,9 +_,9 @@
          // Paper end - PreCreatureSpawnEvent
              && (type.canSpawnFarFromPlayer() || !(nearestPlayerDistanceSqr > type.getCategory().getDespawnDistance() * type.getCategory().getDespawnDistance()))
              && type.canSummon()
@@ -423,7 +366,7 @@
              && level.noCollision(type.getSpawnAABB(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5));
          return success ? PreSpawnStatus.SUCCESS : PreSpawnStatus.FAIL; // Paper - PreCreatureSpawnEvent
      }
-@@ -433,47 +_,47 @@
+@@ -430,47 +_,47 @@
      }
  
      private static Optional<MobSpawnSettings.SpawnerData> getRandomSpawnMobAt(
@@ -436,7 +379,7 @@
          final BlockPos pos
      ) {
 -        Holder<Biome> biome = level.getBiome(pos);
-+        Holder<Biome> biome = chunk.level.getBiome(pos); // Canvas - pass chunk
++        Holder<Biome> biome = chunk.getLevel().getBiome(pos); // Canvas - pass chunk
          return mobCategory == MobCategory.WATER_AMBIENT && biome.is(BiomeTags.REDUCED_WATER_AMBIENT_SPAWNS) && random.nextFloat() < 0.98F
              ? Optional.empty()
 -            : mobsAt(level, structureManager, generator, mobCategory, pos, biome).getRandom(random);
@@ -469,7 +412,7 @@
 +        return isInNetherFortressBounds(pos, chunk, mobCategory, structureManager) // Canvas - pass chunk
              ? NetherFortressStructure.FORTRESS_ENEMIES
 -            : generator.getMobsAt(biome != null ? biome : level.getBiome(pos), structureManager, mobCategory, pos);
-+            : generator.getMobsAt(biome != null ? biome : chunk.level.getBiome(pos), structureManager, mobCategory, pos); // Rolia - pos is no longer clamped into `chunk`, so chunk.getAllReferences() would be the wrong chunk's structure references; the 4-arg overload resolves them at pos
++            : generator.getMobsAt(biome != null ? biome : chunk.getLevel().getBiome(pos), structureManager, mobCategory, pos, chunk.getAllReferences()); // Canvas - reduce chunk lookup
      }
  
      public static boolean isInNetherFortressBounds(
@@ -477,11 +420,11 @@
 +        final BlockPos pos, final LevelChunk chunk, final MobCategory category, final StructureManager structureManager // Canvas - pass chunk
      ) {
 -        if (category == MobCategory.MONSTER && level.getBlockState(pos.below()).is(Blocks.NETHER_BRICKS)) {
-+        if (category == MobCategory.MONSTER && chunk.level.getBlockState(pos.below()).is(Blocks.NETHER_BRICKS)) { // Rolia - pos is no longer clamped into `chunk`; LevelChunk#getBlockState masks x/z to &15 and would silently read the wrong column
++        if (category == MobCategory.MONSTER && chunk.getBlockState(pos.below()).is(Blocks.NETHER_BRICKS)) { // Canvas - reduce chunk lookups
              Structure fortress = structureManager.registryAccess().lookupOrThrow(Registries.STRUCTURE).getValue(BuiltinStructures.FORTRESS);
              return fortress != null && structureManager.getStructureAt(pos, fortress).isValid();
          } else {
-@@ -620,18 +_,22 @@
+@@ -617,18 +_,22 @@
          private @Nullable BlockPos lastCheckedPos;
          private @Nullable EntityType<?> lastCheckedType;
          private double lastCharge;

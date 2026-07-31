@@ -8,8 +8,6 @@ import io.rolia.config.Opt.IntOpt;
 import io.rolia.config.Opt.Reload;
 import io.rolia.config.Opt.StringListOpt;
 import io.rolia.config.Opt.StringOpt;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.EntityType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,7 +18,6 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.security.SecureRandom;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -134,18 +131,19 @@ public final class RoliaConfig {
         "The other half of the master key.").markSecret();
 
     public static final StringOpt SECURE_SEED_ON_MISMATCH = new StringOpt(
-        "secure-seed.on-secret-mismatch", "warn", Set.of("warn", "block", "ignore"), Reload.RESTART,
+        "secure-seed.on-secret-mismatch", "block", Set.of("warn", "block", "ignore"), Reload.RESTART,
         "What to do when this file's secret does not match the world on disk - because the file was",
         "lost and regenerated, or because secure-seed.enabled was flipped after the world existed.",
         "",
-        "  warn   log a very loud warning and start anyway (default)",
-        "  block  refuse to start, so nothing is generated until you have decided",
+        "  block  refuse to start, so nothing is generated until you have decided (default)",
+        "  warn   log a very loud warning and start anyway",
         "  ignore say nothing",
         "",
-        "The consequence of continuing is not subtle: newly generated chunks get different caves, ores,",
-        "biomes and structures from the ones already on disk, with a hard seam between them, and there",
-        "is no way to repair it afterwards. 'block' is the safe choice for a production server; 'warn'",
-        "is the default because refusing to boot is a harsh response to a config mistake.");
+        "The consequence of continuing is not subtle: newly generated chunks get different caves, ores",
+        "and structures from the ones already on disk, with a hard seam between them, and there is no",
+        "way to repair it afterwards. That is why the default is 'block' - a server that will not start",
+        "is an inconvenience, a world quietly generating against the wrong secret is unrecoverable. On a",
+        "brand new world nothing is stored yet, so this can only trigger when there is a real mismatch.");
 
     public static final StringOpt SECURE_SEED_SEED_COMMAND = new StringOpt(
         "secure-seed.seed-command", "fingerprint", Set.of("fingerprint", "hidden", "vanilla"), Reload.LIVE,
@@ -157,267 +155,6 @@ public final class RoliaConfig {
         "  vanilla      Vanilla behaviour. Harmless when secure-seed.enabled is false; when it is true",
         "               this still only shows the public level-seed, because the secret is never in",
         "               level.dat to begin with.");
-
-    // ---------------------------------------------------------------------------------------------
-    // optimizations
-    // ---------------------------------------------------------------------------------------------
-    static {
-        Opt.section("optimizations",
-            "PERFORMANCE OPTIONS - all off by default.",
-            "",
-            "Every option here is off so that a stock Rolia server behaves exactly like a stock Canvas",
-            "server. Turn on what you need. Each one states honestly whether it changes behaviour that",
-            "players can observe, because most performance options do, and a server owner deserves to",
-            "know which farm is about to stop working.",
-            "",
-            "Canvas has its own performance options in config/canvas-server.yml and",
-            "config/canvas-worlds.yml, and Paper has its own in config/paper-global.yml and",
-            "config/paper-world-defaults.yml. Rolia does not duplicate or override them - this file only",
-            "contains options Rolia itself adds.",
-            "",
-            "BEFORE TUNING ANYTHING HERE, check config/paper-global.yml chunk-system. Paper ships",
-            "worker-threads: -1 and io-threads: -1, and -1 does NOT mean 'use all cores': io-threads",
-            "resolves to exactly one thread on every machine, and worker-threads resolves to one on any",
-            "box with 7 or fewer cores. That single setting is worth more than everything below it.");
-    }
-
-    public static final BoolOpt DAB_ENABLED = new BoolOpt(
-        "optimizations.dab.enabled", false, Reload.LIVE,
-        "Dynamic Activation of Brain: mobs far from every player think LESS OFTEN. A mob's AI (brain",
-        "sensors and behaviours, or the goal selector) runs once every N ticks instead of every tick,",
-        "where N scales from 1 up to max-tick-interval with distance to the nearest player.",
-        "",
-        "CHANGES BEHAVIOUR. A throttled mob reacts late: it notices targets, changes path, flees and",
-        "re-aims on a coarser clock, so distant mobs drift and converge differently from Vanilla.",
-        "Movement, physics, damage, despawning and mob spawning are untouched, so mob-farm RATES are",
-        "usually unaffected - but any farm that depends on precise distant pathing can change.",
-        "",
-        "This is the single biggest CPU saving available on a server with many mobs.");
-
-    public static final IntOpt DAB_START_DISTANCE = new IntOpt(
-        "optimizations.dab.start-distance", 12, 1, 256, Reload.LIVE,
-        "Mobs closer than this many blocks to a player always run full AI every tick.");
-
-    public static final IntOpt DAB_MAX_TICK_INTERVAL = new IntOpt(
-        "optimizations.dab.max-tick-interval", 20, 1, 200, Reload.LIVE,
-        "The farthest mobs run their AI at most once per this many ticks.");
-
-    public static final StringListOpt DAB_BLACKLIST = new StringListOpt(
-        "optimizations.dab.blacklist", Set.of(), Reload.LIVE,
-        "Entity type ids that are never throttled, e.g. [\"minecraft:villager\", \"minecraft:piglin\"].",
-        "Use this to exempt whatever a farm depends on instead of turning DAB off entirely.");
-
-    public static final BoolOpt LOBOTOMIZE_ENABLED = new BoolOpt(
-        "optimizations.villager-lobotomize.enabled", false, Reload.LIVE,
-        "Skip the brain tick of villagers that are boxed in and cannot path anywhere. Trades and",
-        "RESTOCKING still work, so a pure trading hall behaves normally.",
-        "",
-        "CHANGES BEHAVIOUR. Skipping the brain skips every sensor and behaviour: a lobotomized villager",
-        "does NOT detect hostiles (it will not flee or scream when a zombie arrives), does NOT sleep,",
-        "does NOT gossip, does NOT breed, and does NOT count towards IRON GOLEM spawning. Leave this",
-        "off if you run villager-based iron farms, breeders, or anything relying on panic or gossip.");
-
-    public static final BoolOpt LOBOTOMIZE_WAIT_UNTIL_TRADE_LOCKED = new BoolOpt(
-        "optimizations.villager-lobotomize.wait-until-trade-locked", true, Reload.LIVE,
-        "Keep full AI for villagers that have never been traded with (0 xp), so they can still gain",
-        "their first profession level. Recommended; only consulted when enabled is true.");
-
-    public static final IntOpt LOBOTOMIZE_CHECK_INTERVAL = new IntOpt(
-        "optimizations.villager-lobotomize.check-interval", 100, 1, 1200, Reload.LIVE,
-        "Ticks between re-checks of whether a villager is boxed in; the answer is cached in between,",
-        "because the check costs up to 8 block and collision-shape lookups per villager. Lower means a",
-        "villager freed from its cell wakes up sooner; higher is cheaper. 100 ticks = 5 seconds.");
-
-    public static final BoolOpt FASTER_NETWORK = new BoolOpt(
-        "optimizations.faster-network.enabled", false, Reload.LIVE,
-        "Write long arrays (chunk light data and heightmaps) in one bulk copy instead of a loop.",
-        "",
-        "Behaviour-neutral: the bytes on the wire are byte-for-byte identical, this is purely faster",
-        "serialization on the Netty threads. Safe to turn on.");
-
-    public static final IntOpt AI_LINE_OF_SIGHT_INTERVAL = new IntOpt(
-        "optimizations.ai.line-of-sight-interval", 1, 1, 40, Reload.LIVE,
-        "Reuse a mob's line-of-sight results for this many ticks. 1 is Vanilla.",
-        "",
-        "Vanilla clears the seen/unseen cache every tick, so every mob re-raycasts every target every",
-        "tick. Raycasting is one of the more expensive things a mob does, and it happens per mob per",
-        "target, so this is likely the largest single saving available on a mob-dense server.",
-        "",
-        "CHANGES BEHAVIOUR at any value above 1: a mob notices a target appearing, or losing cover, up",
-        "to this many ticks late. What that looks like in practice is skeletons and blazes firing a",
-        "fraction of a second behind, and mobs re-acquiring targets slightly later after you break line",
-        "of sight. 2 or 3 is a reasonable trade; 20 is a mob that reacts a second late.");
-
-    public static final IntOpt AI_INACTIVE_GOAL_INTERVAL = new IntOpt(
-        "optimizations.ai.inactive-goal-selector-interval", 3, 1, 40, Reload.LIVE,
-        "Run the goal selector of INACTIVE mobs once per this many ticks. 3 is what Paper does today.",
-        "",
-        "Inactive means the mob is outside entity-activation range - Paper already ticks those mobs on",
-        "a reduced schedule, and this only changes the divisor. Active mobs are untouched, and so is",
-        "the target selector's own rate.",
-        "",
-        "Raising it makes far-away mobs pick new goals less often. They still move, still despawn and",
-        "still count towards mob caps; what changes is how promptly one that is out of range starts",
-        "wandering somewhere new. Anything relying on distant mobs re-pathing quickly may be affected.");
-
-    public static final BoolOpt COLLISION_CACHE_SHAPE_COORDS = new BoolOpt(
-        "optimizations.collision.cache-shape-coords", false, Reload.LIVE,
-        "Cache each cube collision shape's coordinate lists instead of rebuilding them on every query.",
-        "",
-        "Behaviour-neutral: a cube shape's size never changes after construction, so the list is the",
-        "same object every time - Vanilla just builds a new one on each call. Collision queries are hot",
-        "on any server with a lot of moving entities.",
-        "",
-        "Costs one small array per distinct cube shape, which is a fixed and very small set.");
-
-    // ---------------------------------------------------------------------------------------------
-    // vanilla-parity
-    // ---------------------------------------------------------------------------------------------
-    static {
-        Opt.section("vanilla-parity",
-            "VANILLA PARITY - all off by default.",
-            "",
-            "Canvas deviates from Vanilla in the four places below. Rolia can put them back. They are",
-            "off by default so that a stock Rolia server matches a stock Canvas server exactly; turn on",
-            "whichever matters to you.",
-            "",
-            "These are not bug fixes in the sense of crashes - they are deliberate Canvas trade-offs",
-            "that cost Vanilla behaviour. Rolia's actual bug fixes have no keys and are always applied.");
-    }
-
-    public static final BoolOpt PARITY_RANDOM_TICK = new BoolOpt(
-        "vanilla-parity.random-tick-selection", false, Reload.RESTART,
-        "Re-read the ticking-block list on every iteration of the random-tick loop, as Paper does.",
-        "",
-        "Canvas hoists the list size out of the loop. Paper re-reads it deliberately, because a random",
-        "tick can add or remove randomly-ticking blocks in the same chunk section. With a stale count,",
-        "blocks that no longer qualify get ticked and newly qualifying ones do not get selected.",
-        "",
-        "What this visibly affects: CROP GROWTH, grass and mycelium spread, and fire spread. If your",
-        "players say farms grow slowly, this is the option.",
-        "",
-        "Costs a list-size read per iteration. That is the price Paper decided was worth paying.");
-
-    public static final BoolOpt PARITY_MOB_SPAWN_PLACEMENT = new BoolOpt(
-        "vanilla-parity.mob-spawn-placement", false, Reload.RESTART,
-        "Restore Vanilla's mob spawn placement.",
-        "",
-        "Canvas replaced Vanilla's cumulative triangular walk (x += nextInt(6) - nextInt(6), repeated)",
-        "with a single uniform draw around a fixed centre, and clamped the result into the chunk. Packs",
-        "therefore cluster more tightly and pile up on chunk borders. This restores the Vanilla walk,",
-        "and with it the isRightDistanceToPlayerAndSpawnPoint check that Canvas had to replace with an",
-        "unconditional 'true' precisely because of the clamping. It also picks the genuinely nearest",
-        "player rather than the one furthest from its own mob cap.",
-        "",
-        "Honest cost: positions may again fall outside the chunk, so block lookups go through the level",
-        "rather than a masked read inside the chunk - exactly as on Paper and Folia.");
-
-    public static final BoolOpt PARITY_ENDER_PEARL = new BoolOpt(
-        "vanilla-parity.ender-pearl-persistence", false, Reload.RESTART,
-        "Force Canvas's restoreVanillaEnderPearlBehavior on, so ender pearls in flight are saved with",
-        "the player who threw them and survive a restart or a world unload, as in Vanilla.",
-        "",
-        "false does NOT force it off - it means Rolia does not touch the setting and Canvas's own value",
-        "in config/canvas-server.yml decides. Set that directly if you want finer control.");
-
-    public static final BoolOpt PARITY_PROJECTILE_DEFLECTION = new BoolOpt(
-        "vanilla-parity.cross-region-projectile-deflection", false, Reload.RESTART,
-        "Force Canvas's crossRegionRedirectableProjectileDeflection on, so deflecting a projectile (a",
-        "wind charge knocking an arrow aside, for instance) works when the projectile crosses a region",
-        "boundary. Region threading silently disables it otherwise.",
-        "",
-        "false means Rolia does not touch the setting; Canvas's own value decides.");
-
-    // ---------------------------------------------------------------------------------------------
-    // canvas-overrides
-    // ---------------------------------------------------------------------------------------------
-    static {
-        Opt.section("canvas-overrides",
-            "CANVAS DEFAULTS THAT ROLIA CAN CHANGE - all off by default.",
-            "",
-            "Builds 40-42 shipped several of Canvas's own options with different defaults, on the",
-            "grounds that Canvas had chosen badly. That was Rolia quietly deciding for the operator, in",
-            "a file the operator was not reading. Build 43 hands every one of them back: Canvas's",
-            "defaults are Canvas's again, and each change Rolia used to make silently is a key here.",
-            "",
-            "HOW THESE WORK: setting one to true changes the DEFAULT of the corresponding option in",
-            "config/canvas-server.yml or config/canvas-worlds.yml. If you have set that option",
-            "explicitly in Canvas's own file, YOUR value still wins - this only moves the default. false",
-            "means Rolia does not touch it at all.",
-            "",
-            "Each one records what Canvas does, what changes, and why anyone would want it.");
-    }
-
-    public static final BoolOpt CANVAS_GUARD_SEVERITY_LOG = new BoolOpt(
-        "canvas-overrides.log-instead-of-throwing-on-guard-violation", false, Reload.RESTART,
-        "Canvas adds extra tick-thread checks to catch plugins touching the wrong region, and ships",
-        "guardSeverity: THROW. Canvas's own documentation for that option says it can crash the server.",
-        "",
-        "true switches the default to LOG: the violation is still reported, loudly and with a stack",
-        "trace, but a badly written plugin degrades your server instead of stopping it. Recommended on",
-        "a production server that runs third-party plugins; leave it off while developing them, where",
-        "an exception at the point of failure is exactly what you want.");
-
-    public static final BoolOpt CANVAS_TILE_ENTITY_SNAPSHOT = new BoolOpt(
-        "canvas-overrides.tile-entity-snapshot-creation", false, Reload.RESTART,
-        "Canvas ships tileEntitySnapshotCreation: false, which makes BlockState.getOwner() hand back a",
-        "live-backed object rather than a snapshot.",
-        "",
-        "CraftBukkit's documented contract is that it returns a SNAPSHOT. With snapshots off, a plugin",
-        "that reads a chest's inventory and modifies its copy is unknowingly modifying the real block",
-        "entity. Turning this on costs an object copy per getOwner() call and restores the contract.",
-        "Worth it if you run inventory-manipulating plugins and see phantom item changes.");
-
-    public static final BoolOpt CANVAS_CACHE_ENTITY_TYPE_CONVERSION = new BoolOpt(
-        "canvas-overrides.cache-entity-type-conversion", false, Reload.RESTART,
-        "Memoize the Minecraft-to-Bukkit EntityType conversion, which is a pure function of its input",
-        "and is called on every entity event. Behaviour-neutral by construction; the only cost is one",
-        "small lookup table.");
-
-    public static final BoolOpt CANVAS_FILTER_MOVE_PACKETS = new BoolOpt(
-        "canvas-overrides.filter-zero-delta-move-packets", false, Reload.RESTART,
-        "Drop movement packets that carry no movement at all - identical position, identical rotation.",
-        "A stationary player sends about 20 of these a second.",
-        "",
-        "Distinct from Canvas's filterVelocityPacket, which Rolia leaves off because it changes",
-        "client-side motion smoothing and players can feel it. This one drops packets that say nothing.");
-
-    public static final BoolOpt CANVAS_ALT_PLAYERLIST_TICK = new BoolOpt(
-        "canvas-overrides.alternative-player-list-tick", false, Reload.RESTART,
-        "Spread the tab-list ping refresh across ticks instead of updating every player in one. Starts",
-        "to matter somewhere above a hundred players; below that it is noise.");
-
-    public static final BoolOpt CANVAS_SUFFOCATION_OPTIMIZATION = new BoolOpt(
-        "canvas-overrides.suffocation-optimization", false, Reload.RESTART,
-        "Check suffocation less often than every tick.",
-        "",
-        "CHANGES BEHAVIOUR, though less than it sounds: Vanilla already rate-limits suffocation damage",
-        "through invulnerableTime, so the damage RATE is unchanged - it is phase-shifted by up to nine",
-        "ticks. In practice a brief crush of under half a second that would have dealt one point of",
-        "damage may deal none. Anything that actually traps a player still kills them on schedule.");
-
-    public static final BoolOpt CANVAS_DISABLE_REGION_BARS = new BoolOpt(
-        "canvas-overrides.disable-region-bars", false, Reload.RESTART,
-        "Canvas ships its regionized TPS-bar and RAM-bar enabled, and they tick once a second per",
-        "region whether or not any player has switched them on. true disables both by default.",
-        "",
-        "This is the one override that turns something OFF rather than on. Leave it false if you use",
-        "the bars; turn it on if you have never heard of them, which is the common case.");
-
-    // ---------------------------------------------------------------------------------------------
-    // advisory
-    // ---------------------------------------------------------------------------------------------
-    static {
-        Opt.section("advisory",
-            "STARTUP ADVICE - log lines only, no behaviour attached.");
-    }
-
-    public static final BoolOpt ADVISORY_CHUNK_THREADS = new BoolOpt(
-        "advisory.warn-chunk-system-threads", true, Reload.RESTART,
-        "Warn once at startup when Paper's chunk-system thread pools are about to run on a single",
-        "thread. Paper ships worker-threads: -1 and io-threads: -1 in config/paper-global.yml, and -1",
-        "resolves to one I/O thread on EVERY machine and one worker thread on anything with 7 or fewer",
-        "cores. Almost nobody discovers this, which is why the warning exists. Purely a log line.");
 
     // =============================================================================================
     // Typed accessors used by the rest of the server.
@@ -431,33 +168,11 @@ public final class RoliaConfig {
     public static String onSecretMismatch() { load(); return SECURE_SEED_ON_MISMATCH.get0(); }
     public static String seedCommandMode() { load(); return SECURE_SEED_SEED_COMMAND.get0(); }
 
-    public static boolean dabEnabled() { load(); return DAB_ENABLED.get0(); }
-    public static int dabStartDistance() { load(); return DAB_START_DISTANCE.get0(); }
-    public static int dabMaxTickInterval() { load(); return DAB_MAX_TICK_INTERVAL.get0(); }
-    public static boolean dabHasBlacklist() { load(); return !DAB_BLACKLIST.get0().isEmpty(); }
-    public static boolean lobotomizeEnabled() { load(); return LOBOTOMIZE_ENABLED.get0(); }
-    public static boolean lobotomizeWaitUntilTradeLocked() { load(); return LOBOTOMIZE_WAIT_UNTIL_TRADE_LOCKED.get0(); }
-    public static int lobotomizeCheckInterval() { load(); return LOBOTOMIZE_CHECK_INTERVAL.get0(); }
-    public static boolean fasterNetwork() { load(); return FASTER_NETWORK.get0(); }
-    public static int lineOfSightInterval() { load(); return AI_LINE_OF_SIGHT_INTERVAL.get0(); }
-    public static int inactiveGoalSelectorInterval() { load(); return AI_INACTIVE_GOAL_INTERVAL.get0(); }
-    public static boolean cacheShapeCoords() { load(); return COLLISION_CACHE_SHAPE_COORDS.get0(); }
 
-    public static boolean parityRandomTick() { load(); return PARITY_RANDOM_TICK.get0(); }
-    public static boolean parityMobSpawnPlacement() { load(); return PARITY_MOB_SPAWN_PLACEMENT.get0(); }
-    public static boolean parityEnderPearl() { load(); return PARITY_ENDER_PEARL.get0(); }
-    public static boolean parityProjectileDeflection() { load(); return PARITY_PROJECTILE_DEFLECTION.get0(); }
 
     // Rolia - these seven feed the DEFAULT of a Canvas option. They are read while Canvas's config
     // class is initialising, which is early but strictly after rolia.yml can be loaded (the loader
     // only touches the filesystem and SnakeYAML). Canvas's own file still overrides them.
-    public static boolean canvasGuardSeverityLog() { load(); return CANVAS_GUARD_SEVERITY_LOG.get0(); }
-    public static boolean canvasTileEntitySnapshot() { load(); return CANVAS_TILE_ENTITY_SNAPSHOT.get0(); }
-    public static boolean canvasCacheEntityTypeConversion() { load(); return CANVAS_CACHE_ENTITY_TYPE_CONVERSION.get0(); }
-    public static boolean canvasFilterMovePackets() { load(); return CANVAS_FILTER_MOVE_PACKETS.get0(); }
-    public static boolean canvasAltPlayerListTick() { load(); return CANVAS_ALT_PLAYERLIST_TICK.get0(); }
-    public static boolean canvasSuffocationOptimization() { load(); return CANVAS_SUFFOCATION_OPTIMIZATION.get0(); }
-    public static boolean canvasDisableRegionBars() { load(); return CANVAS_DISABLE_REGION_BARS.get0(); }
 
     /**
      * Rolia - the 1024-bit secret feature seed, as 16 longs.
@@ -471,64 +186,6 @@ public final class RoliaConfig {
     }
 
     private static volatile long[] featureSeedParsed;
-
-    // ---------------------------------------------------------------------------------------------
-    // DAB blacklist resolution
-    // ---------------------------------------------------------------------------------------------
-
-    // Rolia - the blacklist is CONFIGURED as entity-type ids but TESTED per mob per tick, so it is
-    // resolved once into the EntityType objects themselves and then tested with a plain set lookup
-    // (zero allocation). Resolution must be LAZY: this config is loaded very early, long before
-    // BuiltInRegistries is populated and frozen, so resolving during load would silently produce an
-    // empty set. volatile: written once by whichever region thread resolves it first.
-    private static volatile Set<EntityType<?>> dabBlacklistTypes;
-
-    /** Rolia - is this entity type excluded from DAB throttling? Allocation-free. */
-    public static boolean dabBlacklisted(final EntityType<?> type) {
-        load();
-        Set<EntityType<?>> types = dabBlacklistTypes;
-        if (types == null) {
-            types = resolveDabBlacklist();
-        }
-        return types.contains(type);
-    }
-
-    private static synchronized Set<EntityType<?>> resolveDabBlacklist() {
-        Set<EntityType<?>> types = dabBlacklistTypes;
-        if (types != null) {
-            return types; // another thread already resolved it
-        }
-        final Set<EntityType<?>> resolved = new HashSet<>();
-        for (final String id : DAB_BLACKLIST.get0()) {
-            if (id.isEmpty()) {
-                continue;
-            }
-            EntityType<?> match = null;
-            try {
-                // Identifier.parse supplies the default namespace, so both "minecraft:villager" and
-                // "villager" resolve.
-                final Identifier key = Identifier.parse(id);
-                final EntityType<?> candidate = BuiltInRegistries.ENTITY_TYPE.getValue(key);
-                // ENTITY_TYPE is a DEFAULTED registry: an unknown id silently returns the default type
-                // (minecraft:pig) rather than null, so verify the round-trip instead of trusting the
-                // lookup - otherwise a single typo would quietly exempt every pig on the server.
-                final var resolvedKey = candidate == null ? null : BuiltInRegistries.ENTITY_TYPE.getKey(candidate);
-                if (key.equals(resolvedKey)) {
-                    match = candidate;
-                }
-            } catch (final Exception ignored) {
-                // malformed id - reported below
-            }
-            if (match == null) {
-                LOGGER.warn("unknown entity type '{}' in {} -> optimizations.dab.blacklist; ignoring it.", id, FILE_NAME);
-            } else {
-                resolved.add(match);
-            }
-        }
-        types = Set.copyOf(resolved);
-        dabBlacklistTypes = types;
-        return types;
-    }
 
     // ---------------------------------------------------------------------------------------------
     // Loading
@@ -795,7 +452,6 @@ public final class RoliaConfig {
         }
         // The blacklist is resolved into EntityType objects and cached; drop the cache so the next mob
         // tick rebuilds it from whatever was just loaded.
-        dabBlacklistTypes = null;
         return new ReloadResult(applied, needsRestart, null);
     }
 
@@ -858,19 +514,17 @@ public final class RoliaConfig {
      */
     private static boolean writeConfig(final File file) {
         final String yaml = ConfigWriter.render(HEADER);
-        // Write atomically via a temp file, and never replace an existing config without first copying
-        // it aside. A half-written or clobbered rolia.yml means a lost secret.
+        // Rolia - build 46: no automatic backups. Earlier builds copied the existing file aside as
+        // rolia.yml.bak.<timestamp> before rewriting it. That scattered copies of the 1024-bit secret
+        // around the server directory - each one owner-readable, each one a thing to leak in a support
+        // archive or a world download, and none of them ever cleaned up. Backing up a secret without
+        // being asked is not a favour. The operator is told, loudly and once, that this file is the
+        // only copy and that it is theirs to keep safe.
+        //
+        // The atomic temp-file write below stays: that is not a backup, it is what stops a power cut
+        // in the middle of a write from leaving a truncated config and an unrecoverable world.
         try {
             final java.nio.file.Path target = file.toPath();
-            if (java.nio.file.Files.exists(target)) {
-                final java.nio.file.Path backup = target.resolveSibling(FILE_NAME + ".bak." + System.currentTimeMillis());
-                try {
-                    java.nio.file.Files.copy(target, backup, java.nio.file.StandardCopyOption.COPY_ATTRIBUTES);
-                    LOGGER.warn("previous {} backed up to {}", FILE_NAME, backup.getFileName());
-                } catch (final Exception e) {
-                    LOGGER.warn("could not back up the existing {} before rewriting it", FILE_NAME, e);
-                }
-            }
             final java.nio.file.Path tmp = target.resolveSibling(FILE_NAME + ".tmp");
             java.nio.file.Files.deleteIfExists(tmp);
             createPrivate(tmp.toFile()); // owner-only before the secret is written into it
@@ -1039,140 +693,6 @@ public final class RoliaConfig {
             }
         } catch (final Exception ignored) {
             // best-effort diagnostic only
-        }
-    }
-
-    // ---------------------------------------------------------------------------------------------
-    // Chunk-system thread pool advisory
-    //
-    // Paper's config/paper-global.yml ships chunk-system.worker-threads: -1 and io-threads: -1, and -1
-    // means "auto". Both autos are traps:
-    //
-    //   io-threads     Moonrise resolves it as `Math.max(1, configIoThreads)` (see
-    //                  MoonriseCommon#adjustWorkerThreads). -1 therefore resolves to exactly ONE I/O
-    //                  thread on every machine, no matter how many cores it has. All region file reads
-    //                  and writes for every world funnel through that single thread.
-    //
-    //   worker-threads Moonrise's auto ladder is roughly `d = cores / 2; d = d <= 4 ? (d <= 3 ? 1 : 2)
-    //                  : d / 2`, so anything with 7 or fewer cores gets exactly ONE chunk-generation
-    //                  worker, and 8-9 cores get two.
-    //
-    // Almost nobody discovers this, so say it out loud, once, at startup.
-    // ---------------------------------------------------------------------------------------------
-    private static final java.util.concurrent.atomic.AtomicBoolean THREAD_ADVISORY_DONE =
-        new java.util.concurrent.atomic.AtomicBoolean();
-
-    /** Rolia - recommended chunk-system worker threads, leaving room for Folia's region threads. */
-    private static int recommendedWorkerThreads(final int cores) {
-        if (cores <= 2) return 1;
-        if (cores <= 4) return 2;
-        if (cores <= 8) return 3;
-        if (cores <= 12) return 4;
-        if (cores <= 16) return 6;
-        if (cores <= 24) return 7;
-        return 8;
-    }
-
-    /** Rolia - recommended chunk-system I/O threads. Disk-bound, so this saturates early. */
-    private static int recommendedIoThreads(final int cores) {
-        if (cores <= 12) return 2;
-        if (cores <= 24) return 3;
-        return 4;
-    }
-
-    /**
-     * Rolia - read the CONFIGURED chunk-system thread counts out of Paper's global config.
-     *
-     * <p>Done reflectively on purpose. {@code io.papermc.paper.configuration.GlobalConfiguration} is
-     * Paper-internal and its field names are not part of any API contract, so binding to them at
-     * compile time would let an upstream rename break the whole build for the sake of a log line.
-     * Returns null when the values cannot be reached, and the caller advises unconditionally.</p>
-     */
-    private static int[] readConfiguredChunkSystemThreads() {
-        try {
-            final Class<?> cfgClass = Class.forName("io.papermc.paper.configuration.GlobalConfiguration");
-            final Object cfg = cfgClass.getMethod("get").invoke(null);
-            if (cfg == null) {
-                return null;
-            }
-            final Object chunkSystem = cfgClass.getField("chunkSystem").get(cfg);
-            if (chunkSystem == null) {
-                return null;
-            }
-            final Class<?> csClass = chunkSystem.getClass();
-            return new int[] {
-                csClass.getField("workerThreads").getInt(chunkSystem),
-                csClass.getField("ioThreads").getInt(chunkSystem)
-            };
-        } catch (final Throwable ignored) {
-            return null;
-        }
-    }
-
-    /**
-     * Rolia - warn once, loudly, when the chunk system is about to run on one worker and/or one I/O
-     * thread on a machine that clearly has cores to spare. Safe to call from anywhere; the first caller
-     * wins and every later call is a single volatile read.
-     */
-    public static void warnIfChunkSystemThreadsUnderconfigured() {
-        if (!THREAD_ADVISORY_DONE.compareAndSet(false, true)) {
-            return;
-        }
-        try {
-            if (!ADVISORY_CHUNK_THREADS.get0()) {
-                return;
-            }
-            final int cores = Runtime.getRuntime().availableProcessors();
-            if (cores < 4) {
-                return; // nothing useful to recommend on a 1-3 core box
-            }
-
-            final int recWorker = recommendedWorkerThreads(cores);
-            final int recIo = recommendedIoThreads(cores);
-
-            final int[] configured = readConfiguredChunkSystemThreads();
-            final String resolvedNote;
-            if (configured == null) {
-                resolvedNote = null;
-            } else {
-                final int cfgWorker = configured[0];
-                final int cfgIo = configured[1];
-                // Moonrise's own resolution, mirrored here.
-                final int resolvedIo = Math.max(1, cfgIo);
-                int resolvedWorker = cfgWorker;
-                if (resolvedWorker <= 0) {
-                    int d = cores / 2;
-                    d = d <= 4 ? (d <= 3 ? 1 : 2) : d / 2;
-                    resolvedWorker = d;
-                }
-                if (resolvedWorker != 1 && resolvedIo != 1) {
-                    return; // already configured sensibly, stay quiet
-                }
-                resolvedNote = "currently worker-threads=" + (cfgWorker <= 0 ? "-1 (auto -> " + resolvedWorker + ")" : String.valueOf(resolvedWorker))
-                    + ", io-threads=" + (cfgIo <= 0 ? "-1 (auto -> " + resolvedIo + ")" : String.valueOf(resolvedIo));
-            }
-
-            LOGGER.warn("############################################################");
-            LOGGER.warn("CHUNK SYSTEM THREADS - this machine reports {} available processors.", cores);
-            if (resolvedNote != null) {
-                LOGGER.warn("{}.", resolvedNote);
-                LOGGER.warn("At least one of those pools is running on a SINGLE thread.");
-            } else {
-                LOGGER.warn("Could not read the configured values, so check them by hand.");
-            }
-            LOGGER.warn("Paper ships both of these as -1, and -1 does NOT mean 'use all cores':");
-            LOGGER.warn("  io-threads     -1 resolves to max(1, -1) = 1 thread on EVERY machine.");
-            LOGGER.warn("  worker-threads -1 resolves to 1 thread on any box with 7 or fewer cores.");
-            LOGGER.warn("One I/O thread means every region-file read and write for every world queues");
-            LOGGER.warn("behind one thread, which shows up as chunk-load stalls, not as MSPT.");
-            LOGGER.warn("Set these in config/paper-global.yml and restart:");
-            LOGGER.warn("    chunk-system:");
-            LOGGER.warn("      worker-threads: {}", recWorker);
-            LOGGER.warn("      io-threads: {}", recIo);
-            LOGGER.warn("(sized for {} cores, deliberately leaving cores free for Folia's region threads)", cores);
-            LOGGER.warn("############################################################");
-        } catch (final Throwable t) {
-            LOGGER.warn("could not run the chunk-system thread advisory", t);
         }
     }
 

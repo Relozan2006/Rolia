@@ -1,23 +1,15 @@
 package io.canvasmc.canvas.configuration.validation;
 
 import io.canvasmc.canvas.configuration.Part;
+import org.jetbrains.annotations.Nullable;
 
-/**
- * Rolia - build 45: the bounds were stored as {@code float} and the value under test was compared
- * as {@code float}. A float carries 24 bits of mantissa, so every bound above about 16.7 million
- * was being compared on a rounded number - and a bound of {@code Long.MAX_VALUE} could not be
- * expressed at all, which matters because tick and memory limits are exactly the settings people
- * write large numbers into. Widened to {@code double}: 53 bits of mantissa covers every long a
- * config can hold up to 2^53, and every existing call site passes a float literal, which widens
- * silently.
- */
-public record NumberComparison(Type type, double... n) implements Part.Validation<Number> {
+public record NumberComparison(Type type, float... n) implements Part.Validation<Number> {
 
     @Override
-    public void validate(final Number number) {
+    public void validate(final @Nullable Number number) {
         if (number == null) throw new IllegalArgumentException("Value must not be null");
 
-        final double val = number.doubleValue();
+        final float val = number.floatValue();
 
         switch (type) {
             case GREATER_THAN -> {

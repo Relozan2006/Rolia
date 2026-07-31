@@ -1,15 +1,6 @@
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -623,6 +_,8 @@
-             generator = new org.bukkit.craftbukkit.generator.CustomChunkGenerator(this, generator, gen);
-         }
-         // CraftBukkit end
-+        io.rolia.secureseed.Globals.setupGlobals(this);
-+        io.rolia.RoliaConfig.warnIfChunkSystemThreadsUnderconfigured(); // Rolia - one-shot startup advisory: Paper's chunk-system.worker-threads/io-threads default of -1 silently resolves to 1 thread
-         boolean syncWrites = server.forceSynchronousWrites();
-         DataFixer fixerUpper = server.getFixerUpper();
-         // Paper - rewrite chunk system
-@@ -697,6 +_,13 @@
+@@ -707,6 +_,13 @@
          // Paper end - rewrite chunk system
          this.getCraftServer().addWorld(this.getWorld()); // CraftBukkit
          this.updateTickData(); // Folia - region threading - make sure it is initialised before ticked
@@ -23,7 +14,7 @@
      }
  
      // Folia start - region threading
-@@ -1038,71 +_,97 @@
+@@ -1039,71 +_,84 @@
      // Paper start - optimise random ticking
      private final io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource simpleRandom = io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource.INSTANCE; // Folia - region threading
  
@@ -42,12 +33,12 @@
          final int offsetX = cpos.x() << 4;
          final int offsetZ = cpos.z() << 4;
  
-+        final net.minecraft.util.RandomSource random = worldData.simpleUnsafeLocalRandom;
++        final net.minecraft.util.RandomSource random = worldData.getCanvasWorldData().simpleUnsafeLocalRandom;
 +
          for (int sectionIndex = 0, sectionsLen = sections.length; sectionIndex < sectionsLen; sectionIndex++) {
 -            final int offsetY = (sectionIndex + minSection) << 4;
              final LevelChunkSection section = sections[sectionIndex];
--            final net.minecraft.world.level.chunk.PalettedContainer<net.minecraft.world.level.block.state.BlockState> states = section.states;
+-            final net.minecraft.world.level.chunk.PalettedContainer<net.minecraft.world.level.block.state.BlockState> states = section.getStates();
              if (!section.isRandomlyTickingBlocks()) {
                  continue;
              }
@@ -61,8 +52,10 @@
 -                if (index >= tickingBlocks) {
 -                    // most of the time we fall here
 -                    continue;
-+            final var states = section.states;
++            final var states = section.getStates();
 +            final var tickList = ((ca.spottedleaf.moonrise.patches.block_counting.BlockCountingChunkSection)section).moonrise$getTickingBlockList();
++            final int tickingBlocks = tickList.size();
++            if (tickingBlocks == 0) continue;
 +
 +            final int offsetY = (sectionIndex + minSection) << 4;
 +
@@ -70,22 +63,7 @@
 +            long rndCache = random.nextLong();
 +            int bitsLeft = 64;
 +
-+            // Rolia start - vanilla-parity.random-tick-selection (default false = Canvas behaviour)
-+            // Canvas hoists the ticking-block count out of the loop. state.randomTick() below can add
-+            // or remove randomly-ticking blocks in THIS section while the loop is still running, so a
-+            // stale count lets tickList.getRaw(index) return a slot at or past the live size: a block
-+            // that is no longer eligible gets random-ticked, and a newly eligible one can never be
-+            // picked. That shifts CROP GROWTH, grass/mycelium spread and fire spread off Vanilla.
-+            // Paper re-reads it every iteration for exactly this reason.
-+            //
-+            // The flag is read ONCE per section rather than per iteration, and the RNG draw pattern is
-+            // identical either way (rndCache is filled before the loop regardless), so switching this
-+            // on cannot shift any other random stream in the world - only which block gets picked.
-+            final boolean roliaFreshTickCount = io.rolia.RoliaConfig.parityRandomTick();
-+            int tickingBlocks = tickList.size();
-+            // Rolia end - vanilla-parity.random-tick-selection
 +            for (int i = 0; i < tickSpeed; i++) {
-+                if (roliaFreshTickCount) { tickingBlocks = tickList.size(); } // Rolia - vanilla-parity.random-tick-selection
 +                if (bitsLeft < 12) { // need 12 bits for 0-4095
 +                    rndCache = random.nextLong();
 +                    bitsLeft = 64;
@@ -133,7 +111,7 @@
          if (!this.paperConfig().environment.disableIceAndSnow) { // Paper - Option to disable ice and snow
          for (int i = 0; i < tickSpeed; i++) {
 -            if (simpleRandom.nextInt(48) == 0) { // Paper - optimise random ticking
-+            if (worldData.simpleUnsafeLocalRandom.nextInt(48) == 0) { // Paper - optimise random ticking // Canvas - optimize random tick
++            if (worldData.getCanvasWorldData().simpleUnsafeLocalRandom.nextInt(48) == 0) { // Paper - optimise random ticking // Canvas - optimize random tick
                  this.tickPrecipitation(this.getBlockRandomPos(minX, 0, minZ, 15));
              }
          }
@@ -145,7 +123,7 @@
          }
      }
  
-@@ -1111,7 +_,7 @@
+@@ -1112,7 +_,7 @@
          boolean raining = this.isRaining();
          int minX = chunkPos.getMinBlockX();
          int minZ = chunkPos.getMinBlockZ();
@@ -154,40 +132,35 @@
              BlockPos pos = this.findLightningTargetAround(this.getBlockRandomPos(minX, 0, minZ, 15));
              if (this.isRainingAt(pos)) {
                  DifficultyInstance difficulty = this.getCurrentDifficultyAt(pos);
-@@ -1142,6 +_,13 @@
+@@ -1143,6 +_,17 @@
      public void tickPrecipitation(final BlockPos pos) {
          BlockPos topPos = this.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, pos);
          BlockPos belowPos = topPos.below();
-+        // Rolia start - Canvas's precipitation fast-out moved down to the handlePrecipitation tail
-+        // Canvas returned here unless the block below the heightmap top was water / a cauldron / a liquid.
-+        // On normal terrain that block is grass, stone or dirt, so this ALWAYS returned early: ice never
-+        // formed and snow layers never formed or deepened anywhere, making the maxSnowAccumulationHeight
-+        // gamerule inert server-wide. The block state read is also no longer hoisted here, because the ice
-+        // handleBlockFormEvent below can replace belowPos - vanilla re-reads it at the point of use.
-+        // Rolia end - precipitation fast-out moved
++        // Canvas start - optimize precipitation
++        BlockState heighestBlockState = this.getBlockState(belowPos);
++        if (
++            !(
++                (heighestBlockState.tagFlag & io.canvasmc.canvas.world.block.BlockTags.WATER) != 0 ||
++                (heighestBlockState.tagFlag & io.canvasmc.canvas.world.block.BlockTags.INTERACTS_WITH_PRECIPITATION) != 0
++            )
++        ) {
++            return;
++        }
++        // Canvas end - optimize precipitation
          Biome biome = this.getBiome(topPos).value();
          if (biome.shouldFreeze(this, belowPos)) {
              org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockFormEvent(this, belowPos, Blocks.ICE.defaultBlockState(), Block.UPDATE_ALL, null); // CraftBukkit
-@@ -1165,8 +_,18 @@
+@@ -1166,8 +_,7 @@
  
              Biome.Precipitation precipitation = biome.getPrecipitationAt(belowPos, this.getSeaLevel());
              if (precipitation != Biome.Precipitation.NONE) {
-                 BlockState belowState = this.getBlockState(belowPos);
-+                // Rolia start - Canvas's precipitation fast-out, narrowed to guard only this call
-+                // Identical condition to the one Canvas used to gate the whole method, so every block that
-+                // reached handlePrecipitation under Canvas still reaches it; it simply no longer swallows
-+                // the ice and snow logic above. INTERACTS_WITH_PRECIPITATION is cauldrons + liquids, i.e.
-+                // the blocks that actually override Block#handlePrecipitation.
-+                if (
-+                    (belowState.tagFlag & io.canvasmc.canvas.world.block.BlockTags.WATER) != 0 ||
-+                    (belowState.tagFlag & io.canvasmc.canvas.world.block.BlockTags.INTERACTS_WITH_PRECIPITATION) != 0
-+                ) {
-                 belowState.getBlock().handlePrecipitation(belowState, this, belowPos, precipitation);
-+                } // Rolia end - precipitation fast-out
+-                BlockState belowState = this.getBlockState(belowPos);
+-                belowState.getBlock().handlePrecipitation(belowState, this, belowPos, precipitation);
++                heighestBlockState.getBlock().handlePrecipitation(heighestBlockState, this, belowPos, precipitation); // Canvas - optimize precipitation
              }
          }
      }
-@@ -1225,10 +_,11 @@
+@@ -1226,10 +_,11 @@
                  int percentage = this.getGameRules().get(GameRules.PLAYERS_SLEEPING_PERCENTAGE);
                  Component message;
                  if (this.sleepStatus.areEnoughSleeping(percentage)) {
@@ -201,8 +174,8 @@
  
                  for (ServerPlayer player : this.players) {
                      player.sendOverlayMessage(message);
-@@ -1401,14 +_,14 @@
-     public void resetWeatherCycle() {
+@@ -1404,14 +_,14 @@
+         io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot reset weather cycle async"); // Canvas - region threading
          WeatherData weatherData = this.getWeatherData();
          // CraftBukkit start
 -        weatherData.setRaining(false, org.bukkit.event.weather.WeatherChangeEvent.Cause.SLEEP); // Paper - Add cause to Weather/ThunderChangeEvents
@@ -218,7 +191,7 @@
          // CraftBukkit start
          // If we stop due to everyone sleeping we should reset the weather duration to some other random value.
          // Not that everyone ever manages to get the whole server to sleep at the same time....
-@@ -1769,7 +_,7 @@
+@@ -1772,7 +_,7 @@
  
      public void unload(final LevelChunk levelChunk) {
          // Spigot start
@@ -227,9 +200,9 @@
              if (blockEntity instanceof net.minecraft.world.Container) {
                  // Paper start - this area looks like it can load chunks, change the behavior
                  // chests for example can apply physics to the world
-@@ -2647,6 +_,7 @@
+@@ -2648,6 +_,7 @@
  
-         for (TickingBlockEntity ticker : (Iterable<? extends net.minecraft.world.level.block.entity.TickingBlockEntity>)null) { // Folia - region threading
+         if (false) { TickingBlockEntity ticker = null; // Folia - region threading
              BlockPos blockPos = ticker.getPos();
 +            if (ticker instanceof net.minecraft.world.level.chunk.LevelChunk.RebindableTickingBlockEntityWrapper rebindable && rebindable.ticker instanceof io.canvasmc.canvas.world.block.SleepingBlockEntity.SleepingTicker sleepingTicker) blockPos = sleepingTicker.getPosForRegionOperation(); // Canvas - block entity sleeping
              csvOutput.writeRow(blockPos.getX(), blockPos.getY(), blockPos.getZ(), ticker.getType());

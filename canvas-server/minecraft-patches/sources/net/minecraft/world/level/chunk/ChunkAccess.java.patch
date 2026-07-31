@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/level/chunk/ChunkAccess.java
 +++ b/net/minecraft/world/level/chunk/ChunkAccess.java
-@@ -73,10 +_,212 @@
+@@ -73,10 +_,272 @@
      protected final @Nullable BlendingData blendingData;
      public final Map<Heightmap.Types, Heightmap> heightmaps = Maps.newEnumMap(Heightmap.Types.class);
      // Paper - rewrite chunk system
@@ -16,31 +16,10 @@
 +      When the chunk has a lot of block entities, this is much faster
 +      to use than the previous 'Map<BlockPos, BlockEntity> blockEntities'
 +     */
-+    // public final Map<BlockPos, BlockEntity> blockEntities = new Object2ObjectOpenHashMap<>();
++    public final Map<BlockPos, BlockEntity> blockEntities = new CanvasBlockEntityMapView();
 +    private static final BlockEntity[] EMPTY_ARRAY = new BlockEntity[0];
 +    private static final int SECTION_SIZE = 16 * 16;
 +    protected final BlockEntity[][] canvas$blockEntitySections;
-+    // Rolia start - O(1) block-entity count and per-section occupancy
-+    // canvas$getAllBlockEntities() used to walk every bucket twice: once through
-+    // canvas$getBlockEntitiesCount() to size the result array, then a second time to fill it. And
-+    // canvas$removeFromBuckets() rescanned a whole 256-slot bucket after every single removal, just
-+    // to decide whether that bucket had become empty. Both are now O(1) off two incrementally
-+    // maintained counters.
-+    //
-+    // Iteration ORDER is deliberately untouched: every loop below still walks sections from low Y
-+    // to high Y and, within a section, in ((x & 15) | ((z & 15) << 4)) index order. That order is
-+    // observable through CraftChunk#getTileEntities() and ClientboundLevelChunkPacketData, so this
-+    // stays an array of buckets and does not become a dense list or a map.
-+    //
-+    // Invariants, established in the constructor and maintained by the four mutators below --
-+    // canvas$setBlockEntityInBuckets, canvas$removeFromBuckets and the two canvas$removeAll
-+    // overloads are the only writers of canvas$blockEntitySections anywhere in the tree:
-+    //   canvas$blockEntityCount       == number of non-null slots across every bucket
-+    //   canvas$sectionEntityCounts[i] == number of non-null slots in canvas$blockEntitySections[i],
-+    //                                    and is 0 exactly when that bucket reference is null
-+    private int canvas$blockEntityCount;
-+    private final short[] canvas$sectionEntityCounts; // at most 256 per section, fits in a short
-+    // Rolia end - O(1) block-entity count and per-section occupancy
 +    private final int canvas$minY;
 +    private final int canvas$maxY;
 +    private final int canvas$height;
@@ -67,7 +46,7 @@
 +    private Map<BlockPos, BlockEntity> canvas$cachedBlockEntityMap = null;
 +
 +    @Nullable
-+    // Note: if removing a block entity, don't use this, use remove method. The block entity is expected non-null
++    // note: if removing a block entity, don't use this, use remove method. The block entity is expected non-null
 +    public BlockEntity canvas$setBlockEntityInBuckets(final int globalX, final int y, final int globalZ, final BlockEntity blockEntity) {
 +        if (y < this.canvas$minY || y > this.canvas$maxY) return null;
 +        int sectionIndex = canvas$toSectionIndex(y);
@@ -79,40 +58,18 @@
 +        int i = canvas$sectionIndex(globalX, globalZ);
 +        BlockEntity old = bucket[i];
 +        bucket[i] = blockEntity;
-+        // Rolia start - keep the counters in sync
-+        // Mirrors what actually landed in the slot, including the contract-violating null argument
-+        // the javadoc above warns against, so the counters can never disagree with the array.
-+        if (old == null) {
-+            if (blockEntity != null) {
-+                ++this.canvas$blockEntityCount;
-+                ++this.canvas$sectionEntityCounts[sectionIndex];
-+            }
-+        } else if (blockEntity == null) {
-+            --this.canvas$blockEntityCount;
-+            --this.canvas$sectionEntityCounts[sectionIndex];
-+        }
-+        // Rolia end - keep the counters in sync
 +        this.canvas$cachedBlockEntityMap = null;
 +        return old;
 +    }
 +
 +    public void canvas$removeAll(final int y) {
 +        if (y < this.canvas$minY || y > this.canvas$maxY) return;
-+        // Rolia start - keep the counters in sync
-+        final int sectionIndex = canvas$toSectionIndex(y);
-+        this.canvas$blockEntityCount -= this.canvas$sectionEntityCounts[sectionIndex];
-+        this.canvas$sectionEntityCounts[sectionIndex] = 0;
-+        canvas$blockEntitySections[sectionIndex] = null;
-+        // Rolia end - keep the counters in sync
++        canvas$blockEntitySections[canvas$toSectionIndex(y)] = null;
 +        this.canvas$cachedBlockEntityMap = null;
 +    }
 +
 +    public void canvas$removeAll() {
 +        java.util.Arrays.fill(canvas$blockEntitySections, null);
-+        // Rolia start - keep the counters in sync
-+        java.util.Arrays.fill(this.canvas$sectionEntityCounts, (short) 0);
-+        this.canvas$blockEntityCount = 0;
-+        // Rolia end - keep the counters in sync
 +        this.canvas$cachedBlockEntityMap = null;
 +    }
 +
@@ -127,15 +84,9 @@
 +            bucket[i] = null;
 +            this.canvas$cachedBlockEntityMap = null;
 +
-+            // Rolia start - O(1) emptiness test instead of rescanning the whole 256-slot bucket
-+            // Exactly the old semantics: drop the bucket reference iff no non-null slot is left in
-+            // it after this removal, and return the removed value either way.
-+            if (removed != null) {
-+                --this.canvas$blockEntityCount;
-+                --this.canvas$sectionEntityCounts[sectionIndex];
++            for (final BlockEntity entry : bucket) {
++                if (entry != null) return removed;
 +            }
-+            if (this.canvas$sectionEntityCounts[sectionIndex] > 0) return removed;
-+            // Rolia end - O(1) emptiness test instead of rescanning the whole 256-slot bucket
 +
 +            // doesn't have anymore entries, remove from buckets
 +            canvas$blockEntitySections[sectionIndex] = null;
@@ -157,11 +108,21 @@
 +    }
 +
 +    public int canvas$getBlockEntitiesCount() {
-+        return this.canvas$blockEntityCount; // Rolia - O(1); was a full scan of all 384 buckets
++        int total = 0;
++
++        for (BlockEntity[] bucket : this.canvas$blockEntitySections) {
++            if (bucket == null) continue;
++
++            for (final BlockEntity blockEntity : bucket) {
++                if (blockEntity != null) total++;
++            }
++        }
++
++        return total;
 +    }
 +
 +    public BlockEntity[] canvas$getAllBlockEntities() {
-+        final int total = this.canvas$blockEntityCount; // Rolia - O(1); no separate counting pass
++        int total = canvas$getBlockEntitiesCount();
 +
 +        if (total == 0) return EMPTY_ARRAY;
 +
@@ -174,14 +135,11 @@
 +            for (BlockEntity blockEntity : bucket) {
 +                if (blockEntity != null) {
 +                    result[idx++] = blockEntity;
-+                    if (idx == total) return result; // Rolia - all found, skip the empty tail
 +                }
 +            }
 +        }
 +
-+        // Rolia - defensive: reachable only if a counter ever drifted. Hand back exactly what was
-+        // Rolia - found rather than an array padded with nulls. Dead code while the invariant holds.
-+        return idx == total ? result : java.util.Arrays.copyOf(result, idx);
++        return result;
 +    }
 +
 +    public boolean canvas$containsPos(final int globalX, final int y, final int globalZ) {
@@ -213,11 +171,113 @@
 +        });
 +        return this.canvas$cachedBlockEntityMap = java.util.Collections.unmodifiableMap(blockEntities);
 +    }
++
++    private final class CanvasBlockEntityMapView extends java.util.AbstractMap<BlockPos, BlockEntity> {
++        @Override
++        public @Nullable BlockEntity get(final Object key) {
++            if (!(key instanceof BlockPos pos)) return null;
++            return canvas$getFromBuckets(pos.getX(), pos.getY(), pos.getZ());
++        }
++
++        @Override
++        public boolean containsKey(final Object key) {
++            if (!(key instanceof BlockPos pos)) return false;
++            return canvas$containsPos(pos);
++        }
++
++        @Override
++        public @Nullable BlockEntity put(final BlockPos key, final BlockEntity value) {
++            return canvas$setBlockEntityInBuckets(key.getX(), key.getY(), key.getZ(), value);
++        }
++
++        @Override
++        public @Nullable BlockEntity remove(final Object key) {
++            if (!(key instanceof BlockPos pos)) return null;
++            return canvas$removeFromBuckets(pos.getX(), pos.getY(), pos.getZ());
++        }
++
++        @Override
++        public int size() {
++            return canvas$getBlockEntitiesCount();
++        }
++
++        @Override
++        public boolean isEmpty() {
++            for (final BlockEntity[] bucket : canvas$blockEntitySections) {
++                if (bucket == null) continue;
++                for (final BlockEntity blockEntity : bucket) {
++                    if (blockEntity != null) return false;
++                }
++            }
++            return true;
++        }
++
++        @Override
++        public void clear() {
++            canvas$removeAll();
++        }
++
++        @Override
++        public void forEach(final java.util.function.BiConsumer<? super BlockPos, ? super BlockEntity> action) {
++            canvas$iterateOverBlockEntities((blockEntity) -> action.accept(blockEntity.getBlockPos(), blockEntity));
++        }
++
++        @Override
++        public Set<Entry<BlockPos, BlockEntity>> entrySet() {
++            return new java.util.AbstractSet<>() {
++                @Override
++                public int size() {
++                    return canvas$getBlockEntitiesCount();
++                }
++
++                @Override
++                public void clear() {
++                    canvas$removeAll();
++                }
++
++                @Override
++                public java.util.Iterator<Entry<BlockPos, BlockEntity>> iterator() {
++                    BlockEntity[] snapshot = canvas$getAllBlockEntities();
++                    return new java.util.Iterator<>() {
++                        int index = 0;
++                        BlockEntity lastReturned = null;
++
++                        @Override
++                        public boolean hasNext() {
++                            return this.index < snapshot.length;
++                        }
++
++                        @Override
++                        public Entry<BlockPos, BlockEntity> next() {
++                            if (this.index >= snapshot.length) throw new java.util.NoSuchElementException();
++                            this.lastReturned = snapshot[this.index++];
++                            BlockPos key = this.lastReturned.getBlockPos();
++                            return new java.util.AbstractMap.SimpleEntry<>(key, this.lastReturned) {
++                                @Override
++                                public BlockEntity setValue(final BlockEntity newValue) {
++                                    canvas$setBlockEntityInBuckets(key.getX(), key.getY(), key.getZ(), newValue);
++                                    return super.setValue(newValue);
++                                }
++                            };
++                        }
++
++                        @Override
++                        public void remove() {
++                            if (this.lastReturned == null) throw new IllegalStateException();
++                            BlockPos pos = this.lastReturned.getBlockPos();
++                            canvas$removeFromBuckets(pos.getX(), pos.getY(), pos.getZ());
++                            this.lastReturned = null;
++                        }
++                    };
++                }
++            };
++        }
++    }
 +    // Canvas end - optimize block entity fetching
      protected final LevelHeightAccessor levelHeightAccessor;
      protected final LevelChunkSection[] sections;
      // CraftBukkit start - SPIGOT-6814: move to ChunkAccess to account for 1.17 to 1.18 chunk upgrading.
-@@ -172,6 +_,13 @@
+@@ -172,6 +_,12 @@
          this.minSection = ca.spottedleaf.moonrise.common.util.WorldUtil.getMinSection(levelHeightAccessor);
          this.maxSection = ca.spottedleaf.moonrise.common.util.WorldUtil.getMaxSection(levelHeightAccessor);
          // Paper end - get block chunk optimisation
@@ -226,7 +286,6 @@
 +        this.canvas$maxY = this.getMaxY();
 +        this.canvas$height = canvas$maxY - canvas$minY + 1;
 +        this.canvas$blockEntitySections = new BlockEntity[this.canvas$height][];
-+        this.canvas$sectionEntityCounts = new short[this.canvas$height]; // Rolia - per-section occupancy counters
 +        // Canvas end - optimize block entity fetching
      }
  
@@ -256,7 +315,7 @@
  
      public Map<Structure, StructureStart> getAllStarts() {
 -        return Collections.unmodifiableMap(this.structureStarts);
-+        return java.util.Collections.unmodifiableMap(this.structureStarts); // Canvas - optimized collection // Rolia - build 45: handing out the LIVE map let any caller edit a chunk's structure state with no error, and made setAllStarts(x.getAllStarts()) a clear() followed by putAll of the emptied map
++        return this.structureStarts; // Canvas - optimized collection
      }
  
      public void setAllStarts(final Map<Structure, StructureStart> starts) {
@@ -265,7 +324,7 @@
      @Override
      public Map<Structure, LongSet> getAllReferences() {
 -        return Collections.unmodifiableMap(this.structuresRefences);
-+        return java.util.Collections.unmodifiableMap(this.structuresRefences); // Canvas - optimized collection // Rolia - build 45: same, for structure references
++        return this.structuresRefences; // Canvas - optimized collection
      }
  
      @Override

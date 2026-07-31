@@ -4,42 +4,28 @@
          if (!this.tryLoadLootTable(input)) {
              ContainerHelper.loadAllItems(input, this.items);
          }
-+        rolia$invalidateFullState(this); // Canvas - optimize hoppers // Rolia - invalidate, don't recompute
++        canvas$recomputeFullState(this); // Canvas - optimize hoppers
  
          this.cooldownTime = input.getIntOr("TransferCooldown", -1);
      }
-@@ -117,7 +_,25 @@
+@@ -117,7 +_,11 @@
      @Override
      public ItemStack removeItem(final int slot, final int count) {
          this.unpackLootTable(null);
 -        return ContainerHelper.removeItem(this.getItems(), slot, count);
 +        // Canvas start - optimize hoppers
 +        ItemStack retVal = ContainerHelper.removeItem(this.getItems(), slot, count);
-+        rolia$invalidateFullState(this); // Rolia - invalidate, don't recompute
++        canvas$recomputeFullState(this);
 +        return retVal;
 +        // Canvas end - optimize hoppers
      }
-+    // Rolia start - keep the cached fullState correct on removeItemNoUpdate
-+    // HopperBlockEntity does not override removeItemNoUpdate, so Canvas's cache sweep
-+    // (loadAdditional / removeItem / setItem / setBlockState / clearContent / setChanged /
-+    // setItems) missed it. Anything draining a hopper through this Container method left a
-+    // stale HOPPER_IS_FULL or HOPPER_EMPTY value behind, and the hopper silently stopped
-+    // pushing or pulling until the chunk was reloaded.
-+
-+    @Override
-+    public ItemStack removeItemNoUpdate(final int slot) {
-+        final ItemStack removed = super.removeItemNoUpdate(slot);
-+        rolia$invalidateFullState(this); // Rolia - invalidate, don't recompute
-+        return removed;
-+    }
-+    // Rolia end - keep the cached fullState correct on removeItemNoUpdate
  
      @Override
 @@ -125,13 +_,24 @@
          this.unpackLootTable(null);
          this.getItems().set(slot, itemStack);
          itemStack.limitSize(this.getMaxStackSize(itemStack));
-+        rolia$invalidateFullState(this); // Canvas - optimize hoppers // Rolia - invalidate, don't recompute
++        canvas$recomputeFullState(this); // Canvas - optimize hoppers
      }
  
      @Override
@@ -47,7 +33,7 @@
          super.setBlockState(blockState);
          this.facing = blockState.getValue(HopperBlock.FACING);
 -    }
-+        rolia$invalidateFullState(this); // Canvas - optimize hoppers // Rolia - invalidate, don't recompute
++        canvas$recomputeFullState(this); // Canvas - optimize hoppers
 +        // Canvas - TODO - optimize hoppers - cache is locked and run tick skip system through here?
 +    }
 +    // Canvas start - optimize hoppers
@@ -55,13 +41,13 @@
 +    @Override
 +    public void clearContent() {
 +        super.clearContent();
-+        rolia$invalidateFullState(this); // Rolia - invalidate, don't recompute
++        canvas$recomputeFullState(this);
 +    }
 +    // Canvas end - optimize hoppers
  
      @Override
      protected Component getDefaultName() {
-@@ -156,8 +_,39 @@
+@@ -156,8 +_,17 @@
      private static final int HOPPER_EMPTY = 0;
      private static final int HOPPER_HAS_ITEMS = 1;
      private static final int HOPPER_IS_FULL = 2;
@@ -69,33 +55,11 @@
 -    private static int getFullState(final HopperBlockEntity hopper) {
 +    // Canvas start - optimize hoppers
 +    private int fullState = -1;
-+    // Rolia start - invalidate the cache on mutation instead of eagerly recomputing it
-+    // canvas$recomputeFullState() was called from loadAdditional, removeItem, removeItemNoUpdate,
-+    // setItem, setBlockState, clearContent, setItems AND setChanged(). A single hopper transfer
-+    // trips several of those in one tick, so the item scan ran N times per tick to produce a value
-+    // that is read at most once, by pushItemsTick. That read already has a lazy
-+    // `if (entity.fullState == -1) canvas$recomputeFullState(entity);` guard, and fullState is
-+    // private with no other reader anywhere in the tree, so marking the cache dirty is enough:
-+    // N mutations now cost one recompute instead of N.
-+    //
-+    // Behaviour is unchanged. Eager caching pinned the value to the instant of the last tracked
-+    // mutation; lazy recompute pins it to the instant of the read, which is what vanilla's
-+    // getFullState() did. Between those two instants only untracked mutations can occur, so lazy
-+    // is never staler than eager, and is exactly vanilla whenever a tracked mutation happened.
-+    //
-+    // unpackLootTable(null) is kept: canvas$recomputeFullState() ran it at each of these sites, and
-+    // dropping it would move when a loot-table hopper rolls its contents. It is a couple of field
-+    // reads and a branch in the common case, next to nothing beside the scan we are deferring.
-+    private static void rolia$invalidateFullState(final HopperBlockEntity hopper) {
-+        hopper.unpackLootTable(null);
-+        hopper.fullState = -1;
-+    }
-+    // Rolia end - invalidate the cache on mutation instead of eagerly recomputing it
 +
 +    @Override
 +    public void setChanged() {
 +        super.setChanged();
-+        rolia$invalidateFullState(this); // Rolia - was: canvas$recomputeFullState(this)
++        canvas$recomputeFullState(this);
 +    }
 +
 +    private static void canvas$recomputeFullState(final HopperBlockEntity hopper) {
@@ -137,7 +101,7 @@
              if (fullState != HOPPER_EMPTY) { // Paper - Perf: Optimize Hoppers
                  changed = ejectItems(level, pos, entity);
              }
-@@ -700,7 +_,7 @@
+@@ -702,7 +_,7 @@
          final boolean optimizeEntities
      ) {
          // Paper end - Perf: Optimize Hoppers
@@ -147,11 +111,11 @@
              result = getEntityContainer(level, x, y, z);
          }
 @@ -717,7 +_,7 @@
- 
-         if (state.hasBlockEntity() && level.getBlockEntity(pos) instanceof Container container) {
-             if (container instanceof ChestBlockEntity && block instanceof ChestBlock) {
--                container = ChestBlock.getContainer((ChestBlock)block, state, level, pos, true);
-+                container = ChestBlock.canvas$getContainerForHoppers((ChestBlock)block, state, level, pos, true, container); // Canvas - optimize hoppers
+             return worldlyContainerHolder.getContainer(state, level, pos);
+         } else if (state.hasBlockEntity() && level.getBlockEntity(pos) instanceof Container container) {
+             if (container instanceof ChestBlockEntity && block instanceof ChestBlock chestBlock) {
+-                container = ChestBlock.getContainer(chestBlock, state, level, pos, true);
++                container = ChestBlock.canvas$getContainerForHoppers(chestBlock, state, level, pos, true, container); // Canvas - optimize hoppers
              }
  
              return container;
@@ -159,7 +123,7 @@
      @Override
      protected void setItems(final NonNullList<ItemStack> items) {
          this.items = items;
-+        rolia$invalidateFullState(this); // Canvas - optimize hoppers // Rolia - invalidate, don't recompute
++        canvas$recomputeFullState(this); // Canvas - optimize hoppers
      }
  
      public static void entityInside(final Level level, final BlockPos pos, final BlockState blockState, final Entity entity, final HopperBlockEntity hopper) {

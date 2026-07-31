@@ -1,15 +1,15 @@
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
-@@ -903,7 +_,7 @@
+@@ -908,7 +_,7 @@
          }
  
-         //if (this instanceof ServerPlayer) this.handlePortal(); // CraftBukkit - Moved up to postTick // Folia - region threading - ONLY allow in postTick()
+         // if (this instanceof ServerPlayer) this.handlePortal(); // CraftBukkit - Moved up to postTick // Folia - region threading - ONLY allow in postTick()
 -        if (this.canSpawnSprintParticle()) {
 +        if (!level().canvasConfig().visuals.particles.disableSprintParticles && this.canSpawnSprintParticle()) { // Canvas - particles config
              this.spawnSprintParticle();
          }
  
-@@ -938,7 +_,16 @@
+@@ -943,7 +_,16 @@
  
          this.checkBelowWorld();
          if (!this.level().isClientSide()) {
@@ -26,52 +26,41 @@
          }
  
          this.firstTick = false;
-@@ -1761,6 +_,13 @@
+@@ -1854,6 +_,11 @@
          boolean debugEntityBlockIntersections = this.level instanceof ServerLevel serverLevel
              && serverLevel.getServer().debugSubscribers().hasAnySubscriberFor(DebugSubscriptions.ENTITY_BLOCK_INTERSECTIONS);
          AtomicInteger iterations = new AtomicInteger();
 +        // Canvas start - optimize checkInsideBlocks
-+        // Rolia - was two 1-element capture arrays allocated per call; they are now transient
-+        // Rolia - fields on Entity (declared next to collidedWithFluid). Reset here so every
-+        // Rolia - invocation starts with a cold cache, exactly as the fresh arrays did.
-+        this.rolia$insideBlocksCachedChunk = null;
-+        this.rolia$insideBlocksLastChunkPos = Long.MIN_VALUE;
++        // use element array for lambdas
++        final net.minecraft.world.level.chunk.ChunkAccess[] cachedChunk = new  net.minecraft.world.level.chunk.ChunkAccess[] { null };
++        final long[] lastChunkPos = { Long.MIN_VALUE };
 +        // Canvas end - optimize checkInsideBlocks
          BlockGetter.forEachBlockIntersectedBetween(
              from,
              to,
-@@ -1774,13 +_,39 @@
+@@ -1867,13 +_,25 @@
                      return false;
                  }
  
-+                // Rolia start - restore Folia's cross-region guard (Canvas deleted it)
-+                // Canvas argued "if the chunk is loaded, and we are NEXT TO IT, then it should always be
-+                // inside the current region". That is false: "loaded" is not "owned by my region thread",
-+                // and a region boundary is exactly where a neighbouring chunk is loaded but ticked by
-+                // another thread. The lambda below calls state.entityInside(...) (pressure plates,
-+                // tripwire, cactus, portals, cauldrons, bubble columns), which MUTATES block and
-+                // block-entity state, so without this guard we write into another region's chunk.
-+                // Kept ahead of the chunk lookup so it still short-circuits before the expensive path.
-+                // Rolia end - restore Folia's cross-region guard
-                 // Folia start - region threading
-                 if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(Entity.this.level, blockIntersection, 16)) {
-                     return false;
-                 }
-                 // Folia end - region threading
+-                // Folia start - region threading
+-                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(Entity.this.level, blockIntersection, 16)) {
+-                    return false;
+-                }
+-                // Folia end - region threading
 +                // Canvas start - optimize checkInsideBlocks
-+                // Rolia - per-chunk caching below is kept, it is a correct optimization; only the
-+                // Rolia - deleted thread check was restored above
++                // remove thread check here, as if the chunk is loaded, and we are NEXT TO IT, then it
++                // should always be inside the current region
                  iterations.set(iteration);
 -                BlockState state = this.level().getBlockState(blockIntersection);
 +                final int chunkX = blockIntersection.getX() >> 4;
 +                final int chunkZ = blockIntersection.getZ() >> 4;
 +                final long chunkLongPos = ((long) chunkZ << 32) | (chunkX & 0xFFFFFFFFL);
-+                if (this.rolia$insideBlocksLastChunkPos != chunkLongPos) { // Rolia - field, not a capture array
++                if (lastChunkPos[0] != chunkLongPos) {
 +                    // update cache, this is a different chunk than previous
-+                    this.rolia$insideBlocksLastChunkPos = chunkLongPos; // Rolia - field
-+                    this.rolia$insideBlocksCachedChunk = this.level.getChunkIfLoaded(chunkX, chunkZ); // Rolia - field
++                    lastChunkPos[0] = chunkLongPos;
++                    cachedChunk[0] = this.level.getChunkIfLoaded(chunkX, chunkZ);
 +                }
-+                net.minecraft.world.level.chunk.ChunkAccess chunk = this.rolia$insideBlocksCachedChunk; // Rolia - field
++                net.minecraft.world.level.chunk.ChunkAccess chunk = cachedChunk[0];
 +                if (chunk == null) {
 +                    // return as if it were air
 +                    return true;
@@ -81,7 +70,7 @@
                  if (state.isAir()) {
                      if (debugEntityBlockIntersections) {
                          this.debugBlockIntersection((ServerLevel)this.level(), blockIntersection.immutable(), false, false);
-@@ -1791,7 +_,7 @@
+@@ -1884,7 +_,7 @@
                      VoxelShape intersectShape = state.getEntityInsideCollisionShape(this.level(), blockIntersection, this);
                      boolean insideBlock = intersectShape == Shapes.block()
                          || this.collidedWithShapeMovingFrom(from, to, intersectShape.move(new Vec3(blockIntersection)).toAabbs());
@@ -90,31 +79,15 @@
                      if ((insideBlock || insideFluid) && visitedBlocks.add(blockIntersection.asLong())) {
                          if (insideBlock) {
                              try {
-@@ -1842,6 +_,23 @@
+@@ -1935,6 +_,7 @@
      }
  
-+    // Rolia start - reuse two fields instead of allocating capture arrays in checkInsideBlocks
-+    // Canvas needed a mutable box to carry the per-chunk lookup cache into the
-+    // forEachBlockIntersectedBetween lambda and used a 1-element ChunkAccess[] plus a 1-element
-+    // long[]. That is two allocations on one of the hottest paths in the server: every moving
-+    // entity, every tick, up to three times per movement. Plain instance fields do the same job
-+    // for free.
-+    //
-+    // Folia-safe for exactly the reason Entity.tickCount is a plain non-volatile int: an entity is
-+    // owned by exactly one region thread at a time, and every ownership handoff goes through the
-+    // region scheduler, which already establishes the happens-before edge. No other thread reads
-+    // or writes these. They are reset at the top of checkInsideBlocks so each invocation starts
-+    // with a cold cache, exactly as a freshly allocated array pair did.
-+    private transient net.minecraft.world.level.chunk.ChunkAccess rolia$insideBlocksCachedChunk;
-+    private transient long rolia$insideBlocksLastChunkPos;
-+    // Rolia end - reuse two fields instead of allocating capture arrays in checkInsideBlocks
-+
      public boolean collidedWithFluid(final FluidState fluidState, final BlockPos blockPos, final Vec3 from, final Vec3 to) {
 +        if (fluidState.isEmpty()) return false; // Canvas - optimize checkInsideBlocks
          AABB fluidAABB = fluidState.getAABB(this.level(), blockPos);
          return fluidAABB != null && this.collidedWithShapeMovingFrom(from, to, List.of(fluidAABB));
      }
-@@ -2128,6 +_,7 @@
+@@ -2225,6 +_,7 @@
  
          float yt = Mth.floor(this.getY());
  
@@ -122,7 +95,7 @@
          for (int i = 0; i < 1.0F + this.dimensions.width() * 20.0F; i++) {
              double xo = (this.random.nextDouble() * 2.0 - 1.0) * this.dimensions.width();
              double zo = (this.random.nextDouble() * 2.0 - 1.0) * this.dimensions.width();
-@@ -2142,6 +_,7 @@
+@@ -2239,6 +_,7 @@
              double zo = (this.random.nextDouble() * 2.0 - 1.0) * this.dimensions.width();
              this.level().addParticle(ParticleTypes.SPLASH, this.getX() + xo, yt + 1.0F, this.getZ() + zo, movement.x, movement.y, movement.z);
          }
@@ -130,7 +103,7 @@
  
          this.gameEvent(GameEvent.SPLASH);
      }
-@@ -2322,8 +_,8 @@
+@@ -2419,8 +_,8 @@
      }
  
      public void push(final Entity entity) {
@@ -140,7 +113,7 @@
                  if (this.level.paperConfig().collisions.onlyPlayersCollide && !(entity instanceof ServerPlayer || this instanceof ServerPlayer)) return; // Paper - Collision option for requiring a player participant
                  double xa = entity.getX() - this.getX();
                  double za = entity.getZ() - this.getZ();
-@@ -3840,6 +_,7 @@
+@@ -3905,6 +_,7 @@
      }
  
      protected static void sendBubbleColumnParticles(final Level level, final BlockPos pos) {
@@ -148,30 +121,3 @@
          if (level instanceof ServerLevel serverLevel) {
              RandomSource random = level.getRandom();
  
-@@ -4629,7 +_,7 @@
-     public boolean endPortalLogicAsync(BlockPos portalPos) {
-         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
- 
--        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END ? Level.OVERWORLD : Level.END);
-+        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END ? io.canvasmc.canvas.GlobalConfiguration.fetchRespawnDimensionKey() : Level.END); // Canvas - default respawn dimension config
-         if (destination == null) {
-             // wat
-             return false;
-@@ -4641,7 +_,7 @@
-     public boolean netherPortalLogicAsync(BlockPos portalPos) {
-         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
- 
--        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.NETHER ? Level.OVERWORLD : Level.NETHER);
-+        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.NETHER ? io.canvasmc.canvas.GlobalConfiguration.fetchRespawnDimensionKey() : Level.NETHER); // Canvas - default respawn dimension config
-         if (destination == null) {
-             // wat
-             return false;
-@@ -5256,7 +_,7 @@
- 
-     public boolean canTeleport(final Level from, final Level to) {
-         if (!this.isAlive() || !this.valid) return false; // Paper - Fix item duplication and teleport issues
--        if (from.dimension() == Level.END && to.dimension() == Level.OVERWORLD) {
-+        if (from.dimension() == Level.END && to.dimension() == io.canvasmc.canvas.GlobalConfiguration.fetchRespawnDimensionKey()) { // Canvas - default respawn dimension config
-             for (Entity passenger : this.getPassengers()) {
-                 if (passenger instanceof ServerPlayer player && !player.seenCredits) {
-                     return false;

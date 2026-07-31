@@ -10,27 +10,9 @@ public class CanvasFileMigration {
     private static final Logger LOGGER = LogUtils.getClassLogger();
     private static boolean MSG_SHOWN = false;
 
-    private static void tryPause() {
-        try {
-            LOGGER.warn("If you do not have a backup of these files, interrupt the server now.");
-            LOGGER.warn("Use Ctrl+C, your panel kill function, etc. Pausing for 8 seconds to wait");
-            if (!Boolean.getBoolean("paper.disableMigrationDelay")) {
-                Thread.sleep(8_000L);
-            }
-            LOGGER.info("Continuing with Rolia file migration, please wait");
-        } catch (InterruptedException thrown) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while waiting before startup Rolia file migration", thrown);
-        } finally {
-            MSG_SHOWN = true;
-        }
-    }
-
     // note: this runs 1 time per level, so we can have per-level stuff migrated
-    public static void initMigration(
-        final WorldMigrationContext migrationContext
-    ) {
-        Set<Types> todo = new HashSet<>();
+    public static void initMigration(final WorldMigrationContext migrationContext) {
+        final Set<Types> todo = new HashSet<>();
         // we iterate over all migration types and check which need to be done
         for (final Types migrationType : Types.values()) {
             if (migrationType.migration.hasOldData(migrationContext) && !migrationType.migration.hasNewData(migrationContext)) {
@@ -40,7 +22,7 @@ public class CanvasFileMigration {
         }
 
         if (!todo.isEmpty()) {
-            LOGGER.info("Beginning migration of Rolia filesave features");
+            LOGGER.info("Beginning migration of Canvas filesave features");
             LOGGER.info("{} migration types awaiting conduction: {}", todo.size(), todo.toArray());
 
             if (!MSG_SHOWN) {
@@ -52,7 +34,23 @@ public class CanvasFileMigration {
                 type.migration.conduct(migrationContext);
             }
 
-            LOGGER.info("All Rolia features migrated successfully, continuing with startup");
+            LOGGER.info("All Canvas features migrated successfully, continuing with startup");
+        }
+    }
+
+    private static void tryPause() {
+        try {
+            LOGGER.warn("If you do not have a backup of these files, interrupt the server now.");
+            LOGGER.warn("Use Ctrl+C, your panel kill function, etc. Pausing for 8 seconds to wait");
+            if (!Boolean.getBoolean("paper.disableMigrationDelay")) {
+                Thread.sleep(8_000L);
+            }
+            LOGGER.info("Continuing with Canvas file migration, please wait");
+        } catch (final InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while waiting before startup Canvas file migration", ie);
+        } finally {
+            MSG_SHOWN = true;
         }
     }
 
@@ -61,7 +59,7 @@ public class CanvasFileMigration {
 
         private final Migration migration;
 
-        Types(Migration migration) {
+        Types(final Migration migration) {
             this.migration = migration;
         }
     }

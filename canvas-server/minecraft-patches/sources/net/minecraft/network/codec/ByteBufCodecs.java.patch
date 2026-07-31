@@ -1,6 +1,6 @@
 --- a/net/minecraft/network/codec/ByteBufCodecs.java
 +++ b/net/minecraft/network/codec/ByteBufCodecs.java
-@@ -782,9 +_,35 @@
+@@ -786,9 +_,35 @@
  
              @Override
              public void encode(final ByteBuf output, final JsonElement value) {
@@ -10,7 +10,7 @@
 +                    object.addProperty("preventsChatReports", true);
 +
 +                    String string = GSON.toJson(object);
-+                    Utf8String.write(output, string, maxStringLength); // Rolia - was a hardcoded 32767 while the captured limit sits two lines below; lenientJson is built with 2 MiB for the status response, and a favicon+MOTD status JSON routinely exceeds 32767 chars, which would throw EncoderException on the Netty thread and drop the server off every server list
++                    Utf8String.write(output, string, 32767);
 +                    return;
 +                }
 +                // Canvas end - no chat reports

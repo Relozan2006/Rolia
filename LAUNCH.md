@@ -207,12 +207,4 @@ For heaps well above 12 GB with many cores on Java 25 you can try Generational
 ZGC instead of the whole G1 block:
 
 ```
--XX:+UseZGC -XX:+AlwaysPreTouch -XX:+PerfDisableSharedMem
-```
-
-ZGC keeps pauses sub-millisecond but uses more CPU and more memory overall.
-Measure before switching; G1 with the flags above is the safer default.
-
-Для куч заметно больше 12 ГБ и большого числа ядер на Java 25 можно попробовать
-Generational ZGC вместо всего блока G1. Паузы меньше, но CPU и память расходуются
-сильнее — сначала измерьте.
+-XX:+UseZGC -X

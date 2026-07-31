@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/entity/projectile/Projectile.java
 +++ b/net/minecraft/world/entity/projectile/Projectile.java
-@@ -45,10 +_,51 @@
+@@ -45,10 +_,53 @@
      public boolean hasBeenShot = false;
      private @Nullable Entity lastDeflectedBy;
      protected boolean hitCancelled = false; // CraftBukkit
@@ -24,12 +24,12 @@
 +            return;
 +        }
 +        // if current world data is null, we may be async or on startup thread
-+        io.papermc.paper.threadedregions.RegionizedWorldData currWorldData = this.level().getCurrentWorldData();
-+        if (currWorldData != null) {
-+            long currentTick = currWorldData.regionData.getCurrentTick();
-+            if (currWorldData.canvas$loadedTick != currentTick) {
-+                currWorldData.canvas$loadedTick = currentTick;
-+                currWorldData.canvas$loadedThisTick = 0;
++        final io.canvasmc.canvas.threadedregions.CanvasRegionizedWorldData canvasRegionData = this.level().getCurrentWorldData().getCanvasWorldData();
++        if (canvasRegionData != null) {
++            long currentTick = canvasRegionData.getRegionData().getCurrentTick();
++            if (canvasRegionData.projectilesLoadedTick != currentTick) {
++                canvasRegionData.projectilesLoadedTick = currentTick;
++                canvasRegionData.projectilesLoadedThisTick = 0;
 +            }
 +        }
 +        // Canvas end - region threading
@@ -37,14 +37,16 @@
 +        int newX = Mth.floor(x) >> 4, newZ = Mth.floor(z) >> 4;
 +        if (previousX != newX || previousZ != newZ) {
 +            boolean isLoaded = ((net.minecraft.server.level.ServerChunkCache) this.level().getChunkSource()).getChunkAtIfLoadedImmediately(newX, newZ) != null;
-+            if (!isLoaded && currWorldData != null) {
-+                if (currWorldData.canvas$loadedThisTick > level().canvasConfig().entities.projectiles.maxProjectileChunkLoadsPerTick) { // Canvas - region threading
++            // Canvas start - region threading
++            if (!isLoaded && canvasRegionData != null) {
++                if (canvasRegionData.projectilesLoadedThisTick > level().canvasConfig().entities.projectiles.maxProjectileChunkLoadsPerTick) {
++            // Canvas end - region threading
 +                    if (++this.loadedLifetime > level().canvasConfig().entities.projectiles.maxProjectileChunkLoadsPerProjectileBeforeRemoval) {
 +                        this.discard();
 +                    }
 +                    return;
 +                }
-+                currWorldData.canvas$loadedThisTick++; // Canvas - region threading
++                canvasRegionData.projectilesLoadedThisTick++; // Canvas - region threading
 +            }
 +        }
 +        super.setPos(x, y, z);
@@ -53,7 +55,7 @@
  
      protected void setOwner(final @Nullable EntityReference<Entity> owner) {
          this.owner = owner;
-@@ -118,6 +_,25 @@
+@@ -119,6 +_,25 @@
          this.checkLeftOwner();
          super.tick();
          this.leftOwnerChecked = false;
@@ -65,7 +67,7 @@
 +        ) {
 +            BlockPos blockPos = BlockPos.containing(this.position());
 +            int sectionPosX = net.minecraft.core.SectionPos.blockToSectionCoord(this.position().x());
-+            int sectionPosZ = net.minecraft.core.SectionPos.blockToSectionCoord(this.position().z());
++            int sectionPosZ = net.minecraft.core.SectionPos.blockToSectionCoord(this.position().x());
 +            if ((
 +                --this.canvas$ticketTimer <= 0L
 +                    || sectionPosX != net.minecraft.core.SectionPos.blockToSectionCoord(blockPos.getX())
@@ -79,7 +81,7 @@
      }
  
      protected void checkLeftOwner() {
-@@ -390,7 +_,10 @@
+@@ -391,7 +_,10 @@
              EntityHitResult entityHitResult = (EntityHitResult)hitResult;
              Entity entityHit = entityHitResult.getEntity();
              if (entityHit.is(EntityTypeTags.REDIRECTABLE_PROJECTILE) && entityHit instanceof Projectile projectile) {

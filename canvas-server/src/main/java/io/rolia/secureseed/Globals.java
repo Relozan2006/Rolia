@@ -78,10 +78,9 @@ public class Globals {
                     seedInitialized = true; // Rolia - volatile write; publishes the array contents above
                     // Rolia - the one authoritative startup line, emitted at the point of publication and
                     // derived from real state, so it cannot report "active" for a seed that is not.
-                    LOGGER.info("Rolia: config loaded (secure seed {}; DAB {}).",
+                    LOGGER.info("Rolia: config loaded (secure seed {}).",
                         isActive() ? "ACTIVE fp=" + seedFingerprint()
-                            : (RoliaConfig.secureSeedEnabled() ? "INACTIVE" : "DISABLED (secure-seed.enabled=false)"),
-                        RoliaConfig.dabEnabled() ? "ON" : "off");
+                            : (RoliaConfig.secureSeedEnabled() ? "INACTIVE" : "DISABLED (secure-seed.enabled=false)"));
                     if (!RoliaConfig.secureSeedEnabled()) {
                         LOGGER.warn("Rolia: secure-seed.enabled is FALSE - worldgen is plain Vanilla and everything");
                         LOGGER.warn("Rolia: in this world is computable from the public level-seed alone.");
@@ -289,9 +288,25 @@ public class Globals {
         }
         final String path = noise.identifier().getPath();
         return switch (path) {
+            // terrain shape
             case "continentalness", "continentalness_large",
                  "erosion", "erosion_large",
                  "ridge", "offset", "jagged" -> true;
+            // Rolia - build 46: biome climate joins the public side.
+            //
+            // Since 1.18 the multi-noise biome source reads six parameters: continentalness, erosion,
+            // weirdness (that is `ridge`), depth, temperature and vegetation. The first three are the
+            // very noises the landscape is built from and were already public; depth is computed from
+            // terrain, so it was public by construction. Only temperature and vegetation were secret -
+            // and those two are exactly what decides whether a mountain is snowy or jungle. Moving them
+            // here makes the biome map reproducible from the ordinary level-seed, which is the point:
+            // a seed-finder site now shows the right biomes as well as the right landscape.
+            //
+            // Nothing else moves. Surface rules, decorations, carvers, aquifers, ore, structures, loot
+            // and slime chunks keep their own independent secret domains, so the biome map still cannot
+            // tell you where anything actually is.
+            case "temperature", "temperature_large",
+                 "vegetation", "vegetation_large" -> true;
             default -> false;
         };
     }

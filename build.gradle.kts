@@ -14,30 +14,24 @@ val canvasMavenPublicUrl = "https://maven.canvasmc.io/public/"
 paperweight {
     filterPatches = false
     gitFilePatches = false
-    upstreams.register("folia") {
-        repo = github("CraftCanvasMC", "Folia")
-        ref = providers.gradleProperty("foliaCommit")
+    upstreams.paper {
+        ref = providers.gradleProperty("paperRef")
 
         patchFile {
-            path = "folia-server/build.gradle.kts"
+            path = "paper-server/build.gradle.kts"
             outputFile = file("canvas-server/build.gradle.kts")
             patchFile = file("canvas-server/build.gradle.kts.patch")
         }
         patchFile {
-            path = "folia-api/build.gradle.kts"
+            path = "paper-api/build.gradle.kts"
             outputFile = file("canvas-api/build.gradle.kts")
             patchFile = file("canvas-api/build.gradle.kts.patch")
         }
-        patchRepo("paperApi") {
+        patchDir("paperApi") {
             upstreamPath = "paper-api"
+            excludes = setOf("build.gradle.kts")
             patchesDir = file("canvas-api/paper-patches")
             outputDir = file("paper-api")
-        }
-        patchDir("foliaApi") {
-            upstreamPath = "folia-api"
-            excludes = listOf("build.gradle.kts", "build.gradle.kts.patch", "paper-patches")
-            patchesDir = file("canvas-api/folia-patches")
-            outputDir = file("folia-api")
         }
     }
 }
@@ -79,23 +73,10 @@ subprojects {
             exceptionFormat = TestExceptionFormat.FULL
             events(TestLogEvent.STANDARD_OUT)
         }
-        // Rolia - test failures are a hard gate as of build 43. There is exactly one exception:
-        // org.bukkit.AnnotationTest, an upstream Paper test that lives in the generated paper-api test
-        // sources (which :canvas-api compiles in) and that fails before Rolia touches anything. It
-        // audits @NotNull/@Nullable coverage across the whole API surface, so excluding it does lose
-        // real coverage - that is the price of having a gate at all, and it should be re-enabled the
-        // moment upstream is green. Everything else now fails the build.
-        ignoreFailures = false
-        filter {
-            excludeTestsMatching("org.bukkit.AnnotationTest")
-            isFailOnNoMatchingTests = false
-        }
     }
 
     tasks.withType<AbstractPatchRouletteTask>().configureEach {
-        // Rolia - patch roulette is CanvasMC's own patch-triage service and Rolia is not part of it;
-        // pointing at it would submit our patch state to another project. Left unset.
-        endpoint = providers.gradleProperty("patchRouletteEndpoint").orNull ?: ""
+        endpoint = "https://patch-roulette.canvasmc.io/api"
     }
 
     extensions.configure<PublishingExtension> {
@@ -120,7 +101,7 @@ subprojects {
         extensions.configure<xyz.jpenilla.resourcefactory.paper.PaperPluginYaml> {
             apiVersion.set(providers.gradleProperty("apiVersion"))
             version = "SNAPSHOT-DEV"
-            authors = listOf("Rolia")
+            authors = listOf("CanvasMC")
             foliaSupported = true
         }
 
