@@ -76,7 +76,7 @@ index 10a0be7a4db1a51579d113d279af7a9effe7f438..0e9dcc8bcabcb7c6fbf93a470f8f53b4
              getManifestAttribute(manifest, ATTRIBUTE_BRAND_ID)
                  .map(Key::key)
 -                .orElse(Key.key("papermc", "folia")), // Folia
-+                .orElse(BRAND_CANVAS_ID), // Folia // Canvas - Rebrand
++                .orElse(BRAND_ROLIA_ID), // Folia // Canvas - Rebrand // Rolia - build 45: BRAND_CANVAS_ID now means Canvas again, so name Rolia's own id here
              getManifestAttribute(manifest, ATTRIBUTE_BRAND_NAME)
 -                .orElse("Folia"), // Folia
 +                .orElse(BRAND_CANVAS_NAME), // Folia // Canvas - Rebrand
@@ -99,7 +99,7 @@ index 10a0be7a4db1a51579d113d279af7a9effe7f438..0e9dcc8bcabcb7c6fbf93a470f8f53b4
      @Override
      public boolean isBrandCompatible(final @NotNull Key brandId) {
 -        return brandId.equals(this.brandId);
-+        return brandId.equals(this.brandId) || brandId.equals(BRAND_PAPER_ID) || brandId.equals(BRAND_FOLIA_ID); // Canvas - Rebrand
++        return brandId.equals(this.brandId) || brandId.equals(BRAND_PAPER_ID) || brandId.equals(BRAND_FOLIA_ID) || brandId.equals(BRAND_CANVAS_ID); // Canvas - Rebrand // Rolia - build 45: Rolia IS Canvas-compatible; it already claimed Paper and Folia and omitted the platform it actually forks
      }
  
      @Override

@@ -118,16 +118,18 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
                 // the field shouldn't be final, or not field property! yippeee :)
                 return true;
             })
+            // Rolia - build 45: ask the wrapper what the field was called rather than trying to invert
+            // toKebabCase, which has no inverse. See the note on getProperty below.
             .filter(p -> !partFields.contains(
-                p instanceof KebabCaseProperty kcp ? fromKebabCase(kcp.getName()) : p.getName()
+                p instanceof KebabCaseProperty kcp ? kcp.originalName() : p.getName()
             ))
             .sorted((a, b) -> {
                 // names are still camelCase at this point, KebabCaseProperty
                 // wraps them after sorting, so sort on the original name
                 String aName = a instanceof KebabCaseProperty kcp
-                    ? fromKebabCase(kcp.getName()) : a.getName();
+                    ? kcp.originalName() : a.getName();
                 String bName = b instanceof KebabCaseProperty kcp
-                    ? fromKebabCase(kcp.getName()) : b.getName();
+                    ? kcp.originalName() : b.getName();
                 int ai = declarationOrder.indexOf(aName);
                 int bi = declarationOrder.indexOf(bName);
                 // unknown fields go to the end
@@ -139,10 +141,32 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
             .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
+    /**
+     * Resolves the field behind a kebab-case key from the YAML file.
+     *
+     * <p>Rolia - build 45: this used to be {@code properties.get(fromKebabCase(name))}, which
+     * assumes {@link #toKebabCase(String)} can be inverted. It cannot. Two consecutive capitals
+     * collapse: {@code enableCPUAffinity} is written as {@code enable-cpu-affinity} and read back as
+     * {@code enableCpuAffinity}, which matches no field, so the lookup misses and config load dies
+     * with a YAMLException naming a key the operator can plainly see in their own file.</p>
+     *
+     * <p>No field carries an acronym today, so the defect is dormant rather than active - it arms
+     * itself the first time somebody adds one, which is not a property a config loader should have.
+     * Matching forward instead removes the assumption: the kebab form of each field name is compared
+     * against the requested key, and {@code toKebabCase} being many-to-one no longer matters.</p>
+     */
     @Override
     public Property getProperty(Class<?> type, String name) {
         Map<String, Property> properties = getPropertiesMap(type, BeanAccess.FIELD);
-        Property property = properties.get(fromKebabCase(name));
+        Property property = properties.get(fromKebabCase(name)); // fast path: correct for every name without an acronym
+        if (property == null) {
+            for (final Map.Entry<String, Property> entry : properties.entrySet()) {
+                if (toKebabCase(entry.getKey()).equals(name)) {
+                    property = entry.getValue();
+                    break;
+                }
+            }
+        }
         if (property == null) {
             throw new YAMLException(
                 "Unable to find property '" + name + "' on class: " + type.getName());
@@ -164,6 +188,13 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
         }
 
         private final Property delegate;
+        // Rolia - build 45: keep the name we were handed. Recovering it from the kebab form is not
+        // possible in general, and every caller that tried was one acronym away from being wrong.
+        private final String originalName;
+
+        String originalName() {
+            return this.originalName;
+        }
 
         private static Type resolveGenericType(final Property delegate) {
             if (delegate instanceof GenericProperty) {
@@ -178,6 +209,7 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
         KebabCaseProperty(final @NonNull Property delegate) {
             super(toKebabCase(delegate.getName()), delegate.getType(), resolveGenericType(delegate));
             this.delegate = delegate;
+            this.originalName = delegate.getName();
         }
 
         @Override

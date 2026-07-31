@@ -115,27 +115,30 @@ public class Part {
             return docs(Style.wrap(toBeWrapped));
         }
 
-        public OptionDefinition greaterThan(float val) {
+        // Rolia - build 45: double, not float. See NumberComparison - a float bound above ~16.7
+        // million is compared on a rounded value. Every existing call site passes a float literal,
+        // which widens to double on its own, so nothing had to change but these signatures.
+        public OptionDefinition greaterThan(double val) {
             return validation(new NumberComparison(NumberComparison.Type.GREATER_THAN, val));
         }
 
-        public OptionDefinition greaterThanOrEqualTo(float val) {
+        public OptionDefinition greaterThanOrEqualTo(double val) {
             return validation(new NumberComparison(NumberComparison.Type.GREATER_THAN_OR_EQUAL_TO, val));
         }
 
-        public OptionDefinition lessThan(float val) {
+        public OptionDefinition lessThan(double val) {
             return validation(new NumberComparison(NumberComparison.Type.LESS_THAN, val));
         }
 
-        public OptionDefinition lessThanOrEqualTo(float val) {
+        public OptionDefinition lessThanOrEqualTo(double val) {
             return validation(new NumberComparison(NumberComparison.Type.LESS_THAN_OR_EQUAL_TO, val));
         }
 
-        public OptionDefinition equals(float val) {
+        public OptionDefinition equals(double val) {
             return validation(new NumberComparison(NumberComparison.Type.EQUAL, val));
         }
 
-        public OptionDefinition between(float min, float max) {
+        public OptionDefinition between(double min, double max) {
             return validation(new NumberComparison(NumberComparison.Type.BETWEEN, min, max));
         }
 

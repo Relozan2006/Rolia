@@ -1,11 +1,11 @@
 package io.canvasmc.canvas.world.waypoints;
 
-import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.waypoints.ServerWaypointManager;
@@ -43,8 +43,14 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
      */
     private final double scale;
 
-    private final MultiThreadedQueue<WaypointTransmitter> waypoints = new MultiThreadedQueue<>();
-    private final MultiThreadedQueue<ServerPlayer> players = new MultiThreadedQueue<>();
+    // Rolia - build 45: these were MultiThreadedQueues guarded by `if (!q.contains(x)) q.add(x)`.
+    // That is a check-then-act on a collection whose entire purpose is to be touched from several
+    // region threads at once: two regions tracking the same waypoint in the same instant both see
+    // "absent" and both add it. The queue then holds it twice, remove() deletes one, and the locator
+    // bar keeps showing a waypoint - or a player who has already left - until restart. A concurrent
+    // set makes "add if absent" one atomic operation and makes remove mean remove.
+    private final Set<WaypointTransmitter> waypoints = ConcurrentHashMap.newKeySet();
+    private final Set<ServerPlayer> players = ConcurrentHashMap.newKeySet();
     private final ServerLevel level;
 
     private boolean shouldScheduleBasedOnDistance(@NonNull ServerPlayer origin, ServerPlayer target) {
@@ -74,8 +80,13 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
 
     @Override
     public void trackWaypoint(@NonNull WaypointTransmitter waypoint) {
+        // Rolia - build 45: register first, then decide whether to connect anything. The gate used to
+        // sit above the add, so while the locator gamerule was off nothing was recorded at all, and
+        // turning it back on restored nothing - the transmitters that existed in the meantime were
+        // simply forgotten. untrackWaypoint already removes regardless of the gamerule, so tracking
+        // regardless is the consistent half of that pair.
+        waypoints.add(waypoint);
         if (isLocatorBarDisabled()) return;
-        if (!waypoints.contains(waypoint)) waypoints.add(waypoint);
 
         for (ServerPlayer player : players) {
             player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
@@ -157,7 +168,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     @Override
     // Note: this should be called on the 'player'
     public void addPlayer(@NonNull ServerPlayer player) {
-        if (!players.contains(player)) players.add(player);
+        players.add(player); // Rolia - build 45: the set makes this idempotent; the contains-then-add it replaced was not
 
         if (isLocatorBarDisabled()) return;
         for (WaypointTransmitter waypoint : waypoints) {

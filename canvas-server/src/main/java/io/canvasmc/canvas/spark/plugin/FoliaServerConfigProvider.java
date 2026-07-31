@@ -71,6 +71,17 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
             .add("world-settings.*.seed-*")
             .add("feature-seeds")
             .add("seed-*")
+            // Rolia - build 45: every /spark health and every profiler stop uploads the whole canvas/
+            // tree to bytebin, a public paste service. rolia.yml is not in the FILES map above, so the
+            // 1024-bit secret is not being uploaded today - but the redaction list is what stands
+            // between "not uploaded today" and "uploaded by whoever adds the next file", and it named
+            // only Vanilla's seed keys. Defence in depth costs four lines.
+            .add("secure-seed")
+            .add("secure-seed.salt")
+            .add("secure-seed.feature-seed")
+            .add("rolia")
+            .add("*.secret")
+            .add("*.token")
             .addAll(getTimingsHiddenConfigs())
             .addAll(getSystemPropertyList("spark.serverconfigs.hiddenpaths"));
 
