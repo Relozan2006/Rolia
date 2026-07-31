@@ -2,7 +2,7 @@ name: Build Rolia
 
 on:
   push:
-    branches: [main]
+    branches: [main, v26.2]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -32,7 +32,7 @@ jobs:
       # Rolia - the ONE place the build number is written. It used to be hardcoded in three separate
       # places (the build step, the test step and the release step), and the release tag came from the
       # third, so editing two of them shipped a mislabelled release.
-      BUILD_NUMBER: 45
+      BUILD_NUMBER: 46
     defaults:
       run:
         shell: bash
@@ -939,8 +939,8 @@ jobs:
           python3 /tmp/rolia_cfg.py 2>/dev/null | head -1 || true
           echo "CI python tools written and compiled"
 
-      - name: Apply Rolia DAB source hooks
-        run: python3 scripts/apply_dab_hooks.py
+      - name: Apply Rolia worldgen source hooks
+        run: python3 scripts/apply_seed_hooks.py
 
       - name: Build paperclip jar
         timeout-minutes: 90
@@ -1388,9 +1388,20 @@ jobs:
           [ "$AB_LAND_PCT"  -ge $((AC_LAND_PCT  + 20)) ] || { echo "FAIL: the land mask agrees ${AB_LAND_PCT}% within a level-seed and ${AC_LAND_PCT}% across level-seeds - the coastline is not coming from the public seed"; exit 1; }
 
           # 3. CLIMATE IS SECRET: the same landscape must be wearing different biomes.
-          # Measured 9%. 85 was a guess with no data behind it; at 9% the honest bound is far tighter,
-          # and a jump back toward the old value would mean climate had stopped following the secret.
-          [ "$AB_BIOME_PCT" -le 40 ]      || { echo "FAIL: ${AB_BIOME_PCT}% of columns kept the SAME biome after every secret changed (measured 9%) - biome climate is not under the secret seed"; exit 1; }
+          # Rolia - build 46: this assertion is INVERTED, because the contract changed.
+          #
+          # Through build 45 biome climate was secret, so the test demanded that biomes CHANGE when the
+          # secret changed and 9% agreement was a pass. From build 46 temperature and vegetation are
+          # public, so the biome map must be reproducible from the level-seed alone: change every
+          # secret and the biomes must STAY. Anything less means the climate noises did not really move
+          # to the public root - which is the one thing this build exists to do.
+          #
+          # Not 100%, and it should not be: biome is sampled at the surface, and the surface is still
+          # cut by secret carvers, so a column whose top block dropped into a cave can read a different
+          # biome. Same effect that holds exact height agreement near 70%.
+          [ "$AB_BIOME_PCT" -ge 90 ]      || { echo "FAIL: only ${AB_BIOME_PCT}% of columns kept the SAME biome after every secret changed - biome climate is NOT public, which is the whole point of build 46"; exit 1; }
+          # ...and the control must still separate: a different level-seed has to give different biomes
+          [ "$AC_BIOME_PCT" -le 40 ]      || { echo "FAIL: a DIFFERENT level-seed kept ${AC_BIOME_PCT}% of biomes - the level-seed is not driving climate at all"; exit 1; }
 
           # 4. Slime chunks move with the secret (see the smoke test for restart stability).
           SL1=$(grep -oE 'slime-selftest [0-9a-f]{8,}' terr_w1.log | awk '{print $2}' | head -1 || true)
@@ -1406,7 +1417,7 @@ jobs:
 
           echo "TERRAIN OK: the landscape is reproducible from level-seed alone (${AB_EXACT_PCT}% exact,"
           echo "            land mask ${AB_LAND_PCT}%), a different level-seed scores only ${AC_EXACT_PCT}%,"
-          echo "            and only ${AB_BIOME_PCT}% of columns kept their biome when the secret changed."
+          echo "            biomes held at ${AB_BIOME_PCT}% when every secret changed, and fell to ${AC_BIOME_PCT}% across level-seeds."
 
       - name: Determinism + seed-split test
         timeout-minutes: 90
@@ -1525,42 +1536,6 @@ jobs:
             tail -60 guard.log
             exit 1
           fi
-
-      - name: DAB enabled smoke
-        timeout-minutes: 30
-        run: |
-          # Rolia - real gate (was `set +e +o pipefail`, which made the step
-          # unfailable); diagnostics below are neutralised individually.
-          set -e -o pipefail
-          set -x
-          source /tmp/ci-helpers.sh
-          reap_servers pre
-          cd testrun
-          rm -rf world world_nether world_the_end
-          # Rolia - RoliaConfig reads optimizations.dab first and only falls back
-          # to a top-level dab: block, so the smoke test must use the nested,
-          # documented form - otherwise it only ever exercised the back-compat path.
-          printf 'secure-seed:\n  salt: "DABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKEDABSMOKE01"\noptimizations:\n  dab:\n    enabled: true\n    start-distance: 8\n    max-tick-interval: 20\n    blacklist: []\n' > rolia.yml
-          printf 'level-seed=dabtest\nonline-mode=false\nserver-port=25630\n' > server.properties
-          rm -f input exitcode; mkfifo input
-          (set +e; java -Xmx3G -jar /tmp/rolia.jar --nogui < input > dab.log 2>&1; echo $? > exitcode) &   # Rolia - set +e: record the exit code instead of dying on it
-          exec 3>input
-          for i in $(seq 1 180); do grep -q 'Done (' dab.log 2>/dev/null && break; [ -f exitcode ] && break; sleep 5; done
-          sleep 8; echo "stop" >&3 || true
-          wait_exit dab dab.log
-          exec 3>&- 2>/dev/null || true
-          echo "=== DAB run: config + startup ==="
-          grep -iE 'config loaded|DAB (ON|off)|secure seed|Generating a new' dab.log | head || true
-          grep -q 'Done (' dab.log || { echo "FAIL: DAB run did not start"; tail -100 dab.log; exit 1; }
-          # Rolia - assert DAB is actually ON. The old diagnostic matched
-          # "DAB off" just as happily as "DAB ON".
-          grep -qE 'config loaded .*secure seed ACTIVE fp=[0-9a-f]{16}; DAB ON' dab.log || {
-            echo "FAIL: DAB is not ON - optimizations.dab.enabled=true was not honoured"
-            grep -i 'config loaded' dab.log | head || true
-            exit 1
-          }
-          scan_errors dab dab.log || exit 1
-          echo "DAB ENABLED SMOKE OK: clean startup with optimizations.dab.enabled=true and DAB ON"
 
       - name: Auto-random seed test (fresh server => unique 1024-bit seed)
         timeout-minutes: 50
@@ -1822,7 +1797,7 @@ jobs:
           # Rolia - a failed build must NOT publish a jar under the canonical
           # filename users are told to download.
           if [ "${{ job.status }}" = "success" ]; then
-            RELNAME="rolia-paperclip-26.1.2.jar"
+            RELNAME="rolia-paperclip-26.2.jar"
           else
             RELNAME="FAILED-BUILD-DO-NOT-USE-$(printf '%s' "$GITHUB_SHA" | cut -c1-7).jar"
           fi
@@ -1870,8 +1845,8 @@ jobs:
           set -e -o pipefail
           source /tmp/ci-helpers.sh
           reap_servers pre
-          TAG="v26.1.2-build.$BUILD_NUMBER"
-          JAR=/tmp/out/rolia-paperclip-26.1.2.jar
+          TAG="v26.2-build.$BUILD_NUMBER"
+          JAR=/tmp/out/rolia-paperclip-26.2.jar
           [ -f "$JAR" ] || { echo "FAIL: $JAR not found - the publish step did not produce a release jar"; ls -la /tmp/out; exit 1; }
           # Rolia - the tag and the artifact's build number can never drift silently again.
           # Read it from the SERVER jar stashed by the build step (paperclip's own manifest has no
@@ -1888,7 +1863,7 @@ jobs:
             jar_manifest "$JAR"; exit 1; }
           SHA=$(sha256sum "$JAR" | awk '{print $1}')
           cat > /tmp/relnotes.md << NOTES
-          ## Rolia 26.1.2 (build $BUILD_NUMBER)
+          ## Rolia 26.2 (build $BUILD_NUMBER)
 
           **Rolia** — высокопроизводительное ядро Minecraft на базе Canvas (Paper + Folia) с секретным
           1024-битным сидом генерации.
@@ -1914,7 +1889,7 @@ jobs:
 
           ### Установка
 
-          1. Скачайте `rolia-paperclip-26.1.2.jar`.
+          1. Скачайте `rolia-paperclip-26.2.jar`.
           2. Нужна Java 25 или новее. Флаги запуска — в `start.sh` / `start.bat`.
           3. При первом запуске рядом появится `rolia.yml` с правами `0600`.
 
@@ -1950,6 +1925,6 @@ jobs:
           NOTES
           gh release create "$TAG" "$JAR" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Rolia 26.1.2 (build $BUILD_NUMBER)" \
+            --title "Rolia 26.2 (build $BUILD_NUMBER)" \
             --notes-file /tmp/relnotes.md \
             --latest
