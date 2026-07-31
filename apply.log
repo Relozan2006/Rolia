@@ -1,0 +1,147 @@
+Fetching distribution.
+Downloading https://services.gradle.org/distributions/gradle-9.6.1-bin.zip
+.............10%.............20%..............30%.............40%..............50%.............60%.............70%..............80%.............90%..............100%
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Calculating task graph as no cached configuration is available for tasks: applyAllPatches
+Type-safe project accessors is an incubating feature.
+
+> Configure project :
+weaver-patcher v2.4.5 (running on 'Linux')
+
+> Task :collectPaperApiATsFromPatches
+> Task :mergePaperApiATs
+> Task :checkoutPaperRepo
+> Task :applyPaperSingleFilePatches
+> Task :filterPaperApiFromPaper
+
+> Task :runPaperApiSetup
+Applying access transformers...
+
+> Task :applyPaperApiBasePatches
+
+> Task :applyPaperApiFilePatches
+Applied 1 patches
+
+> Task :applyPaperApiFeaturePatches
+> Task :applyPaperApiPatches
+> Task :applyPaperPatches
+
+> Configure project :Rolia
+weaver-patcher v2.4.5 (running on 'Linux')
+
+> Configure project :Rolia:canvas-api
+w: file:///home/runner/work/Rolia/Rolia/canvas-api/build.gradle.kts:21:49: 'fun provideDelegate(thisRef: Any?, property: KProperty<*>): ExistingDomainObjectDelegate<Configuration>' is deprecated. Use 'val element = create(name)' instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-api/build.gradle.kts:21:49: 'val <T : Any> NamedDomainObjectContainer<T>.creating: NamedDomainObjectContainerCreatingDelegateProvider<T>' is deprecated. Use 'val element = create(name)' instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-api/build.gradle.kts:21:49: 'fun <T> ExistingDomainObjectDelegate<out T>.getValue(receiver: Any?, property: KProperty<*>): T' is deprecated. Use the named() API instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-api/build.gradle.kts:25:56: 'fun provideDelegate(thisRef: Any?, property: KProperty<*>): ExistingDomainObjectDelegate<Configuration>' is deprecated. Use 'val element = create(name)' instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-api/build.gradle.kts:25:56: 'fun <T : Any> NamedDomainObjectContainer<T>.creating(configuration: T.() -> Unit): NamedDomainObjectContainerCreatingDelegateProvider<T>' is deprecated. Use 'val element = create(name) { }' instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-api/build.gradle.kts:25:56: 'fun <T> ExistingDomainObjectDelegate<out T>.getValue(receiver: Any?, property: KProperty<*>): T' is deprecated. Use the named() API instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-api/build.gradle.kts:288:33: 'fun <U : Task> RegisteringDomainObjectDelegateProviderWithTypeAndAction<out TaskContainer, U>.provideDelegate(receiver: Any?, property: KProperty<*>): ExistingDomainObjectDelegate<TaskProvider<U>>' is deprecated. Use 'val task = tasks.register<Type>(name) { }' instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-api/build.gradle.kts:288:33: 'fun <T : Any, C : PolymorphicDomainObjectContainer<T>, U : T> C.registering(type: KClass<U>, action: U.() -> Unit): RegisteringDomainObjectDelegateProviderWithTypeAndAction<out C, U>' is deprecated. Use 'val element = register<Type>(name) { }' instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-api/build.gradle.kts:288:33: 'fun <T> ExistingDomainObjectDelegate<out T>.getValue(receiver: Any?, property: KProperty<*>): T' is deprecated. Use the named() API instead. See the Gradle 9.6 upgrading guide.
+
+> Configure project :Rolia:canvas-server
+weaver-core v2.4.5 (running on 'Linux')
+w: file:///home/runner/work/Rolia/Rolia/canvas-server/build.gradle.kts:22:32: 'fun <U : Task> RegisteringDomainObjectDelegateProviderWithTypeAndAction<out TaskContainer, U>.provideDelegate(receiver: Any?, property: KProperty<*>): ExistingDomainObjectDelegate<TaskProvider<U>>' is deprecated. Use 'val task = tasks.register<Type>(name) { }' instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-server/build.gradle.kts:22:32: 'fun <T> ExistingDomainObjectDelegate<out T>.getValue(receiver: Any?, property: KProperty<*>): T' is deprecated. Use the named() API instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-server/build.gradle.kts:125:48: 'fun provideDelegate(thisRef: Any?, property: KProperty<*>): ExistingDomainObjectDelegate<Configuration>' is deprecated. Use 'val element = create(name)' instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-server/build.gradle.kts:125:48: 'val <T : Any> NamedDomainObjectContainer<T>.creating: NamedDomainObjectContainerCreatingDelegateProvider<T>' is deprecated. Use 'val element = create(name)' instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-server/build.gradle.kts:125:48: 'fun <T> ExistingDomainObjectDelegate<out T>.getValue(receiver: Any?, property: KProperty<*>): T' is deprecated. Use the named() API instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-server/build.gradle.kts:127:44: 'fun <T : Any, reified U : T> NamedDomainObjectProvider<out T>.getValue(thisRef: Any?, property: KProperty<*>): U' is deprecated. Use 'val value = provider.get()' instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-server/build.gradle.kts:259:33: 'fun <U : Task> RegisteringDomainObjectDelegateProviderWithTypeAndAction<out TaskContainer, U>.provideDelegate(receiver: Any?, property: KProperty<*>): ExistingDomainObjectDelegate<TaskProvider<U>>' is deprecated. Use 'val task = tasks.register<Type>(name) { }' instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-server/build.gradle.kts:259:33: 'fun <T : Any, C : PolymorphicDomainObjectContainer<T>, U : T> C.registering(type: KClass<U>, action: U.() -> Unit): RegisteringDomainObjectDelegateProviderWithTypeAndAction<out C, U>' is deprecated. Use 'val element = register<Type>(name) { }' instead. See the Gradle 9.6 upgrading guide.
+w: file:///home/runner/work/Rolia/Rolia/canvas-server/build.gradle.kts:259:33: 'fun <T> ExistingDomainObjectDelegate<out T>.getValue(receiver: Any?, property: KProperty<*>): T' is deprecated. Use the named() API instead. See the Gradle 9.6 upgrading guide.
+
+> Task :Rolia:canvas-server:downloadMcManifest
+> Task :Rolia:canvas-server:downloadMcVersionManifest
+> Task :Rolia:canvas-server:downloadServerJar
+> Task :Rolia:canvas-server:extractFromBundler
+
+> Task :Rolia:canvas-server:setupMacheResources
+Copy initial sources...
+Setup git repo...
+
+> Task :applyAllPatches
+> Task :Rolia:canvas-server:extractMacheResources
+
+> Task :Rolia:canvas-server:applyPaperMinecraftResourcePatches
+Applied 6 patches
+
+> Task :Rolia:canvas-server:downloadMcLibrariesSources
+> Task :Rolia:canvas-server:downloadRuntimeClasspathSources
+> Task :Rolia:canvas-server:macheRemapJar
+> Task :Rolia:canvas-server:indexLibraryFiles
+
+> Task :Rolia:canvas-server:importPaperLibraryFiles
+Importing 14 classes from library sources...
+
+> Task :Rolia:canvas-server:macheDecompileJar
+> Task :Rolia:canvas-server:collectPaperATsFromPatches
+> Task :Rolia:canvas-server:mergePaperATs
+
+> Task :Rolia:canvas-server:setupMacheSources
+Copy initial sources...
+Setup git repo...
+Applying mache patches...
+Applied 105 mache patches
+Applying access transformers...
+
+> Task :Rolia:canvas-server:extractMacheSources
+> Task :Rolia:canvas-server:applyPaperMinecraftBasePatches
+
+> Task :Rolia:canvas-server:applyPaperMinecraftSourcePatches
+Applied 930 patches
+
+> Task :Rolia:canvas-server:applyPaperMinecraftFilePatches
+> Task :Rolia:canvas-server:applyPaperMinecraftFeaturePatches
+> Task :Rolia:canvas-server:collectCanvasATsFromPatches
+> Task :Rolia:canvas-server:mergeMinecraftATs
+> Task :Rolia:canvas-server:mergeCanvasATs
+
+> Task :Rolia:canvas-server:importCanvasLibraryFiles
+Importing 2 classes from library sources...
+
+> Task :Rolia:canvas-server:runCanvasSetup
+Applying access transformers...
+
+> Task :Rolia:canvas-server:applyMinecraftBasePatches
+
+> Task :Rolia:canvas-server:applyMinecraftResourcePatches
+Applied 0 patches
+
+> Task :Rolia:canvas-server:applyMinecraftSourcePatches
+Applied 127 patches
+
+> Task :Rolia:canvas-server:applyMinecraftFilePatches
+> Task :Rolia:canvas-server:applyMinecraftFeaturePatches
+> Task :Rolia:canvas-server:applyMinecraftPatches
+> Task :Rolia:canvas-server:filterPaperServerFromPaper
+> Task :Rolia:canvas-server:collectPaperServerATsFromPatches
+> Task :Rolia:canvas-server:mergePaperServerATs
+
+> Task :Rolia:canvas-server:runPaperServerSetup
+Applying access transformers...
+
+> Task :Rolia:canvas-server:applyPaperServerBasePatches
+
+> Task :Rolia:canvas-server:applyPaperServerFilePatches
+Applied 12 patches
+
+> Task :Rolia:canvas-server:applyPaperServerFeaturePatches
+> Task :Rolia:canvas-server:applyPaperServerPatches
+> Task :Rolia:canvas-server:applyServerPatches
+> Task :Rolia:canvas-server:applyAllServerPatches
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1785512561881.json
+
+[Incubating] Problems report is available at: file:///home/runner/work/Rolia/Rolia/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 6m 28s
+10 actionable tasks: 10 executed
+Configuration cache entry stored.
