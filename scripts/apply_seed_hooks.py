@@ -264,4 +264,76 @@ patch(NBCG,
 #    arrive via ViaVersion and any future packet batching. The unreachable heap-staging branch was
 #    also dropped in favour of the plain loop, which is correct for every ByteBuf implementation.
 
+
+# =================================================================================================
+# Rolia - build 46: four edits that used to live inside Canvas's own per-file patches.
+#
+# They are hooks now, and the reason is mechanical rather than stylistic. A per-file patch numbers
+# its hunks against the ORIGINAL decompiled file, but the only 26.2 sources available to write
+# against are the ones a build produces - which are post-patch. Writing these as patch hunks would
+# have meant guessing the pre-patch line numbers, pushing, and reading the rejection. As hooks they
+# anchor on text that exists at exactly the moment they run, and they carry the same context
+# checksum every other hook here does.
+#
+# Only the SEED parts are carried over. The same Canvas patches also held Rolia's spawn-chunk
+# fairness shuffle, the random-tick parity block and the chunk-thread startup advisory; those were
+# optional behaviour, they are not part of a bare core, and they are deliberately left behind.
+# =================================================================================================
+
+SCC = "canvas-server/src/minecraft/java/net/minecraft/server/level/ServerChunkCache.java"
+# The generator is where worldgen begins, so this is where the secret has to be published. It is
+# idempotent - setupGlobals publishes once behind a volatile and returns immediately afterwards.
+patch(SCC,
+      "    public ChunkGenerator getGenerator() {\n",
+      "    public ChunkGenerator getGenerator() {\n"
+      "        io.rolia.secureseed.Globals.setupGlobals(level); // Rolia - publish the secret before any generation runs\n",
+      "ServerChunkCache publishes the secret", context="bb5944b3443ce376",
+      hint="getGenerator", marker="io.rolia.secureseed.Globals.setupGlobals(level)")
+
+SL = "canvas-server/src/minecraft/java/net/minecraft/server/level/ServerLevel.java"
+# ...and again as the level is constructed, because a world can be generated from paths that do not
+# go through getGenerator() first. Same publish-once call.
+patch(SL,
+      "            generator = new org.bukkit.craftbukkit.generator.CustomChunkGenerator(this, generator, gen);\n"
+      "        }\n"
+      "        // CraftBukkit end\n",
+      "            generator = new org.bukkit.craftbukkit.generator.CustomChunkGenerator(this, generator, gen);\n"
+      "        }\n"
+      "        // CraftBukkit end\n"
+      "        io.rolia.secureseed.Globals.setupGlobals(this); // Rolia - publish the secret at level construction\n",
+      "ServerLevel publishes the secret", context="0c2cca763b6fff6e",
+      hint="CustomChunkGenerator", marker="io.rolia.secureseed.Globals.setupGlobals(this)")
+
+CG = "canvas-server/src/minecraft/java/net/minecraft/world/level/chunk/ChunkGenerator.java"
+# The decoration seed drives every structure and feature placement in the chunk. Vanilla keys it
+# from the public level seed; under Rolia it comes from the secret, which is the difference between
+# "a seed map shows you where the villages are" and "it does not".
+patch(CG,
+      "            WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));\n",
+      "            WorldgenRandom random = new io.rolia.secureseed.WorldgenCryptoRandom(origin.getX(), origin.getZ(), io.rolia.secureseed.Globals.Salt.UNDEFINED, 0); // Rolia - decoration seed under the secret\n",
+      "ChunkGenerator decoration seed under the secret", context="6d7425f2032c038e",
+      hint="generateUniqueSeed", marker="WorldgenCryptoRandom")
+# Bukkit's BlockPopulator API gets its own salt domain. UNDEFINED collided exactly with a datapack
+# structure set configured with salt: 0, which is a real configuration people write.
+patch(CG,
+      "                WorldgenRandom seededrandom = new WorldgenRandom(new net.minecraft.world.level.levelgen.LegacyRandomSource(level.getSeed()));\n",
+      "                WorldgenRandom seededrandom = new io.rolia.secureseed.WorldgenCryptoRandom(x, z, io.rolia.secureseed.Globals.Salt.BUKKIT_POPULATOR, 0); // Rolia - own salt domain\n",
+      "ChunkGenerator Bukkit populator under the secret", context="68f800ff45a58640",
+      hint="seededrandom", marker="Salt.BUKKIT_POPULATOR")
+
+# CraftChunk lives in the Paper tree rather than the Minecraft one, and which of the two it ends up
+# in depends on the build layout, so resolve it instead of asserting a path.
+import glob as _glob
+_cc = ([p for p in _glob.glob("canvas-server/src/main/java/org/bukkit/craftbukkit/CraftChunk.java")]
+       + [p for p in _glob.glob("paper-server/src/main/java/org/bukkit/craftbukkit/CraftChunk.java")])
+if not _cc:
+    print("ERROR: CraftChunk.java not found in either tree", file=sys.stderr); sys.exit(1)
+# The Bukkit API must agree with where slimes actually spawn. Computed straight from the
+# coordinates, never through getHandle(), which would force-load the chunk from another region.
+patch(_cc[0],
+      "        return this.level.paperConfig().entities.spawning.allChunksAreSlimeChunks || WorldgenRandom.seedSlimeChunk(this.getX(), this.getZ(), this.getWorld().getSeed(), level.spigotConfig.slimeSeed).nextInt(10) == 0; // Paper\n",
+      "        return this.level.paperConfig().entities.spawning.allChunksAreSlimeChunks || io.rolia.secureseed.WorldgenCryptoRandom.seedSlimeChunk(io.rolia.secureseed.Globals.stableDimensionId(this.level), this.getX(), this.getZ(), this.getWorld().getSeed(), level.spigotConfig.slimeSeed).nextInt(10) == 0; // Paper // Rolia - the API must agree with where slimes really spawn\n",
+      "CraftChunk isSlimeChunk under the secret", context="e9a14ff67a9a40d4",
+      hint="isSlimeChunk", marker="WorldgenCryptoRandom.seedSlimeChunk")
+
 print("Rolia: worldgen source hooks applied")
