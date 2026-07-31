@@ -110,7 +110,7 @@ jobs:
           for f in \
             net/minecraft/server/commands/SeedCommand.java \
             net/minecraft/world/RandomSequences.java \
-            net/minecraft/world/entity/monster/Slime.java \
+            net/minecraft/world/entity/monster/cubemob/Slime.java \
             net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java \
             net/minecraft/world/level/chunk/status/ChunkStep.java \
             net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java \
@@ -128,6 +128,13 @@ jobs:
             net/minecraft/world/level/levelgen/RandomSupport.java \
             net/minecraft/world/level/biome/BiomeManager.java \
             net/minecraft/util/RandomSource.java \
+            net/minecraft/world/level/levelgen/WorldgenRandom.java \
+            net/minecraft/world/level/levelgen/SurfaceSystem.java \
+            net/minecraft/world/level/levelgen/Aquifer.java \
+            net/minecraft/world/level/levelgen/blending/Blender.java \
+            net/minecraft/world/level/levelgen/NoiseRouterData.java \
+            net/minecraft/world/level/biome/MultiNoiseBiomeSource.java \
+            net/minecraft/world/level/levelgen/DensityFunctions.java \
           ; do
             src=$(find canvas-server/src/minecraft/java -path "*/$f" -type f 2>/dev/null | head -1)
             if [ -n "$src" ]; then
