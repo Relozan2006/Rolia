@@ -2,12 +2,13 @@ package io.canvasmc.canvas.util;
 
 import com.google.common.base.Preconditions;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import java.lang.ref.Reference;
+import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
@@ -21,7 +22,21 @@ import org.jspecify.annotations.Nullable;
  */
 public class WeakConcurrentCollection<E> implements Collection<E> {
     private final CopyOnWriteArrayList<WeakReference<E>> backed = new CopyOnWriteArrayList<>();
-    private final AtomicInteger liveCount = new AtomicInteger(0);
+    // Rolia - build 45: automatic compaction never ran, not once, in any build.
+    //
+    // The old trigger was `(backed.size() - liveCount) * 4 >= backed.size()`, where liveCount was
+    // incremented in add() and decremented in remove() and compact() right beside the matching
+    // change to `backed`. It therefore equalled backed.size() at all times, the left-hand side was
+    // always zero, and the condition reduced to `0 >= total` - false whenever the collection held
+    // anything at all. Entries whose referent had been garbage collected were never purged, so
+    // CraftScoreboardManager.scoreboards grew for the entire life of the process on any server
+    // whose plugins call getNewScoreboard(), and every traversal walked all of it.
+    //
+    // Rather than repair the estimate, ask the garbage collector. Each reference is registered with
+    // this queue and the JVM enqueues it at the moment its referent is collected, so drainDead()
+    // removes exactly the dead entries and nothing else - no counter to drift, no heuristic to
+    // mistune, and no O(n) scan on a collection that has not lost anything.
+    private final ReferenceQueue<E> deadRefs = new ReferenceQueue<>();
 
     @Override
     public int size() {
@@ -32,7 +47,7 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
 
     @Override
     public boolean isEmpty() {
-        if (liveCount.get() <= 0) return true;
+        if (backed.isEmpty()) return true; // Rolia - build 45: the entry count IS backed.size(); no second counter to disagree with it
         for (WeakReference<E> ref : backed) {
             if (ref.get() != null) return false;
         }
@@ -99,9 +114,8 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
     @Override
     public boolean add(final E value) {
         Preconditions.checkArgument(value != null, "Cannot add null value");
-        backed.add(new WeakReference<>(value));
-        liveCount.incrementAndGet();
-        compactIfNeeded();
+        backed.add(new WeakReference<>(value, deadRefs)); // Rolia - build 45: registered, so the JVM tells us when it dies
+        drainDead();
         return true;
     }
 
@@ -111,10 +125,8 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
         for (WeakReference<E> ref : backed) {
             E value = ref.get();
             if (o.equals(value)) {
-                ref.clear();
-                if (backed.remove(ref)) {
-                    liveCount.decrementAndGet();
-                }
+                ref.clear(); // Rolia - build 45: clear() does not enqueue, so this entry will not also arrive via deadRefs
+                backed.remove(ref);
                 return true;
             }
         }
@@ -172,20 +184,32 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
     public void clear() {
         for (WeakReference<E> ref : backed) ref.clear();
         backed.clear();
-        liveCount.set(0);
+        while (deadRefs.poll() != null) { /* Rolia - build 45: discard notifications for entries that are already gone */ }
     }
 
+    /**
+     * Purges every entry whose referent has been garbage collected.
+     *
+     * <p>Rolia - build 45: this used to iterate the copy-on-write snapshot and call {@code remove}
+     * per dead entry, which allocates a fresh backing array each time - quadratic on exactly the
+     * collections that need compacting most. {@code removeIf} does it in one atomic pass.</p>
+     */
     public void compact() {
-        int removed = 0;
-        for (WeakReference<E> ref : backed) {
-            if (ref.get() == null && backed.remove(ref)) removed++;
-        }
-        if (removed > 0) liveCount.addAndGet(-removed);
+        drainDead();
+        backed.removeIf(ref -> ref.get() == null);
     }
 
-    private void compactIfNeeded() {
-        int total = backed.size();
-        int live = liveCount.get();
-        if (total > 0 && (total - live) * 4 >= total) compact();
+    /**
+     * Removes the entries the garbage collector has told us about. O(1) when nothing has died.
+     */
+    private void drainDead() {
+        Reference<? extends E> dead = deadRefs.poll();
+        if (dead == null) return;
+        final List<Reference<? extends E>> batch = new ObjectArrayList<>();
+        do {
+            batch.add(dead);
+        } while ((dead = deadRefs.poll()) != null);
+        // one pass, not one copy of the backing array per dead entry
+        backed.removeIf(batch::contains);
     }
 }

@@ -256,7 +256,7 @@
  
      public Map<Structure, StructureStart> getAllStarts() {
 -        return Collections.unmodifiableMap(this.structureStarts);
-+        return this.structureStarts; // Canvas - optimized collection
++        return java.util.Collections.unmodifiableMap(this.structureStarts); // Canvas - optimized collection // Rolia - build 45: handing out the LIVE map let any caller edit a chunk's structure state with no error, and made setAllStarts(x.getAllStarts()) a clear() followed by putAll of the emptied map
      }
  
      public void setAllStarts(final Map<Structure, StructureStart> starts) {
@@ -265,7 +265,7 @@
      @Override
      public Map<Structure, LongSet> getAllReferences() {
 -        return Collections.unmodifiableMap(this.structuresRefences);
-+        return this.structuresRefences; // Canvas - optimized collection
++        return java.util.Collections.unmodifiableMap(this.structuresRefences); // Canvas - optimized collection // Rolia - build 45: same, for structure references
      }
  
      @Override

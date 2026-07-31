@@ -184,7 +184,7 @@ index 825d69075ef95586d187e79eea0fc200aaf888bb..880ed8cbae969366cd58bdb6bc19fbcc
          Preconditions.checkState(this.console.getAllLevels().iterator().hasNext(), "Cannot create additional worlds on STARTUP");
          //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot create a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
          Preconditions.checkArgument(creator != null, "WorldCreator cannot be null");
-@@ -1345,6 +1357,133 @@ public final class CraftServer implements Server {
+@@ -1345,6 +1357,150 @@ public final class CraftServer implements Server {
  
          return serverLevel.getWorld();
      }
@@ -268,22 +268,39 @@ index 825d69075ef95586d187e79eea0fc200aaf888bb..880ed8cbae969366cd58bdb6bc19fbcc
 +                        regions = new ArrayList<>();
 +                    handle.regioniser.computeForAllRegions(regions::add);
 +
++                    // Rolia - build 45: this was `for (;;)` with no deadline and not one line of
++                    // output. If a single region never marks itself non-schedulable, the loop spins at
++                    // a thousand wakeups a second for the life of the process, the shutdown thread
++                    // never begins its work, and whoever asked for the unload - a plugin, or the
++                    // console - waits forever with nothing in the log to explain it. Folia's own
++                    // scheduler halt, on the path immediately next to this one, is bounded at 60
++                    // seconds. Match that bound, and report progress while waiting rather than after.
++                    final long canvas$deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(60L);
++                    long canvas$nextReport = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5L);
 +                    waiter:
 +                    for (;;) {
 +                        java.util.concurrent.locks.LockSupport.parkNanos("waiting on next pass", 1_000_000);
 +
 +                        // check for alive regions, if we have one, continue waiting
-+                        boolean hasAliveRegion = false;
++                        int canvas$aliveRegions = 0;
 +
-+                        checker:
 +                        for (final io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData> region : regions) {
 +                            if (!region.getData().getRegionSchedulingHandle().isMarkedAsNonSchedulable()) {
-+                                hasAliveRegion = true;
-+                                break checker;
++                                canvas$aliveRegions++;
 +                            }
 +                        }
 +
-+                        if (!hasAliveRegion) {
++                        if (canvas$aliveRegions == 0) {
++                            break waiter;
++                        }
++
++                        final long canvas$now = System.nanoTime();
++                        if (canvas$now - canvas$nextReport >= 0L) {
++                            canvas$nextReport = canvas$now + java.util.concurrent.TimeUnit.SECONDS.toNanos(5L);
++                            MinecraftServer.LOGGER.info("Still waiting on {} of {} regions of world '{}' to become unschedulable", canvas$aliveRegions, regions.size(), handle.getWorld().getName());
++                        }
++                        if (canvas$now - canvas$deadline >= 0L) {
++                            MinecraftServer.LOGGER.error("Gave up after 60s waiting on {} of {} regions of world '{}' to become unschedulable. Continuing the unload; the alternative is to hang forever.", canvas$aliveRegions, regions.size(), handle.getWorld().getName());
 +                            break waiter;
 +                        }
 +                    }

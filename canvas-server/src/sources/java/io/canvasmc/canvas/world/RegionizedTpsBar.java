@@ -103,7 +103,12 @@ public class RegionizedTpsBar extends RegionResourceBar {
                 });
             }
         }
-        return new Pair<>(builder.build(), (float) utilPercent / 100);
+        // Rolia - build 45: utilisation is not bounded by 100%. A region that needs longer than its
+        // tick budget reports above 1.0 here, and Adventure's BossBar#progress rejects anything
+        // outside [0,1] with IllegalArgumentException - thrown from inside the region tick. So the
+        // cosmetic TPS bar took the region down at precisely the moment the server was already
+        // struggling. The RAM bar never hit this only because used/max cannot exceed one.
+        return new Pair<>(builder.build(), Math.max(0.0F, Math.min(1.0F, (float) utilPercent / 100.0F)));
     }
 
 }

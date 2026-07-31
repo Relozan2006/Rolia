@@ -111,7 +111,12 @@ public class RegionTickCommand implements Command {
     @Override
     public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base) {
         return base
-            .then(literal("rate").then(argument("rate", FloatArgumentType.floatArg(0.0F)).executes((context) -> {
+            // Rolia - build 45: restore Vanilla's clamp. This read floatArg(0.0F) - no upper bound and,
+            // worse, a lower bound of zero, where Vanilla's /tick rate is floatArg(1.0F, 10000.0F).
+            // `/tick rate 0` therefore asked for 1/0 seconds per tick, which lands at 2.147 seconds -
+            // about 0.47 TPS for the entire server - and the only way back out is to type another
+            // command while every region ticks twice a minute. It needs no plugin and no config key.
+            .then(literal("rate").then(argument("rate", FloatArgumentType.floatArg(1.0F, 10000.0F)).executes((context) -> {
                 float newTickRate = context.getArgument("rate", Float.class);
                 TickRegionScheduler.setTickRate(newTickRate);
                 return 0;

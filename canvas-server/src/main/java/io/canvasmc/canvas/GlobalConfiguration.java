@@ -378,7 +378,12 @@ public class GlobalConfiguration extends Part {
                         return switch (severity) {
                             case LOG -> "Just logs a warning in console, but continues the operation";
                             case THROW -> "Throws an exception, can crash the server. Good for ensuring correctness";
-                            case SILENT -> "Doesn't say anything or do anything";
+                            // Rolia - build 45: SILENT and LOG both used to log an ERROR and throw, which is
+                            // neither silent nor a continuation. They now behave as described. Since SILENT
+                            // really does mean no protection at all, say so rather than leaving the operator
+                            // to discover it from a corrupted world.
+                            case SILENT -> "Doesn't say anything or do anything - the guard is off entirely, and a"
+                                + " misbehaving plugin will corrupt world state silently instead of being caught";
                         };
                     })
                 );

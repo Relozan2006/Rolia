@@ -129,7 +129,12 @@ public abstract class RegionResourceBar {
 
                 @Override
                 public void setProgress(final float progress) {
-                    this.progress = progress;
+                    // Rolia - build 45: defence in depth for the same defect fixed at the TPS bar's
+                    // source. BossBar#progress throws outside [0,1] and this runs on the region tick
+                    // thread, so one out-of-range value from any present or future bar would abort
+                    // the tick. A resource bar is decoration; it must never be able to do that. NaN
+                    // fails both comparisons and is deliberately mapped to zero rather than kept.
+                    this.progress = progress > 0.0F ? Math.min(progress, 1.0F) : 0.0F;
                 }
 
                 @Override
