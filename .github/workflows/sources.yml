@@ -42,6 +42,16 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
 
+      # Rolia - GLOBAL, not repository-local. paperweight applies patches by committing them into
+      # its own checkout of Paper, not into this workspace, so a local identity is invisible to it -
+      # which is exactly how the first run died: "fatal: empty ident name", one minute in, with a
+      # stack trace that blamed patch application. The main build workflow has always had this step;
+      # this one was written without it.
+      - name: Configure git
+        run: |
+          git config --global user.email "ci@rolia.local"
+          git config --global user.name  "Rolia CI"
+
       # Rolia - a heartbeat. The first run of this workflow produced no branch at all, and with no
       # way to read the Actions log from here that is indistinguishable from "never triggered". This
       # pushes a marker before anything can fail, so the next attempt answers that question by itself.
