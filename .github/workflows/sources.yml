@@ -42,6 +42,25 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
 
+      # Rolia - a heartbeat. The first run of this workflow produced no branch at all, and with no
+      # way to read the Actions log from here that is indistinguishable from "never triggered". This
+      # pushes a marker before anything can fail, so the next attempt answers that question by itself.
+      - name: Heartbeat - prove the job started
+        run: |
+          set -x
+          rm -rf /tmp/hb && mkdir -p /tmp/hb && cd /tmp/hb
+          { echo "started: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo "sha:     $GITHUB_SHA"
+            echo "ref:     $GITHUB_REF"
+            echo "runner:  $RUNNER_OS  java: $(java -version 2>&1 | head -1)"
+            echo "gradlew: $(test -x "$GITHUB_WORKSPACE/gradlew" && echo present || echo MISSING)"
+          } > STARTED.txt
+          git init -q .; git config user.name rolia-ci; git config user.email ci@rolia.local
+          git checkout -q -b srcdump; git add -A
+          git -c commit.gpgsign=false commit -q -m "heartbeat for $GITHUB_SHA"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" srcdump
+          echo "heartbeat pushed"
+
       - name: Remove Rolia's own patches and sources
         run: |
           set -e -o pipefail
@@ -64,7 +83,12 @@ jobs:
 
       - name: Apply Canvas patches
         timeout-minutes: 70
-        run: ./gradlew applyAllPatches --no-daemon --stacktrace 2>&1 | tail -40
+        run: |
+          set -o pipefail
+          ./gradlew applyAllPatches --no-daemon --stacktrace 2>&1 | tee /tmp/apply.log | tail -60
+      - name: Keep the apply log even on failure
+        if: always()
+        run: mkdir -p /tmp/out && cp /tmp/apply.log /tmp/out/ 2>/dev/null || true
 
       - name: Collect the sources Rolia patches
         run: |
