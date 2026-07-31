@@ -2,7 +2,9 @@
 
 Ready-to-use scripts: **`start.sh`** (Linux/macOS) and **`start.bat`** (Windows).
 Set `MEM`, `CONC_GC_THREADS` and `JAR` at the top of the script and run it from the
-server folder.
+server folder. They ship tuned for a **32 GB** heap on Java 25; a 32 GB heap wants a
+host with 40 GB or more, because the JVM needs memory outside the heap and the OS
+needs what is left to cache your region files.
 
 Готовые скрипты: **`start.sh`** (Linux/macOS) и **`start.bat`** (Windows). Задайте
 `MEM`, `CONC_GC_THREADS` и `JAR` в начале скрипта и запустите его из папки сервера.
@@ -39,10 +41,13 @@ The JVM flags are only half the job. Do these once, then restart.
    **Сохраните `rolia.yml`** вместе с миром. В нём соль и 1024-битный сид; от них
    зависит всё, кроме формы рельефа. Потеряете — уже существующий мир нельзя будет
    корректно достроить. Файл создаётся с правами `0600`.
-7. **Decide about `optimizations.dab` and `optimizations.villager-lobotomize`**
-   in `rolia.yml`. Both are **off by default** and both change mob behaviour —
-   see "Defaults that change behaviour" below.
-   Обе опции **выключены по умолчанию** и обе меняют поведение мобов — см. ниже.
+7. **Leave `rolia.yml` alone unless you mean to.** Its five keys are all under
+   `secure-seed`, and the defaults are the ones you want: the secret seed on, and
+   `on-secret-mismatch: block` so the server refuses to start against a world that
+   belongs to a different secret rather than quietly ruining it.
+   Пять ключей `rolia.yml` — все в разделе `secure-seed`, и умолчания правильные:
+   секретный сид включён, а `on-secret-mismatch: block` не даст серверу стартовать
+   на мире с чужим секретом вместо того, чтобы тихо его испортить.
 
 ---
 
@@ -64,8 +69,13 @@ Paper по умолчанию ставит `-1` для обоих парамет
 поток ввода-вывода на любой машине; `worker-threads` при `-1` превращается в **1 поток**
 на машинах с 7 ядрами и меньше. Проявляется это подвисанием прогрузки чанков, а не MSPT.
 
-Rolia prints a WARN block at startup when it detects this. Recommended values:
-Rolia пишет предупреждение при старте, если это обнаружено. Рекомендуемые значения:
+Nothing warns you about this — Paper does not, and Rolia no longer does either
+(the startup advisory went with the rest of Rolia's non-seed code in build 46).
+Check it yourself. Recommended values:
+
+Об этом никто не предупреждает: ни Paper, ни, начиная со сборки 46, Rolia —
+стартовый совет удалён вместе с остальным кодом Rolia, не относящимся к сиду.
+Проверьте сами. Рекомендуемые значения:
 
 | CPU cores / ядра | `worker-threads` | `io-threads` |
 | --- | --- | --- |
@@ -114,13 +124,14 @@ On Java 26 `sun.misc.Unsafe` is removed and the flag stops applying.
 **`--enable-native-access=ALL-UNNAMED`** — silences the native-access warnings
 from Paper's libdeflate/OpenSSL bindings and JLine.
 
-**`-XX:+UseG1GC -XX:ConcGCThreads=2`** — G1 gives predictable pause targets and
+**`-XX:+UseG1GC -XX:ConcGCThreads=4`** — G1 gives predictable pause targets and
 is the collector the Aikar tuning was measured against. `ConcGCThreads` is pinned
 **on purpose**: G1's concurrent marking threads run *at the same time* as Folia's
 region tick threads, so they are not covered by any stop-the-world pause. Left
 unset it defaults to `ceil(ParallelGCThreads / 4)` and `ParallelGCThreads` scales
 with core count — so on a large box G1 quietly takes cores away from region ticks
-and the symptom is unexplained MSPT spikes. `2` suits a 4–8 GB heap.
+and the symptom is unexplained MSPT spikes. `2` suits a 4–8 GB heap; the shipped
+scripts use `4`, which is right for the 32 GB they are tuned for.
 
 **`-XX:+AlwaysPreTouch`** — fault in every heap page at startup so the OS commits
 it up front. Boot is slower and the process reports its whole heap as RSS
@@ -137,58 +148,52 @@ auto-discover the process (JMX still works if you enable it).
 short-lived per-tick garbage is never promoted; a low occupancy trigger so
 concurrent marking starts early instead of degenerating into a full GC; and
 `MaxTenuringThreshold=1` so survivors are promoted immediately rather than copied
-between survivor spaces every collection. Above ~12 GB retune as noted in the
-script: `G1NewSizePercent=40`, `G1MaxNewSizePercent=50`, `G1HeapRegionSize=16M`,
-`G1ReservePercent=15`, `InitiatingHeapOccupancyPercent=20`.
+between survivor spaces every collection. The shipped scripts carry the >12 GB
+settings — `G1NewSizePercent=40`, `G1MaxNewSizePercent=50`, `G1HeapRegionSize=16M`,
+`G1ReservePercent=15`, `InitiatingHeapOccupancyPercent=20` — because they are tuned
+for a 32 GB heap. Below about 12 GB, go back to 30 / 40 / 8M / 20 / 15.
 
 ---
 
-## Defaults that change behaviour / Умолчания, меняющие поведение
+## What Rolia adds / Что Rolia добавляет
 
-Both live in `rolia.yml` and both are **off by default**. Neither is
-behaviour-neutral — turn them off if you want strictly Vanilla mob behaviour
-everywhere and can afford the CPU.
+Exactly one thing: the secret world seed. `rolia.yml` has five keys, all under
+`secure-seed`, and only `enabled` defaults to `true`. There are no Rolia
+performance options and no Rolia gameplay changes — a stock Rolia server behaves
+like a stock Canvas server apart from worldgen.
 
-Обе опции живут в `rolia.yml` и **выключены по умолчанию**. Ни одна не является
-поведенчески-нейтральной.
+Ровно одно: секретный сид мира. В `rolia.yml` пять ключей, все в разделе
+`secure-seed`, и по умолчанию включён только `enabled`. Никаких своих
+оптимизаций и никаких изменений геймплея у Rolia нет — голая Rolia ведёт себя
+как голый Canvas, кроме генерации мира.
 
-**`optimizations.dab` — Dynamic Activation of Brain.** Mobs far from every player
-**think less often**, where N grows with distance from 1 up to
-`max-tick-interval` (20) and mobs within `start-distance` (12 blocks) are never
-throttled. Goal-driven mobs (зомби, скелеты) run their goal and target selectors
-once every N ticks instead of every tick. Brain-driven mobs (жители, пиглины)
-have their sensor schedule stretched to `max(собственная настроенная частота
-сенсора, N)` — build 45 moved this from a gate at the call site, which multiplied
-the configured rate by N instead of replacing it: при обоих значениях по
-умолчанию, равных 20, дальний житель пересканировал округу раз в 400 тиков вместо
-двадцати. A throttled mob **reacts late** — it notices
-targets, repaths, flees and re-aims on a coarser clock, so distant mobs drift and
-converge differently than in Vanilla. Movement, physics, damage, despawning, mob
-caps and spawn rules are untouched, so farm *rates* are normally unaffected, but
-anything relying on precise distant pathing can change. Exempt specific types
-with `optimizations.dab.blacklist`.
+Performance settings live where they always did: `config/canvas-server.yml`,
+`config/canvas-worlds.yml`, `config/paper-global.yml` and
+`config/paper-world-defaults.yml`. Rolia does not duplicate or override them.
 
-Мобы вдали от игроков **думают реже**: ИИ выполняется раз в N тиков, N растёт с
-расстоянием до `max-tick-interval` (20); ближе `start-distance` (12 блоков) троттлинга
-нет. Такой моб **реагирует с задержкой**. Спавн, мобкапы, физика, урон и деспавн не
-затронуты. Исключения — в `optimizations.dab.blacklist`.
+Настройки производительности — там же, где и были: `canvas-server.yml`,
+`canvas-worlds.yml`, `paper-global.yml`, `paper-world-defaults.yml`. Rolia их не
+дублирует и не переопределяет.
 
-**`optimizations.villager-lobotomize`.** A villager boxed into a 1×1 cell cannot
-path anywhere, so its whole brain tick is skipped. Trades and **restocking are
-preserved**, so pure trading halls behave like Vanilla. But skipping the brain
-skips every sensor and behaviour: a lobotomized villager does **not detect
-hostiles** (it will not flee or scream when a zombie arrives), does **not sleep**,
-does **not gossip**, does **not breed**, and does **not contribute to iron-golem
-spawning**. Turn it off if you run villager-based iron farms or breeders.
+**Public from the ordinary `level-seed`:** the landscape and the biome map.
+**Secret, from the 1024-bit key:** surface rules, decorations, caves and ravines,
+aquifers, ore, structures and their loot, slime chunks, End spike layout and
+stronghold rings.
 
-Торговец в клетке 1×1 не тикает мозг. Сделки и **пополнение товаров сохраняются**. Но
-он **не видит враждебных мобов**, **не спит**, **не сплетничает**, **не размножается** и
-**не участвует в спавне железных големов**. Выключите, если у вас железные фермы.
+**Публично по обычному `level-seed`:** рельеф и карта биомов.
+**Секретно, из 1024-битного ключа:** правила поверхности, декорации, пещеры и
+овраги, водоносные слои, руда, структуры и лут в них, слайм-чанки, расположение
+столбов Края и колец крепостей.
 
-**`optimizations.faster-network`** is the only one of the three that is genuinely
-behaviour-neutral: bulk long-array writes, byte-identical on the wire.
+> `rolia.yml` holds the only copy of the secret. Rolia does **not** write backup
+> copies of it. Back it up together with the world folder — lose it and the world
+> cannot be recovered.
+>
+> `rolia.yml` — единственная копия секрета. Rolia **не** делает его резервных
+> копий. Бэкапьте его вместе с миром: потеряете — мир не восстановить.
 
 ---
+
 
 ## Verifying / Проверка
 
