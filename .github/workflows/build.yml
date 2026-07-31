@@ -1638,6 +1638,11 @@ jobs:
           reap_servers pre
           [ -f /tmp/rolia.jar ] || { echo "FAIL: /tmp/rolia.jar missing"; exit 1; }
           mkdir -p testrun/cfg && cd testrun/cfg
+          # Rolia - build 46: keep the log whatever happens. The previous run failed somewhere in this
+          # step and published nothing, because the only copy of cfg.log sat AFTER the shutdown wait -
+          # so a server that failed to start or failed to stop took its own explanation with it. A trap
+          # costs nothing and turns "it failed somewhere here" into a log.
+          trap 'cp -f cfg.log /tmp/out/cfg.log 2>/dev/null || true; cp -f exitcode /tmp/out/cfg.exitcode 2>/dev/null || true' EXIT
           echo "eula=true" > eula.txt
           # Rolia - every server-launching step pins its own port and disables online-mode. A step that
           # does not is one leftover JVM away from FAILED TO BIND TO PORT.
