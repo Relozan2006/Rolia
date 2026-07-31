@@ -2,7 +2,7 @@ name: Build Rolia
 
 on:
   push:
-    branches: [main]
+    branches: [main, v26.2]
     paths-ignore:
       - '**.md'
       - 'docs/**'

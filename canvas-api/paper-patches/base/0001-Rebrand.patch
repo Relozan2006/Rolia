@@ -31,7 +31,7 @@ diff --git a/src/main/java/io/papermc/paper/ServerBuildInfo.java b/src/main/java
 index 652ff54e7c50412503725d628bfe72ed03059790..e394a3643ad582cd823ac61b8ce56b8b069c3ab4 100644
 --- a/src/main/java/io/papermc/paper/ServerBuildInfo.java
 +++ b/src/main/java/io/papermc/paper/ServerBuildInfo.java
-@@ -18,6 +18,16 @@ public interface ServerBuildInfo {
+@@ -18,6 +18,20 @@ public interface ServerBuildInfo {
       * The brand id for Paper.
       */
      Key BRAND_PAPER_ID = Key.key("papermc", "paper");
@@ -44,6 +44,10 @@ index 652ff54e7c50412503725d628bfe72ed03059790..e394a3643ad582cd823ac61b8ce56b8b
 +     * The brand id for Canvas.
 +     */
 +    Key BRAND_CANVAS_ID = Key.key("canvasmc", "canvas");
++    /**
++     * The brand id for Rolia.
++     */
++    Key BRAND_ROLIA_ID = Key.key("rolia", "rolia");
 +    // Canvas end - Rebrand
  
      /**
