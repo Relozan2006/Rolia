@@ -95,25 +95,76 @@ public final class Dab {
         }
     }
 
-    private static boolean computeShouldTick(final LivingEntity entity, final ServerLevel level,
-                                             final long gameTime, final int id) {
+    /**
+     * Rolia - build 45: the distance-to-interval mapping, extracted so the sensor schedule and the
+     * goal-selector gate cannot drift apart. Returns 1 for "do not throttle this mob".
+     */
+    private static int intervalFor(final LivingEntity entity, final ServerLevel level) {
         final int start = RoliaConfig.dabStartDistance();
         final int maxInterval = RoliaConfig.dabMaxTickInterval();
         final double startSq = (double) start * (double) start;
 
         final double nearestSq = nearestPlayerDistanceSq(entity, level);
-        final int interval;
         if (nearestSq < 0.0D) {
-            interval = maxInterval; // no players -> maximum throttle
-        } else if (nearestSq <= startSq) {
-            return true; // close to a player -> full AI every tick
-        } else {
-            final double dist = Math.sqrt(nearestSq);
-            int i = 1 + (int) ((dist - start) / Math.max(1, start));
-            if (i < 1) i = 1;
-            if (i > maxInterval) i = maxInterval;
-            interval = i;
+            return maxInterval; // no players -> maximum throttle
         }
+        if (nearestSq <= startSq) {
+            return 1; // close to a player -> full AI every tick
+        }
+        final double dist = Math.sqrt(nearestSq);
+        int i = 1 + (int) ((dist - start) / Math.max(1, start));
+        if (i < 1) i = 1;
+        if (i > maxInterval) i = maxInterval;
+        return i;
+    }
+
+    /**
+     * How many ticks a brain sensor should wait before its next scan.
+     *
+     * <p>Rolia - build 45. Until now DAB threw a gate in front of {@code Brain.tickSensors}. That
+     * looked like throttling and was not: {@code Sensor.tick} decrements its own counter only when
+     * it is called, so blocking the call did not slow the sensor to DAB's interval - it multiplied
+     * the operator's configured scan rate BY it. At Paper's default rate of 20 and DAB's default
+     * interval of 20, a distant villager rescanned once every 400 ticks. Twenty seconds, from two
+     * settings that each say one second.</p>
+     *
+     * <p>A throttle belongs in the schedule, so this returns {@code max(configured, interval)}: DAB
+     * can stretch a sensor that runs faster than its interval, and can never make one slower than
+     * the rate the operator wrote down. At the defaults the two are equal and nothing changes.</p>
+     *
+     * @param body the mob whose sensor is rescheduling
+     * @param configuredRate the rate Paper's config resolved for this sensor
+     * @return the number of ticks until the next scan
+     */
+    public static int sensorPeriod(final LivingEntity body, final int configuredRate) {
+        if (BROKEN.get()) {
+            return configuredRate;
+        }
+        try {
+            if (!RoliaConfig.dabEnabled()) {
+                return configuredRate;
+            }
+            if (!(body.level() instanceof ServerLevel level)) {
+                return configuredRate;
+            }
+            // the same exemptions the goal gate honours: a mob in a fluid, or on the blacklist, is
+            // never throttled, so its senses are not stretched either
+            if (body.isInWater() || body.isInLava()) {
+                return configuredRate;
+            }
+            if (RoliaConfig.dabHasBlacklist() && RoliaConfig.dabBlacklisted(body.getType())) {
+                return configuredRate;
+            }
+            return Math.max(configuredRate, intervalFor(body, level));
+        } catch (final Exception e) {
+            disable(e);
+            return configuredRate;
+        }
+    }
+
+    private static boolean computeShouldTick(final LivingEntity entity, final ServerLevel level,
+                                             final long gameTime, final int id) {
+        final int interval = intervalFor(entity, level);
         if (interval <= 1) {
             return true;
         }

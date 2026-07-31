@@ -164,12 +164,37 @@ def assert_contains(path, needle, why):
 BRAIN = "canvas-server/src/minecraft/java/net/minecraft/world/entity/ai/Brain.java"
 MOB = "canvas-server/src/minecraft/java/net/minecraft/world/entity/Mob.java"
 
-# 1) throttle brain sensors for distant mobs (villagers/piglins etc.)
-patch(BRAIN,
-      "    private void tickSensors(final ServerLevel level, final E body) {\n",
-      "    private void tickSensors(final ServerLevel level, final E body) {\n"
-      "        if (!io.rolia.optimization.Dab.shouldTickBrain(body)) return; // Rolia - DAB\n",
-      "Brain.tickSensors DAB gate", context="6b3d0d2669203e48")
+# 1) REMOVED in build 45 - the gate multiplied a documented setting instead of throttling it.
+#
+# It read:
+#     private void tickSensors(final ServerLevel level, final E body) {
+#         if (!Dab.shouldTickBrain(body)) return;    <- here
+#
+# Brain.tickSensors is nothing but a loop over sensor.tick(level, body), and Sensor.tick is:
+#     public final void tick(level, body) {
+#         if (--this.timeToTick <= 0L) {
+#             this.timeToTick = <Paper's configured sensor rate>;
+#             this.updateTargetingConditionRanges(body);
+#             this.doTick(level, body);
+#         }
+#     }
+# The counter only moves when the method is CALLED. Gating the caller therefore does not make the
+# sensor run on the DAB interval - it multiplies the operator's configured scanRate BY it. At
+# Paper's default rate of 20 and DAB's default interval of 20, a distant villager rescanned its
+# surroundings once every 400 ticks: twenty seconds, from a setting whose file says one.
+#
+# A throttle belongs in the schedule, so the hook moves to Sensor.tick itself - see hook 1b below.
+
+# 1b) throttle brain sensors by lengthening their SCHEDULE, which is the thing that decides how often
+# they run. Dab.sensorPeriod returns max(configuredRate, dabInterval): DAB may stretch a sensor that
+# scans faster than its interval and can never make one slower than the rate the operator configured.
+# At the defaults - Paper's rate 20, DAB's interval 20 - the two are equal and nothing changes, which
+# is exactly what the old gate failed to do when it turned 20 into 400.
+SENSOR = "canvas-server/src/minecraft/java/net/minecraft/world/entity/ai/sensing/Sensor.java"
+patch(SENSOR,
+      "            this.timeToTick = java.util.Objects.requireNonNullElse(level.paperConfig().tickRates.sensor.get(body.getType(), this.configKey), this.scanRate); // Paper - configurable sensor tick rate and timings\n",
+      "            this.timeToTick = io.rolia.optimization.Dab.sensorPeriod(body, java.util.Objects.requireNonNullElse(level.paperConfig().tickRates.sensor.get(body.getType(), this.configKey), this.scanRate)); // Paper - configurable sensor tick rate and timings // Rolia - DAB throttles the schedule, not the call\n",
+      "Sensor.tick DAB schedule", context="5b94c96e96141a1c")
 
 # 2) throttle goal-mob AI (zombies/skeletons etc.) far from players; navigation still runs (mobs keep moving)
 block = ("        this.sensing.tick();\n"
@@ -181,9 +206,19 @@ block = ("        this.sensing.tick();\n"
          "            this.targetSelector.tick();\n"
          "            this.goalSelector.tick();\n"
          "        }\n")
+# Rolia - build 45: this.sensing.tick() moves OUT of the gate.
+#
+# EntitySenses#tick clears the line-of-sight cache; the cache is what makes a mob's idea of what it
+# can see up to `optimizations.ai.line-of-sight-interval` ticks stale, and that option documents
+# "up to 3 ticks". Inside the gate it was cleared only on ticks DAB allowed, so the real staleness
+# was DAB's interval multiplied by that option - 60 ticks at the defaults, three seconds of a mob
+# shooting at a wall a player had already stepped out from behind. Clearing a cache is a couple of
+# field writes; there is nothing to save by skipping it, and it was never the point of the gate.
+gated = block[block.index("        int idBasedTickCount"):]
 patch(MOB, block,
+      "        this.sensing.tick(); // Rolia - build 45: outside the DAB gate; gating it multiplied line-of-sight-interval by the DAB interval\n"
       "        if (io.rolia.optimization.Dab.shouldTickBrain(this)) { // Rolia - DAB (throttle goal-mob AI far from players)\n"
-      + block +
+      + gated +
       "        } // Rolia - DAB end\n",
       "Mob.serverAiStep DAB gate", context="777ce9b1f1cea226")
 

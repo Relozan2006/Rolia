@@ -32,7 +32,7 @@ jobs:
       # Rolia - the ONE place the build number is written. It used to be hardcoded in three separate
       # places (the build step, the test step and the release step), and the release tag came from the
       # third, so editing two of them shipped a mislabelled release.
-      BUILD_NUMBER: 44
+      BUILD_NUMBER: 45
     defaults:
       run:
         shell: bash

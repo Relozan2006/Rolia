@@ -153,10 +153,15 @@ everywhere and can afford the CPU.
 поведенчески-нейтральной.
 
 **`optimizations.dab` — Dynamic Activation of Brain.** Mobs far from every player
-**think less often**: their AI (brain sensors and behaviours, or the goal
-selector) runs once every N ticks instead of every tick, where N grows with
-distance from 1 up to `max-tick-interval` (20) and mobs within `start-distance`
-(12 blocks) are never throttled. A throttled mob **reacts late** — it notices
+**think less often**, where N grows with distance from 1 up to
+`max-tick-interval` (20) and mobs within `start-distance` (12 blocks) are never
+throttled. Goal-driven mobs (зомби, скелеты) run their goal and target selectors
+once every N ticks instead of every tick. Brain-driven mobs (жители, пиглины)
+have their sensor schedule stretched to `max(собственная настроенная частота
+сенсора, N)` — build 45 moved this from a gate at the call site, which multiplied
+the configured rate by N instead of replacing it: при обоих значениях по
+умолчанию, равных 20, дальний житель пересканировал округу раз в 400 тиков вместо
+двадцати. A throttled mob **reacts late** — it notices
 targets, repaths, flees and re-aims on a coarser clock, so distant mobs drift and
 converge differently than in Vanilla. Movement, physics, damage, despawning, mob
 caps and spawn rules are untouched, so farm *rates* are normally unaffected, but
