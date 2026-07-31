@@ -154,10 +154,8 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
         for (WeakReference<E> ref : backed) {
             E value = ref.get();
             if (value != null && c.contains(value)) {
-                ref.clear();
-                if (backed.remove(ref)) {
-                    liveCount.decrementAndGet();
-                }
+                ref.clear(); // Rolia - build 45: clear() does not enqueue, so this will not also arrive via deadRefs
+                backed.remove(ref);
                 changed = true;
             }
         }
@@ -170,10 +168,8 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
         for (WeakReference<E> ref : backed) {
             E value = ref.get();
             if (value != null && !c.contains(value)) {
-                ref.clear();
-                if (backed.remove(ref)) {
-                    liveCount.decrementAndGet();
-                }
+                ref.clear(); // Rolia - build 45: as above
+                backed.remove(ref);
                 changed = true;
             }
         }
