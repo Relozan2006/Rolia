@@ -1,0 +1,134 @@
+name: Dump 26.2 sources
+
+# Rolia - build 46 scaffolding, and it exists for one reason.
+#
+# Rolia's per-file patches are written against the DECOMPILED Minecraft sources, and those sources
+# only exist inside a build - paperweight produces them from the Paper ref pinned in
+# gradle.properties. Moving from 26.1.2 to 26.2 changes every one of them, so every context line in
+# every Rolia patch is now wrong, and there is no copy of the new text to write against.
+#
+# The alternative to this workflow is to guess a patch, push, wait for a 40-minute build to reject
+# it, and guess again. Instead: apply CANVAS's patches only - with Rolia's removed, so the tree
+# applies cleanly - and publish the handful of decompiled files Rolia needs to touch. Then the
+# patches are written against the real text, once.
+#
+# Delete this workflow once build 46 is green. It is a ladder, not a floor.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [v26.2]
+    paths:
+      - '.github/workflows/sources.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sources-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+
+      - name: Remove Rolia's own patches and sources
+        run: |
+          set -e -o pipefail
+          # paperweight must see a stock Canvas 26.2 tree, or it will fail on our 26.1.2-era patches
+          # before it ever produces the sources we came for.
+          rm -f canvas-server/minecraft-patches/sources/net/minecraft/server/commands/SeedCommand.java.patch
+          rm -f canvas-server/minecraft-patches/sources/net/minecraft/world/RandomSequences.java.patch
+          rm -f canvas-server/minecraft-patches/sources/net/minecraft/world/entity/monster/Slime.java.patch
+          rm -f canvas-server/minecraft-patches/sources/net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java.patch
+          rm -rf canvas-server/minecraft-patches/sources/net/minecraft/world/level/chunk/status
+          rm -rf canvas-server/minecraft-patches/sources/net/minecraft/world/level/levelgen/feature
+          rm -f canvas-server/minecraft-patches/sources/net/minecraft/world/level/levelgen/structure/Structure.java.patch
+          rm -rf canvas-server/minecraft-patches/sources/net/minecraft/world/level/levelgen/structure/placement
+          rm -rf canvas-server/src/main/java/io/rolia
+          git config user.name  rolia-ci
+          git config user.email ci@rolia.local
+          git add -A
+          git -c commit.gpgsign=false commit -q -m "ci: stock Canvas tree for the source dump" || true
+          echo "Rolia patches removed; remaining per-file patches: $(find canvas-server/minecraft-patches/sources -name '*.patch' | wc -l)"
+
+      - name: Apply Canvas patches
+        timeout-minutes: 70
+        run: ./gradlew applyAllPatches --no-daemon --stacktrace 2>&1 | tail -40
+
+      - name: Collect the sources Rolia patches
+        run: |
+          set -e -o pipefail
+          mkdir -p /tmp/out/src
+          # Every file Rolia touches, plus the ones its worldgen hooks anchor into. A file that is
+          # missing here is reported rather than skipped silently - a silent skip is how you discover
+          # a renamed class three builds later.
+          for f in \
+            net/minecraft/server/commands/SeedCommand.java \
+            net/minecraft/world/RandomSequences.java \
+            net/minecraft/world/entity/monster/Slime.java \
+            net/minecraft/world/level/chunk/ChunkGeneratorStructureState.java \
+            net/minecraft/world/level/chunk/status/ChunkStep.java \
+            net/minecraft/world/level/levelgen/feature/EndSpikeFeature.java \
+            net/minecraft/world/level/levelgen/feature/GeodeFeature.java \
+            net/minecraft/world/level/levelgen/structure/Structure.java \
+            net/minecraft/world/level/levelgen/structure/placement/RandomSpreadStructurePlacement.java \
+            net/minecraft/world/level/levelgen/structure/placement/StructurePlacement.java \
+            net/minecraft/world/level/chunk/ChunkGenerator.java \
+            net/minecraft/server/level/ServerChunkCache.java \
+            net/minecraft/server/level/ServerLevel.java \
+            net/minecraft/world/level/levelgen/RandomState.java \
+            net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java \
+            net/minecraft/world/level/levelgen/carver/WorldCarver.java \
+            net/minecraft/world/level/levelgen/XoroshiroRandomSource.java \
+            net/minecraft/world/level/levelgen/RandomSupport.java \
+            net/minecraft/world/level/biome/BiomeManager.java \
+            net/minecraft/util/RandomSource.java \
+          ; do
+            src=$(find canvas-server/src/minecraft/java -path "*/$f" -type f 2>/dev/null | head -1)
+            if [ -n "$src" ]; then
+              mkdir -p "/tmp/out/src/$(dirname "$f")"
+              cp "$src" "/tmp/out/src/$f"
+              echo "  ok      $f"
+            else
+              echo "  MISSING $f"
+              echo "$f" >> /tmp/out/MISSING.txt
+            fi
+          done
+          # the CraftBukkit side lives in a different tree
+          for f in org/bukkit/craftbukkit/CraftChunk.java ; do
+            src=$(find paper-server/src/main/java canvas-server/src/main/java -path "*/$f" -type f 2>/dev/null | head -1)
+            if [ -n "$src" ]; then
+              mkdir -p "/tmp/out/src/$(dirname "$f")"; cp "$src" "/tmp/out/src/$f"; echo "  ok      $f"
+            else
+              echo "  MISSING $f"; echo "$f" >> /tmp/out/MISSING.txt
+            fi
+          done
+          # a map of where things actually live, so a rename is visible at a glance
+          (cd canvas-server/src/minecraft/java && find . -name '*.java' | sed 's#^\./##' | sort) > /tmp/out/all-sources.txt
+          echo "collected: $(find /tmp/out/src -type f | wc -l) files; total decompiled: $(wc -l < /tmp/out/all-sources.txt)"
+
+      - name: Publish to the srcdump branch
+        if: always()
+        run: |
+          set -x
+          set +e
+          cd /tmp/out
+          git init -q .
+          git config user.name  rolia-ci
+          git config user.email ci@rolia.local
+          git checkout -q -b srcdump
+          git add -A
+          git -c commit.gpgsign=false commit -q -m "26.2 decompiled sources for $GITHUB_SHA"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" srcdump
+          echo "pushed"
