@@ -1,40 +1,15 @@
 --- a/net/minecraft/world/level/chunk/ChunkGenerator.java
 +++ b/net/minecraft/world/level/chunk/ChunkGenerator.java
-@@ -22,6 +_,9 @@
- import java.util.function.Predicate;
- import java.util.function.Supplier;
- import java.util.stream.Collectors;
-+
-+import io.rolia.secureseed.Globals;
-+import io.rolia.secureseed.WorldgenCryptoRandom;
- import net.minecraft.CrashReport;
- import net.minecraft.CrashReportCategory;
- import net.minecraft.ReportedException;
-@@ -345,7 +_,7 @@
-             Map<Integer, List<Structure>> structuresByStep = structuresRegistry.stream()
-                 .collect(Collectors.groupingBy(structure -> structure.step().ordinal()));
-             List<FeatureSorter.StepFeatureData> featureList = this.featuresPerStep.get();
--            WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));
-+            WorldgenRandom random = new WorldgenCryptoRandom(origin.getX(), origin.getZ(), Globals.Salt.UNDEFINED, 0);
-             long decorationSeed = random.setDecorationSeed(level.getSeed(), origin.getX(), origin.getZ());
-             Set<Holder<Biome>> possibleBiomes = new ObjectArraySet<>();
-             ChunkPos.rangeClosed(sectionPos.chunk(), 1).forEach(chunkPos -> {
-@@ -464,8 +_,12 @@
-             int x = chunk.getPos().x();
-             int z = chunk.getPos().z();
-             for (org.bukkit.generator.BlockPopulator populator : world.getPopulators()) {
--                WorldgenRandom seededrandom = new WorldgenRandom(new net.minecraft.world.level.levelgen.LegacyRandomSource(level.getSeed()));
--                seededrandom.setDecorationSeed(level.getSeed(), x, z);
-+                //WorldgenRandom seededrandom = new WorldgenRandom(new net.minecraft.world.level.levelgen.LegacyRandomSource(level.getSeed()));
-+                //seededrandom.setDecorationSeed(level.getSeed(), x, z);
-+                WorldgenCryptoRandom seededrandom = new WorldgenCryptoRandom(x, z, Globals.Salt.BUKKIT_POPULATOR, 0); // Rolia - own salt domain; UNDEFINED collided exactly with a datapack structure set configured with salt: 0
-+                // Rolia - build 44: with secure-seed.enabled=false the constructor discards x/z, so every
-+                // chunk handed its BlockPopulator the identical random stream. No-op when the secret is on.
-+                if (!Globals.isSecureSeedEnabled()) seededrandom.setDecorationSeed(level.getSeed(), x, z);
-                 populator.populate(world, new org.bukkit.craftbukkit.util.RandomSourceWrapper.RandomWrapper(seededrandom), x, z, limitedRegion);
-             }
-             limitedRegion.saveEntities();
-@@ -503,6 +_,12 @@
+@@ -196,7 +_,7 @@
+             int chunkOriginX = SectionPos.blockToSectionCoord(pos.getX());
+             int chunkOriginZ = SectionPos.blockToSectionCoord(pos.getZ());
+ 
+-            for (int radius = 0; radius <= maxSearchRadius; radius++) {
++            for (int radius = (io.canvasmc.canvas.GlobalConfiguration.getInstance().chunkSystem.optimizeTreasureMapLocating ? maxSearchRadius : 0); radius <= maxSearchRadius; radius++) { // Canvas - optimize treasure map locating - just search the largest radius to avoid spamming iterations
+                 boolean foundSomething = false;
+ 
+                 for (Entry<StructurePlacement, Set<Holder<Structure>>> entry : randomSpreadEntries) {
+@@ -507,6 +_,12 @@
      ) {
          Map<Structure, LongSet> structures = structureManager.getAllStructuresAt(pos);
  
@@ -47,18 +22,3 @@
          for (Entry<Structure, LongSet> entry : structures.entrySet()) {
              Structure structure = entry.getKey();
              StructureSpawnOverride override = structure.spawnOverrides().get(mobCategory);
-@@ -569,8 +_,12 @@
-                             } else {
-                                 ArrayList<StructureSet.StructureSelectionEntry> options = new ArrayList<>(structures.size());
-                                 options.addAll(structures);
--                                WorldgenRandom random = new WorldgenRandom(new LegacyRandomSource(0L));
--                                random.setLargeFeatureSeed(state.getLevelSeed(), sourceChunkPos.x(), sourceChunkPos.z());
-+                                //WorldgenRandom random = new WorldgenRandom(new LegacyRandomSource(0L));
-+                                //random.setLargeFeatureSeed(state.getLevelSeed(), sourceChunkPos.x(), sourceChunkPos.z());
-+                                WorldgenRandom random = new WorldgenCryptoRandom(sourceChunkPos.x(), sourceChunkPos.z(), Globals.Salt.GENERATE_FEATURE, 0);
-+                                // Rolia - build 44: same as above; without this the weighted structure-set
-+                                // pick was identical in every chunk when the secret is off.
-+                                if (!Globals.isSecureSeedEnabled()) random.setLargeFeatureSeed(state.getLevelSeed(), sourceChunkPos.x(), sourceChunkPos.z());
-                                 int total = 0;
- 
-                                 for (StructureSet.StructureSelectionEntry option : options) {

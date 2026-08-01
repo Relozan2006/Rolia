@@ -31,7 +31,7 @@ diff --git a/src/main/java/io/papermc/paper/ServerBuildInfo.java b/src/main/java
 index 652ff54e7c50412503725d628bfe72ed03059790..e394a3643ad582cd823ac61b8ce56b8b069c3ab4 100644
 --- a/src/main/java/io/papermc/paper/ServerBuildInfo.java
 +++ b/src/main/java/io/papermc/paper/ServerBuildInfo.java
-@@ -18,6 +18,24 @@ public interface ServerBuildInfo {
+@@ -18,6 +18,20 @@ public interface ServerBuildInfo {
       * The brand id for Paper.
       */
      Key BRAND_PAPER_ID = Key.key("papermc", "paper");
@@ -43,10 +43,6 @@ index 652ff54e7c50412503725d628bfe72ed03059790..e394a3643ad582cd823ac61b8ce56b8b
 +    /**
 +     * The brand id for Canvas.
 +     */
-+    // Rolia - build 45: this read Key.key("rolia", "rolia"). A constant named BRAND_CANVAS_ID that
-+    // does not identify Canvas is a trap: every plugin detecting the platform through it stopped
-+    // recognising a server that is in fact a Canvas fork carrying Canvas's own API surface. The
-+    // constant gets its meaning back, and Rolia gets an id of its own.
 +    Key BRAND_CANVAS_ID = Key.key("canvasmc", "canvas");
 +    /**
 +     * The brand id for Rolia.

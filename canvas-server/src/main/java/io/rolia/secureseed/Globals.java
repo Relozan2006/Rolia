@@ -12,29 +12,30 @@ import java.util.Optional;
 /**
  * Rolia - the secure world seed.
  *
- * <h2>Build 40 model: terrain is PUBLIC, everything else is SECRET</h2>
+ * <h2>Build 46 model: the MAP is public, the CONTENTS are secret</h2>
  *
  * <p>Worldgen is deliberately split in two:</p>
  * <ul>
  *   <li><b>Public</b>, derived from the ordinary {@code level-seed} in server.properties: the terrain
- *       SHAPE. Concretely the {@code continentalness}, {@code erosion}, {@code ridge}, {@code offset}
- *       and {@code jagged} noises, {@code BlendedNoise}, and End-island shape. Anyone who knows the
- *       level seed can reproduce the landscape.</li>
- *   <li><b>Secret</b>, derived from the 1024-bit feature seed plus the salt: everything else. Biome
- *       climate ({@code temperature}/{@code vegetation} - i.e. WHICH biome sits on a given landform),
- *       caves, ravines, ore veins, aquifers, surface rules, structures, decorations, loot and slime
- *       chunks.</li>
+ *       SHAPE and the BIOME MAP. Concretely the {@code continentalness}, {@code erosion}, {@code ridge},
+ *       {@code offset} and {@code jagged} noises, the {@code temperature} and {@code vegetation} climate
+ *       noises, {@code BlendedNoise}, and End-island shape. Anyone who knows the level seed can
+ *       reproduce the landscape and see which biome sits on it.</li>
+ *   <li><b>Secret</b>, derived from the 1024-bit feature seed plus the salt: everything worth finding.
+ *       Surface rules, decorations, caves, ravines, ore veins, aquifers, structures and their loot,
+ *       slime chunks, End spike layout and stronghold rings.</li>
  * </ul>
  *
- * <p>Terrain shape and biome selection are coupled in 1.18+: the multi-noise biome source reads
- * continentalness, erosion, depth and ridges, which are the same noises that build the heightmap. So a
- * player who knows the level seed knows four of the six biome parameters. Temperature and vegetation
- * stay secret, which is what decides whether a given mountain is snowy or jungle. This is a deliberate,
- * documented limit, not an oversight.</p>
+ * <p>Builds 40-45 kept biome climate on the secret side. Build 46 moved it, deliberately: a world you
+ * cannot preview is hard to choose, and hiding the climate never hid the thing that matters. What
+ * protects the ore and the structures is the placement roll, and that is still secret. The cost is
+ * disclosed rather than hidden - because the biome map is public, anything that follows strictly from
+ * biome is inferable, and the world spawn point becomes predictable.</p>
  *
  * <p>The public/secret routing is a <b>whitelist</b>: {@link #isPublicTerrainNoise} names the public
- * noises and everything else falls to the secret side. That way a Minecraft update that adds a new
- * noise fails safe - the new noise is secret - rather than silently leaking.</p>
+ * noises, namespace included, and everything else falls to the secret side. That way a Minecraft update
+ * that adds a new noise, or a datapack that registers one under a name we know, fails safe - it is
+ * secret - rather than silently leaking.</p>
  */
 public class Globals {
     private static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
@@ -60,7 +61,12 @@ public class Globals {
      * five-argument {@link WorldgenCryptoRandom} constructor; relying on the ambient value there gave
      * wrong and unstable answers before build 40.</p>
      */
-    public static final ThreadLocal<Integer> dimension = ThreadLocal.withInitial(() -> 0);
+    // Rolia - build 46: package-private, was public. Build 44 made the 1024-bit seed private for the
+    // same reason and this field is the same class of hazard from the other end: a plugin could call
+    // Globals.dimension.set(...) on a region thread and silently corrupt every chunk generated on it
+    // afterwards, with no error anywhere. The only legitimate writer is setupGlobals, and the only
+    // reader outside it is WorldgenCryptoRandom, which is in this package.
+    static final ThreadLocal<Integer> dimension = ThreadLocal.withInitial(() -> 0);
 
     private static volatile boolean seedInitialized = false;
     private static final java.util.concurrent.ConcurrentHashMap<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>, Integer> DIMENSION_ID_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
@@ -78,10 +84,9 @@ public class Globals {
                     seedInitialized = true; // Rolia - volatile write; publishes the array contents above
                     // Rolia - the one authoritative startup line, emitted at the point of publication and
                     // derived from real state, so it cannot report "active" for a seed that is not.
-                    LOGGER.info("Rolia: config loaded (secure seed {}; DAB {}).",
+                    LOGGER.info("Rolia: config loaded (secure seed {}).",
                         isActive() ? "ACTIVE fp=" + seedFingerprint()
-                            : (RoliaConfig.secureSeedEnabled() ? "INACTIVE" : "DISABLED (secure-seed.enabled=false)"),
-                        RoliaConfig.dabEnabled() ? "ON" : "off");
+                            : (RoliaConfig.secureSeedEnabled() ? "INACTIVE" : "DISABLED (secure-seed.enabled=false)"));
                     if (!RoliaConfig.secureSeedEnabled()) {
                         LOGGER.warn("Rolia: secure-seed.enabled is FALSE - worldgen is plain Vanilla and everything");
                         LOGGER.warn("Rolia: in this world is computable from the public level-seed alone.");
@@ -110,7 +115,7 @@ public class Globals {
         if (!fingerprintDone) {
             verifyFingerprintOnce();
         }
-        dimension.set(stableDimensionId(world.dimension()));
+        dimension.set(boxedDimensionId(world.dimension()));
     }
 
     /**
@@ -145,18 +150,59 @@ public class Globals {
     }
 
     private static volatile boolean fingerprintDone = false;
-    private static final java.util.concurrent.atomic.AtomicInteger FINGERPRINT_ATTEMPTS = new java.util.concurrent.atomic.AtomicInteger();
+    private static volatile boolean fingerprintStarted = false;
+    private static volatile long fingerprintDeadline = 0L;
+    private static volatile long lastFingerprintAttempt = 0L;
+    private static final long FINGERPRINT_RETRY_NANOS = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(250);
 
+    /**
+     * Rolia - arm the "this world was made with a different secret" guard, giving up on a CLOCK.
+     *
+     * <p>Build 46 replaced a counter with a deadline, because the counter could not work on this
+     * server. The budget was 64 attempts, justified as "far more than the handful of getGenerator()
+     * calls that happen before the level storage exists" - which is a single-threaded estimate on a
+     * fork that has no main thread. {@code setupGlobals} is called from every Folia chunk worker and
+     * region thread at once, so on a 16-worker box the 64 attempts are spent in milliseconds, quite
+     * possibly before the level storage directory exists at all. After that {@code fingerprintDone}
+     * was true forever: no fingerprint was ever written beside {@code level.dat}, and
+     * {@code on-secret-mismatch: block} silently protected nothing for the life of that world.</p>
+     *
+     * <p>A deadline cannot be exhausted by concurrency - it is the same 60 seconds no matter how many
+     * threads are asking - and running out of it is now reported instead of being silent.</p>
+     */
     private static void verifyFingerprintOnce() {
-        // Cap the scans so a server whose world directory never appears where we look cannot keep
-        // hitting the disk forever. 64 attempts is far more than the handful of getGenerator() calls
-        // that happen before the level storage exists.
-        if (FINGERPRINT_ATTEMPTS.incrementAndGet() > 64) {
+        final long now = System.nanoTime();
+        // Rolia - a separate flag rather than `deadline == 0L`, because nanoTime's origin is arbitrary
+        // and on Linux it counts from boot, so 0 is a value it can genuinely return. Using it as an
+        // "unset" sentinel would silently disengage the throttle below.
+        if (!fingerprintStarted) {
+            fingerprintStarted = true;
+            fingerprintDeadline = now + java.util.concurrent.TimeUnit.SECONDS.toNanos(60);
+            lastFingerprintAttempt = now;
+        } else {
+            // Throttle the retries. This runs from ServerChunkCache#getGenerator(), which is called
+            // constantly while chunks generate, and the check lists a directory. Build 40.0 ran it
+            // unconditionally here and chunk generation fell from ~44 chunks/s to ~7. One attempt per
+            // 250ms costs nothing and is bounded by wall clock rather than by thread count, so adding
+            // workers cannot make it either more expensive or less likely to succeed.
+            if (now - lastFingerprintAttempt < FINGERPRINT_RETRY_NANOS) {
+                return;
+            }
+            lastFingerprintAttempt = now;
+        }
+        final long deadline = fingerprintDeadline;
+
+        if (RoliaConfig.verifyWorldFingerprint(seedFingerprintCached())) {
             fingerprintDone = true;
             return;
         }
-        if (RoliaConfig.verifyWorldFingerprint(seedFingerprintCached())) {
+        if (now - deadline >= 0L) {
             fingerprintDone = true;
+            LOGGER.error("Rolia: no world directory was found within 60s, so the secret-mismatch guard is");
+            LOGGER.error("Rolia: now DISABLED for this run. A world generated with a different rolia.yml");
+            LOGGER.error("Rolia: will NOT be detected. This usually means the server was started from a");
+            LOGGER.error("Rolia: directory that does not contain the world folder - check the 'using config'");
+            LOGGER.error("Rolia: line above and start the server from beside your world.");
         }
     }
 
@@ -183,6 +229,18 @@ public class Globals {
      * got IDENTICAL separators. The identifier never moves, so the separator never moves.</p>
      */
     public static int stableDimensionId(net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> key) {
+        return boxedDimensionId(key);
+    }
+
+    /**
+     * Rolia - the same value, kept boxed.
+     *
+     * <p>{@link #setupGlobals} stores it in a {@code ThreadLocal<Integer>} on a path its own comment
+     * says must not allocate per call. Returning {@code int} meant every one of those stores boxed a
+     * fresh {@code Integer}, because the id is a MAC output and so is essentially never inside the
+     * {@code Integer} cache range. The cache already holds a boxed instance; hand that one out.</p>
+     */
+    private static Integer boxedDimensionId(net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> key) {
         Integer cached = DIMENSION_ID_CACHE.get(key);
         if (cached != null) {
             return cached;
@@ -191,9 +249,9 @@ public class Globals {
         // worlds whose ids agreed on a 64-byte prefix shared a separator - the very collision this
         // method exists to prevent.
         final byte[] idBytes = key.identifier().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        final int id = (int) Hashing.mac(null, idBytes)[0];
-        DIMENSION_ID_CACHE.put(key, id);
-        return id;
+        final Integer id = (int) Hashing.mac(null, idBytes)[0];
+        final Integer raced = DIMENSION_ID_CACHE.putIfAbsent(key, id);
+        return raced != null ? raced : id; // one shared box per dimension, even under a race
     }
 
     /** Rolia - convenience for call sites that hold a level and must not rely on the ambient value. */
@@ -216,11 +274,23 @@ public class Globals {
 
     /**
      * Rolia - the correct way to read the shared seed from a thread that did not itself call
-     * {@link #setupGlobals}. The branch consumes the volatile read, so it cannot be optimised away.
+     * {@link #setupGlobals}. The volatile read of {@code seedInitialized} establishes the happens-before
+     * edge to the array writes inside the publication block.
+     *
+     * <p>Build 46 made the guard real. Both branches used to {@code return worldSeed}, so the check was
+     * a no-op that the JIT was free to drop entirely, and the javadoc's claim that "the branch consumes
+     * the volatile read" described a branch that did not exist. That mattered because
+     * {@code WorldgenCryptoRandom} caches the derived key for the whole process on first use: a single
+     * read before publication would have baked the ALL-ZERO seed into every chunk the server ever
+     * generates, silently, while the startup line still printed a healthy-looking fingerprint. Fail
+     * loudly instead - if this ever throws, the alternative was an unrecoverable world.</p>
      */
     static long[] publishedWorldSeed() { // Rolia - build 44: package-private. It hands back the LIVE secret array; nothing outside io.rolia.secureseed has ever needed it, and leaving it public meant the private field above bought nothing.
-        if (seedInitialized) {
-            return worldSeed; // published - the volatile read above orders the writes before this point
+        if (!seedInitialized && isSecureSeedEnabled()) {
+            throw new IllegalStateException(
+                "Rolia: worldgen asked for the secret before it was published. This is a bug in the "
+                    + "publication hooks (ServerChunkCache#getGenerator, ServerLevel construction, "
+                    + "ChunkStep#apply); generating now would key the entire world off zeros.");
         }
         return worldSeed;
     }
@@ -280,28 +350,62 @@ public class Globals {
      * <p>Deliberately a whitelist: anything not named here - including any noise a future Minecraft
      * version introduces - is routed to the secret. Failing safe matters more than failing convenient.</p>
      *
-     * <p>Note {@code temperature} and {@code vegetation} are NOT here: they select which biome sits on a
-     * landform, which is exactly the thing we want hidden. They do not feed the overworld heightmap.</p>
+     * <p>The namespace is checked, not just the path. Matching on the path alone was a fail-OPEN hole
+     * in exactly the property this method advertises: a datapack or mod registering {@code mypack:erosion}
+     * or {@code mypack:temperature} was routed to the public root and derived from the ordinary
+     * level-seed. The secret side has always used the full namespaced id as its domain string, so only
+     * this side was blind.</p>
      */
     public static boolean isPublicTerrainNoise(final net.minecraft.resources.ResourceKey<?> noise) {
         if (!isSecureSeedEnabled()) {
             return true; // Rolia - switched off: every noise goes back to the public root, i.e. vanilla
         }
-        final String path = noise.identifier().getPath();
+        final net.minecraft.resources.Identifier id = noise.identifier();
+        if (!net.minecraft.resources.Identifier.DEFAULT_NAMESPACE.equals(id.getNamespace())) {
+            return false; // Rolia - build 46: a third-party noise of the same name is NOT the vanilla one
+        }
+        final String path = id.getPath();
         return switch (path) {
+            // terrain shape
             case "continentalness", "continentalness_large",
                  "erosion", "erosion_large",
                  "ridge", "offset", "jagged" -> true;
+            // Rolia - build 46: biome climate joins the public side.
+            //
+            // Since 1.18 the multi-noise biome source reads six parameters: continentalness, erosion,
+            // weirdness (that is `ridge`), depth, temperature and vegetation. The first three are the
+            // very noises the landscape is built from and were already public; depth is computed from
+            // terrain, so it was public by construction. Only temperature and vegetation were secret -
+            // and those two are exactly what decides whether a mountain is snowy or jungle. Moving them
+            // here makes the biome map reproducible from the ordinary level-seed, which is the point:
+            // a seed-finder site now shows the right biomes as well as the right landscape.
+            //
+            // The two legacy Nether climate noises moved with them, by deleting their hooks in
+            // apply_seed_hooks.py: "the biome map is public" has to hold in all three dimensions, or a
+            // seed-finding site shows the right Overworld and the wrong Nether and the claim is false.
+            //
+            // Nothing else moves. Surface rules, decorations, carvers, aquifers, ore, structures, loot
+            // and slime chunks keep their own independent secret domains, so the biome map still cannot
+            // tell you where anything actually is.
+            case "temperature", "temperature_large",
+                 "vegetation", "vegetation_large" -> true;
             default -> false;
         };
     }
 
-    /** Rolia - the same whitelist for the named positional factories (BlendedNoise uses "terrain"). */
+    /**
+     * Rolia - the same whitelist for the named positional factories (BlendedNoise uses "terrain").
+     *
+     * <p>Namespace-checked for the same reason as {@link #isPublicTerrainNoise}. The vanilla id is a
+     * constant so the exposure was theoretical, but a whitelist that is namespace-blind in one place
+     * and not the other is a trap for whoever reads one and assumes the other.</p>
+     */
     public static boolean isPublicTerrainFactory(final net.minecraft.resources.Identifier name) {
         if (!isSecureSeedEnabled()) {
             return true; // Rolia - switched off: vanilla routing
         }
-        return "terrain".equals(name.getPath());
+        return net.minecraft.resources.Identifier.DEFAULT_NAMESPACE.equals(name.getNamespace())
+            && "terrain".equals(name.getPath());
     }
 
     /**
@@ -358,18 +462,12 @@ public class Globals {
         return new net.minecraft.world.level.levelgen.XoroshiroRandomSource(k[0], k[1]).forkPositional();
     }
 
-    /**
-     * Rolia - a full-width secret RandomSource for the two legacy Nether climate noises.
-     *
-     * <p>Vanilla builds those from {@code new LegacyRandomSource(seed + offset)}, which keeps 48 bits of
-     * state. Nether biome climate is a SECRET system in the build 40 model, so it must not go through a
-     * 48-bit funnel derived from anything public.</p>
-     */
-    public static net.minecraft.util.RandomSource secretClimateSource(final long offset) {
-        // Rolia - build 44: mix the level seed, same reasoning as secretPositionalFactory above.
-        final long[] k = Hashing.derive("climate-legacy", publishedWorldSeed(), offset ^ levelSeed());
-        return new net.minecraft.world.level.levelgen.XoroshiroRandomSource(k[0], k[1]);
-    }
+    // Rolia - build 46: secretClimateSource was deleted here along with its two callers.
+    //
+    // It produced a full-width secret RandomSource for the two legacy Nether climate noises, because
+    // in the build 40 model biome climate was secret. Build 46 makes the biome map public, and it has
+    // to be public in all three dimensions or the claim is not true - so the Nether climate noises go
+    // back to vanilla's own construction and this has nothing left to serve.
 
     // ---------------------------------------------------------------------------------------------
     // Seed derivation for vanilla systems that would otherwise leak the raw level seed
@@ -381,13 +479,19 @@ public class Globals {
      */
     public static long transformSeed(long levelSeed, long domain) {
         if (!isSecureSeedEnabled()) {
-            // Rolia - build 44: this had NO enabled-check, and publishedWorldSeed() returns the real
-            // secret regardless of the switch. Its two callers are loot random sequences and the End
-            // spike layout, so with secure-seed.enabled=false a world still had non-Vanilla loot and
-            // non-Vanilla obsidian pillars, both keyed to rolia.yml - directly contradicting the
-            // config's own promise that such a world "is an ordinary Minecraft world and can be moved
-            // to any server". Vanilla's own mixing for these two call sites is the plain XOR.
-            return levelSeed ^ domain;
+            // Rolia - build 44 added this enabled-check, because without it a world with
+            // secure-seed.enabled=false still had non-Vanilla loot sequences and non-Vanilla obsidian
+            // pillars, both keyed to rolia.yml - contradicting the config's own promise that such a
+            // world "is an ordinary Minecraft world and can be moved to any server".
+            //
+            // Build 46: it returned `levelSeed ^ domain`, on the claim that "vanilla's own mixing for
+            // these two call sites is the plain XOR". That was wrong at both sites, so the promise was
+            // still not kept. Vanilla's EndSpikeFeature is createThreadLocalInstance(level.getSeed())
+            // with no XOR at all, and vanilla's RandomSequences is `(includeWorldSeed ? worldSeed : 0L)
+            // ^ salt` - an XOR with the caller's own salt, which the patched line still applies OUTSIDE
+            // this call. Mixing in the Rolia domain constant here was an extra term in both cases.
+            // Returning the seed untouched makes each call site reduce to exactly the line it replaced.
+            return levelSeed;
         }
         return Hashing.derive("legacy-transform", publishedWorldSeed(), levelSeed ^ domain)[0];
     }
@@ -429,18 +533,36 @@ public class Globals {
         return seed;
     }
 
+    /**
+     * Rolia - parse the stored 1024-bit feature seed, refusing anything that is not exactly one.
+     *
+     * <p>Build 46 made this strict. It used to accept up to 400 characters and then discard whatever
+     * did not fit in 1024 bits, and to mask a negative value into range - so a corrupted line produced
+     * a DIFFERENT, valid-looking secret instead of an error. That defeated the whole point of build
+     * 44's "present but malformed is a hard refusal": the corruption modes that rule was written for
+     * (a truncated line, an editor that wrapped the 309-digit number, a bad merge) are exactly the ones
+     * that change its length or sign. Silently generating a different world is the worst possible
+     * response to a damaged secret.</p>
+     */
     public static Optional<long[]> parseSeed(String seedStr) {
         if (seedStr == null || seedStr.isEmpty()) return Optional.empty();
-        // Rolia - bound the input: an operator-supplied or file-supplied value of unbounded length
-        // would otherwise stall or OOM startup inside BigInteger.
-        if (seedStr.length() > 400) return Optional.empty();
+        final String trimmed = seedStr.trim();
+        // A loose guard only, so a file- or operator-supplied value of unbounded length cannot stall
+        // startup inside BigInteger. The real bound is bitLength below. Testing the DIGIT COUNT against
+        // 309 (the exact width of a 1024-bit value) was tried first and was too sharp: it also rejected
+        // a leading "+" or leading zeros, which are valid decimal that BigInteger accepts, and the
+        // consequence of a false rejection here is that the server refuses to boot on a mathematically
+        // correct seed.
+        if (trimmed.isEmpty() || trimmed.length() > 512) return Optional.empty();
 
         try {
+            final BigInteger value = new BigInteger(trimmed);
+            // Refuse rather than reinterpret: both of these used to be silently rewritten into some
+            // other secret, which is indistinguishable from the operator's real one at a glance.
+            if (value.signum() < 0 || value.bitLength() > WORLD_SEED_BITS) return Optional.empty();
+
             long[] seed = new long[WORLD_SEED_LONGS];
-            BigInteger seedBigInt = new BigInteger(seedStr.trim());
-            if (seedBigInt.signum() < 0) {
-                seedBigInt = seedBigInt.and(BigInteger.ONE.shiftLeft(WORLD_SEED_BITS).subtract(BigInteger.ONE));
-            }
+            BigInteger seedBigInt = value;
             for (int i = 0; i < WORLD_SEED_LONGS; i++) {
                 BigInteger[] divRem = seedBigInt.divideAndRemainder(BigInteger.ONE.shiftLeft(64));
                 seed[i] = divRem[1].longValue();
@@ -472,8 +594,8 @@ public class Globals {
      * <ul>
      *   <li>{@link #isPublicTerrainNoise} and {@link #isPublicTerrainFactory} answer true for
      *       everything, so {@code RandomState} routes every noise back through the public root;</li>
-     *   <li>{@link #secretPositionalFactory} and {@link #secretClimateSource} are not called at all -
-     *       the hooks in {@code RandomState} pick the vanilla expression instead;</li>
+     *   <li>{@link #secretPositionalFactory} is not called at all - the hooks in {@code RandomState}
+     *       pick the vanilla expression instead;</li>
      *   <li>{@link WorldgenCryptoRandom} degrades to the plain {@code WorldgenRandom} it extends, so
      *       every one of the fifteen worldgen call sites becomes vanilla without being touched;</li>
      *   <li>{@link #isActive} is false, so the fingerprint written beside {@code level.dat} is the

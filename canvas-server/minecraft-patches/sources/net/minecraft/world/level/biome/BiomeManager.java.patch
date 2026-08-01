@@ -8,33 +8,20 @@
  
      public BiomeManager(final BiomeManager.NoiseBiomeSource noiseBiomeSource, final long seed) {
          this.noiseBiomeSource = noiseBiomeSource;
-@@ -51,7 +_,46 @@
+@@ -51,7 +_,33 @@
              double distanceX = xEven ? fractX : fractX - 1.0;
              double distanceY = yEven ? fractY : fractY - 1.0;
              double distanceZ = zEven ? fractZ : fractZ - 1.0;
 -            double next = getFiddledDistance(this.biomeZoomSeed, cornerX, cornerY, cornerZ, distanceX, distanceY, distanceZ);
 +            // Canvas start - optimize getBiome
 +            // This code block is new
-+            // Rolia start - fix the early-out bound. Canvas computed Math.max(d + m, |d - m|), which for
-+            // every real d and m is |d| + m: the MAXIMUM of (d + fiddle)^2, not the minimum. The skip test
-+            // `minFiddledDistance < bound` is only sound with a LOWER bound - "even this corner's best case
-+            // cannot beat what we already have". With the upper bound it fired for almost every corner
-+            // after i == 0, so corner 0 won nearly always and biome borders lost Vanilla's jitter, becoming
-+            // aligned to the 4x4x4 quart grid. Measured against a faithful reimplementation of Vanilla's
-+            // getFiddledDistance over 40 000 random block positions: the shipped bound picked a DIFFERENT
-+            // corner than Vanilla for 26 916 of them (67.3%), and returned corner 0 for 86% against
-+            // Vanilla's 24%. With the bound below: 0 mismatches out of 40 000, and the early-out is kept.
-+            //
-+            // min over f in [-m, m] of (d + f)^2 is (max(0, |d| - m))^2 - zero when the interval straddles
-+            // the origin, and the nearer endpoint otherwise.
 +            double maxDistanceY = 0.0D, maxDistanceZ = 0.0D;
 +            if (i != 0) {
-+                maxDistanceY = Mth.square(Math.max(0.0D, Math.abs(distanceY) - canvas$maxFiddle));
-+                maxDistanceZ = Mth.square(Math.max(0.0D, Math.abs(distanceZ) - canvas$maxFiddle));
-+                double maxDistanceX = Mth.square(Math.max(0.0D, Math.abs(distanceX) - canvas$maxFiddle));
++                maxDistanceY = Mth.square(Math.max(distanceY + canvas$maxFiddle, Math.abs(distanceY - canvas$maxFiddle)));
++                maxDistanceZ = Mth.square(Math.max(distanceZ + canvas$maxFiddle, Math.abs(distanceZ - canvas$maxFiddle)));
++                double maxDistanceX = Mth.square(Math.max(distanceX + canvas$maxFiddle, Math.abs(distanceX - canvas$maxFiddle)));
 +                if (minFiddledDistance < maxDistanceX + maxDistanceY + maxDistanceZ) continue;
 +            }
-+            // Rolia end - fix the early-out bound
 +            // I transferred the code from getFiddledDistance to here, so I could call continue halfway through
 +            long rval = LinearCongruentialGenerator.next(this.biomeZoomSeed, cornerX);
 +            rval = LinearCongruentialGenerator.next(rval, cornerY);

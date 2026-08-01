@@ -7,15 +7,17 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 import org.jetbrains.annotations.Contract;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.DumperOptions;
@@ -42,27 +44,6 @@ public class ConfigurationProvider {
     // note: if we want to preserve comments, we have to use compose() on file reads
     private static final Yaml YAML;
 
-    // Rolia - close the readers (were leaking a file descriptor on every config load/reload)
-    private static Node composeFile(final java.io.File file) throws FileNotFoundException {
-        try (java.io.Reader r = new FileReader(file)) {
-            return YAML.compose(r);
-        } catch (FileNotFoundException e) {
-            throw e;
-        } catch (java.io.IOException e) {
-            throw new java.io.UncheckedIOException(e);
-        }
-    }
-
-    private static Object loadAsFile(final java.io.File file, final Class<?> type) throws FileNotFoundException {
-        try (java.io.Reader r = new FileReader(file)) {
-            return YAML.loadAs(r, type);
-        } catch (FileNotFoundException e) {
-            throw e;
-        } catch (java.io.IOException e) {
-            throw new java.io.UncheckedIOException(e);
-        }
-    }
-
     static {
         LOADER_OPTIONS = new LoaderOptions();
         LOADER_OPTIONS.setProcessComments(true);
@@ -74,25 +55,25 @@ public class ConfigurationProvider {
         DUMPER_OPTIONS.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
         DUMPER_OPTIONS.setIndent(3); // default is 2
 
-        FieldOrderPropertyUtils propertyUtils = new FieldOrderPropertyUtils();
+        final FieldOrderPropertyUtils propertyUtils = new FieldOrderPropertyUtils();
 
         // from testing, it seems like these need to be set to make comments work
         // we also define a custom property utils so the order of the fields is
         // defined by the declaration order of the fields in the class
 
-        Representer representer = new Representer(DUMPER_OPTIONS) {
+        final Representer representer = new Representer(DUMPER_OPTIONS) {
             private boolean representingKey = false;
 
             @Contract("_, _, _ -> new")
             @Override
-            protected @NonNull MappingNode representMapping(Tag tag, @NonNull Map<?, ?> mapping, DumperOptions.FlowStyle flowStyle) {
+            protected MappingNode representMapping(final Tag tag, final Map<?, ?> mapping, final DumperOptions.FlowStyle flowStyle) {
                 // temporarily wrap representData so we can toggle the flag
-                List<NodeTuple> tuples = new ArrayList<>();
+                final List<NodeTuple> tuples = new ArrayList<>();
                 for (Map.Entry<?, ?> entry : mapping.entrySet()) {
                     representingKey = true;
-                    Node keyNode = representData(entry.getKey());
+                    final Node keyNode = representData(entry.getKey());
                     representingKey = false;
-                    Node valueNode = representData(entry.getValue());
+                    final Node valueNode = representData(entry.getValue());
                     tuples.add(new NodeTuple(keyNode, valueNode));
                 }
                 return new MappingNode(tag, tuples, flowStyle);
@@ -100,21 +81,21 @@ public class ConfigurationProvider {
 
             @Contract("_, _ -> new")
             @Override
-            protected @NonNull MappingNode representJavaBean(@NonNull Set<Property> properties, Object javaBean) {
-                List<NodeTuple> tuples = new ArrayList<>();
+            protected MappingNode representJavaBean(final Set<Property> properties, final Object javaBean) {
+                final List<NodeTuple> tuples = new ArrayList<>();
                 for (Property property : properties) {
                     representingKey = true;
-                    Node keyNode = representData(property.getName());
+                    final Node keyNode = representData(property.getName());
                     representingKey = false;
-                    Node valueNode = representData(property.get(javaBean));
+                    final Node valueNode = representData(property.get(javaBean));
                     tuples.add(new NodeTuple(keyNode, valueNode));
                 }
-                Tag tag = getTag(javaBean.getClass(), Tag.MAP);
+                final Tag tag = getTag(javaBean.getClass(), Tag.MAP);
                 return new MappingNode(tag, tuples, DUMPER_OPTIONS.getDefaultFlowStyle());
             }
 
             @Override
-            protected Node representScalar(Tag tag, String value, DumperOptions.ScalarStyle style) {
+            protected Node representScalar(final Tag tag, final String value, DumperOptions.ScalarStyle style) {
                 if (!representingKey && tag.equals(Tag.STR)) {
                     style = DumperOptions.ScalarStyle.DOUBLE_QUOTED;
                 }
@@ -122,7 +103,7 @@ public class ConfigurationProvider {
             }
 
             @Override
-            protected Tag getTag(@NonNull Class<?> clazz, Tag defaultTag) {
+            protected Tag getTag(final Class<?> clazz, final Tag defaultTag) {
                 if (clazz.isEnum()) {
                     return Tag.STR;
                 }
@@ -132,7 +113,7 @@ public class ConfigurationProvider {
         representer.setPropertyUtils(propertyUtils);
         representer.getPropertyUtils().setBeanAccess(BeanAccess.FIELD);
 
-        Constructor constructor = new Constructor(LOADER_OPTIONS);
+        final Constructor constructor = new Constructor(LOADER_OPTIONS);
         constructor.setPropertyUtils(propertyUtils);
         constructor.getPropertyUtils().setBeanAccess(BeanAccess.FIELD);
 
@@ -144,138 +125,18 @@ public class ConfigurationProvider {
         );
     }
 
-    private static <C extends Part> void floodFill(
-        final @NonNull Path pathAbsolute,
-        final int commentCharLim,
-        final @Nullable Resolver<C> resolver,
-        final C defaultObj,
-        final @Nullable String[] header
-    ) {
-        LOGGER.info("{} doesn't exist, using flood fill", pathAbsolute.getFileName());
-
-        Node representation = YAML.represent(defaultObj);
-        Token.injectComments(defaultObj.getClass(), representation, commentCharLim);
-
-        // we need to set this, or it will include a global tag
-        representation.setTag(Tag.MAP);
-
-        try {
-            write(pathAbsolute, representation, header, false);
-        } catch (IOException ioe) {
-            throw new RuntimeException("Couldn't save config", ioe);
-        }
-
-        // finished load, call resolver and return
-        if (resolver != null) {
-            // resolver CAN be null, the only time this happens is when the
-            // caller wants to handle this themsleves
-            resolver.onFinishLoad(injectNode(defaultObj, representation));
-        }
-
-        // we don't have to do anything about trying to patch this, no file was present, return
-    }
-
-    @Contract("_, _ -> param1")
-    private static <C extends Part> @NonNull C injectNode(final @NonNull C defaultObj, final Node node) {
-        defaultObj.node.setValue(node);
-        return defaultObj;
-    }
-
-    private static void mergeNodes(
-        final @NonNull MappingNode baseMapping,
-        final @NonNull MappingNode patchMapping,
-        final @NonNull String prefix
-    ) {
-        Map<String, NodeTuple> baseKeys = NodeDiff.indexByKey(baseMapping);
-        Map<String, NodeTuple> patchKeys = NodeDiff.indexByKey(patchMapping);
-
-        for (Map.Entry<String, NodeTuple> patchEntry : patchKeys.entrySet()) {
-            String key = patchEntry.getKey();
-            String fqn = prefix.isEmpty() ? key : prefix + "." + key;
-
-            if (!baseKeys.containsKey(key)) {
-                // patch references a key that no longer exists in the base — skip
-                LOGGER.warn("Patch key '{}' does not exist in base config, skipping", fqn);
-                continue;
-            }
-
-            Node baseValue = baseKeys.get(key).getValueNode();
-            Node patchValue = patchEntry.getValue().getValueNode();
-
-            if (baseValue instanceof MappingNode bm && patchValue instanceof MappingNode pm) {
-                // both are sections, recurse rather than replacing the whole section
-                mergeNodes(bm, pm, fqn);
-            }
-            else {
-                // scalar or sequence, swap the base tuple out for the patch tuple
-                List<NodeTuple> baseTuples = baseMapping.getValue();
-                baseTuples.replaceAll(tuple -> {
-                    if (!(tuple.getKeyNode() instanceof ScalarNode sk)) return tuple;
-                    if (!sk.getValue().equals(key)) return tuple;
-                    // keep the base key node but take the patch's value node
-                    return new NodeTuple(tuple.getKeyNode(), patchValue);
-                });
-
-                LOGGER.debug("Patch applied override for '{}'", fqn);
-            }
-        }
-    }
-
-    protected static void write(
-        final @NonNull Path pathAbsolute, final Node representation, final @Nullable String[] header, final boolean alreadyExisted
-    ) throws IOException {
-        // only write the header on first creation, because if the file already existed,
-        // the user may have edited or removed it intentionally, so we never touch it
-        if (!alreadyExisted && header != null) {
-            // the header is special, it can define its own lines and its own formatting
-            List<CommentLine> lines = new ArrayList<>();
-            for (final String str : header) {
-                if (str == null)
-                    throw new IllegalArgumentException("Line in header must not be null. If you want a blank line, use an empty string");
-                // we specifically do not let the token system format this, we trust the
-                // header is formatted literally and to the extent the user wants
-                lines.add(Token.toCommentLine(str));
-            }
-            // add blank line so that it's kinda separated from the other comments
-            lines.add(new CommentLine(null, null, "", CommentType.BLANK_LINE));
-            representation.setBlockComments(lines);
-        }
-
-        // now that we wrote the header, write to file
-        Files.createDirectories(pathAbsolute.getParent());
-        // Rolia - build 44: this was `new FileWriter(file)`, which TRUNCATES the operator's live config
-        // before a single byte is written - and buildSolidConfiguration rewrites the file on every
-        // start, not just when something changed. A crash, an OOM, a kill or a full disk between the
-        // truncate and the flush left canvas-server.yml empty or half-written, and the next boot then
-        // saw a null document, flood-filled defaults, and silently discarded every setting the operator
-        // had tuned. Write to a temp file and move it into place instead - the same pattern
-        // io.rolia.RoliaConfig#writeConfig already uses. Also pin UTF-8 explicitly: YAML is defined as
-        // UTF-8, the old code used the platform default on both read and write, and this project ships
-        // Russian documentation and operators put Cyrillic in MOTD and message options.
-        final Path tmp = pathAbsolute.resolveSibling(pathAbsolute.getFileName() + ".tmp");
-        try (java.io.Writer fw = Files.newBufferedWriter(tmp, java.nio.charset.StandardCharsets.UTF_8)) {
-            YAML.serialize(representation, fw);
-        }
-        try {
-            Files.move(tmp, pathAbsolute, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-        } catch (final java.nio.file.AtomicMoveNotSupportedException e) {
-            Files.move(tmp, pathAbsolute, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        }
-    }
-
     public static <C extends Part> void buildSolidConfiguration(
-        final Path pathAbsolute,
-        final @NonNull Supplier<C> defaultSupplier,
-        final int commentCharLim,
+        final Path absolutePath,
+        final Supplier<C> defaultSupplier,
+        final int wrapLimit,
         final Resolver<C> resolver,
-        final @Nullable String[] header
+        final String... header
     ) {
         final C defaultObj = defaultSupplier.get();
 
         // if it doesn't exist, flood fill
-        if (!Files.exists(pathAbsolute)) {
-            floodFill(pathAbsolute, commentCharLim, resolver, defaultObj, header);
+        if (!Files.exists(absolutePath)) {
+            floodFill(absolutePath, wrapLimit, resolver, defaultObj, header);
             return;
         }
 
@@ -287,17 +148,17 @@ public class ConfigurationProvider {
             //       configured our constructor/representer, so for new comments we should just
             //       take the object representation and tokenize it, pull the added configs,
             //       and then inject those comments into the new file representation nodes
-            Node fileRepresentation = composeFile(pathAbsolute.toFile());
-            Node objectRepresentation = YAML.represent(defaultObj);
+            final Node fileRepresentation = composeFromFile(absolutePath);
+            final Node objectRepresentation = YAML.represent(defaultObj);
 
             // file representation can be null if the user completely empties the config
             if (fileRepresentation == null) {
-                floodFill(pathAbsolute, commentCharLim, resolver, defaultObj, header);
+                floodFill(absolutePath, wrapLimit, resolver, defaultObj, header);
                 return;
             }
 
             // build and apply diff
-            NodeDiff nodeDiff = NodeDiff.compute(fileRepresentation, objectRepresentation, defaultObj.getClass(), commentCharLim);
+            NodeDiff nodeDiff = NodeDiff.compute(fileRepresentation, objectRepresentation, defaultObj.getClass(), wrapLimit);
             while (nodeDiff.hasNext()) {
                 nodeDiff.applyNext(resolver::onDiffAdd, resolver::onDiffRemove);
             }
@@ -309,8 +170,8 @@ public class ConfigurationProvider {
             fileRepresentation.setTag(Tag.MAP);
 
             try {
-                write(pathAbsolute, fileRepresentation, header, true);
-            } catch (IOException ioe) {
+                write(absolutePath, fileRepresentation, true, header);
+            } catch (final IOException ioe) {
                 throw new RuntimeException("Couldn't save config", ioe);
             }
 
@@ -318,37 +179,37 @@ public class ConfigurationProvider {
             // parse pretty perfectly now too, with no extra or missing keys
 
             //noinspection unchecked
-            C userMade = (C) loadAsFile(pathAbsolute.toFile(), defaultObj.getClass());
+            C userMade = (C) YAML.loadAs(new FileReader(absolutePath.toFile()), defaultObj.getClass());
 
             // finished load, call resolver and return
-            resolver.onFinishLoad(injectNode(userMade, fileRepresentation));
-        } catch (FileNotFoundException e) {
-            throw new IllegalStateException("File wasn't found?", e);
+            resolver.onFinishLoad(userMade);
+        } catch (final FileNotFoundException fnfe) {
+            throw new IllegalStateException("File wasn't found?", fnfe);
         }
     }
 
     public static <C extends Part> void buildPatchableConfiguration(
         final Path patchAbsolute,
         final Path baseAbsolute,
-        final @NonNull Supplier<C> defaultSupplier,
+        final Supplier<C> defaultSupplier,
         final Resolver<C> resolver,
-        final String[] header
+        final String... header
     ) {
         // parse both files, create a diff, find what the patch overrides,
         // apply to the base, return modified version
 
         // so we need to check if the ORIGINAL exists, and if it doesn't then we throw
         if (!Files.exists(baseAbsolute)) {
-            throw new IllegalStateException("Patch default needs to be present already. Use 'buildSolidConfiguration' to create, then create a patch with this");
+            throw new IllegalStateException("Patch default needs to be present already. Use \"buildSolidConfiguration\" to create, then create a patch with this");
         }
 
         // load the base config as the starting point
-        C base;
+        final C base;
         try {
             //noinspection unchecked
-            base = (C) loadAsFile(baseAbsolute.toFile(), defaultSupplier.get().getClass());
-        } catch (FileNotFoundException e) {
-            throw new IllegalStateException("Base config disappeared between existence check and load", e);
+            base = (C) YAML.loadAs(new FileReader(baseAbsolute.toFile()), defaultSupplier.get().getClass());
+        } catch (final FileNotFoundException fnfe) {
+            throw new IllegalStateException("Base config disappeared between existence check and load", fnfe);
         }
 
         // check if the patch exists. if not, flood
@@ -356,14 +217,14 @@ public class ConfigurationProvider {
             // write just the header comment, no keys, the patch is intentionally empty by default
             try {
                 Files.createDirectories(patchAbsolute.getParent());
-                try (FileWriter fw = new FileWriter(patchAbsolute.toFile())) {
+                try (final FileWriter fw = new FileWriter(patchAbsolute.toFile())) {
                     // strip and write to the file
                     for (final String str : header) {
                         fw.write("# " + str + "\n");
                     }
                     fw.write("\n");
                 }
-            } catch (IOException ioe) {
+            } catch (final IOException ioe) {
                 throw new RuntimeException("Couldn't write patch file", ioe);
             }
 
@@ -376,7 +237,7 @@ public class ConfigurationProvider {
         // are defined in the patch, we just return the default. otherwise, we patch the values
 
         try {
-            Node patchNode = composeFile(patchAbsolute.toFile());
+            final Node patchNode = composeFromFile(patchAbsolute);
 
             // null or non-mapping means the patch is empty, just return base
             if (patchNode == null) {
@@ -389,8 +250,7 @@ public class ConfigurationProvider {
             }
 
             // represent the base object as a node tree so we can merge into it
-            Node baseNode = YAML.represent(base);
-            baseNode.setTag(Tag.MAP);
+            final Node baseNode = represent(base);
 
             if (!(baseNode instanceof MappingNode baseMapping)) {
                 throw new UnsupportedOperationException("Base node was not MappingNode");
@@ -400,15 +260,144 @@ public class ConfigurationProvider {
             mergeNodes(baseMapping, patchMapping, "");
 
             // serialize the merged node back to a string and load it as C
-            StringWriter sw = new StringWriter();
+            final StringWriter sw = new StringWriter();
             YAML.serialize(baseNode, sw);
 
             //noinspection unchecked
-            C merged = (C) YAML.loadAs(new StringReader(sw.toString()), defaultSupplier.get().getClass());
+            final C merged = (C) YAML.loadAs(new StringReader(sw.toString()), defaultSupplier.get().getClass());
 
-            resolver.onFinishLoad(injectNode(merged, baseNode));
-        } catch (FileNotFoundException fnfe) {
+            resolver.onFinishLoad(merged);
+        } catch (final FileNotFoundException fnfe) {
             throw new RuntimeException("Unable to find patch file", fnfe);
         }
+    }
+
+    static Node represent(final Part configPart) {
+        final Node node = YAML.represent(configPart);
+        node.setTag(Tag.MAP);
+        return node;
+    }
+
+    static void mergeNodes(
+        final MappingNode baseMappings,
+        final MappingNode patchMappings,
+        final String prefix
+    ) {
+        final Map<String, NodeTuple> baseKeys = NodeDiff.indexByKey(baseMappings);
+        final Map<String, NodeTuple> patchKeys = NodeDiff.indexByKey(patchMappings);
+
+        for (final Map.Entry<String, NodeTuple> patchEntry : patchKeys.entrySet()) {
+            final String key = patchEntry.getKey();
+            final String fqn = prefix.isEmpty() ? key : prefix + "." + key;
+
+            if (!baseKeys.containsKey(key)) {
+                // patch references a key that no longer exists in the base — skip
+                LOGGER.warn("Patch key '{}' does not exist in base config, skipping", fqn);
+                continue;
+            }
+
+            final Node baseValue = baseKeys.get(key).getValueNode();
+            final Node patchValue = patchEntry.getValue().getValueNode();
+
+            if (baseValue instanceof MappingNode bm && patchValue instanceof MappingNode pm) {
+                // both are sections, recurse rather than replacing the whole section
+                mergeNodes(bm, pm, fqn);
+            }
+            else {
+                final List<NodeTuple> baseTuples = baseMappings.getValue();
+
+                // scalar or sequence, swap the base tuple out for the patch tuple
+                baseTuples.replaceAll(tuple -> {
+                    if (!(tuple.getKeyNode() instanceof ScalarNode sk)) return tuple;
+                    if (!sk.getValue().equals(key)) return tuple;
+                    // keep the base key node but take the patch's value node
+                    return new NodeTuple(tuple.getKeyNode(), patchValue);
+                });
+
+                LOGGER.debug("Patch applied override for '{}'", fqn);
+            }
+        }
+    }
+
+    /**
+     * Returns the YAML serialized {@link org.yaml.snakeyaml.nodes.Node} instance from a file, or null if the
+     * configuration is completely emptied
+     *
+     * @param absolutePath
+     *     the path of the file
+     *
+     * @return the compiled node, or {@code null} if the configuration is completely empty
+     *
+     * @throws FileNotFoundException
+     *     if the file doesn't exist
+     */
+    @Nullable
+    static Node composeFromFile(final Path absolutePath) throws FileNotFoundException {
+        return YAML.compose(new FileReader(absolutePath.toFile()));
+    }
+
+    private static <C extends Part> void floodFill(
+        final Path absolutePath,
+        final int wrapLimit,
+        final @Nullable Resolver<C> resolver,
+        final C defaultObject,
+        final String... header
+    ) {
+        LOGGER.info("{} doesn't exist, using flood fill", absolutePath.getFileName());
+
+        final Node defaultRepresentation = YAML.represent(defaultObject);
+        Token.injectComments(defaultObject.getClass(), defaultRepresentation, wrapLimit);
+
+        // we need to set this, or it will include a global tag
+        defaultRepresentation.setTag(Tag.MAP);
+
+        try {
+            write(absolutePath, defaultRepresentation, false, header);
+        } catch (final IOException ioe) {
+            throw new RuntimeException("Couldn't save config", ioe);
+        }
+
+        // finished load, call resolver and return
+        if (resolver != null) {
+            // resolver CAN be null, the only time this happens is when the
+            // caller wants to handle this themsleves
+            resolver.onFinishLoad(defaultObject);
+        }
+
+        // we don't have to do anything about trying to patch this, no file was present, return
+    }
+
+    protected static void write(
+        final Path absolutePath, final Node representation, final boolean alreadyExisted, final String... header
+    ) throws IOException {
+        // only write the header on first creation, because if the file already existed,
+        // the user may have edited or removed it intentionally, so we never touch it
+        if (!alreadyExisted && header.length > 0) {
+            // the header is special, it can define its own lines and its own formatting
+            final List<CommentLine> lines = new LinkedList<>();
+            for (final String str : header) {
+                Objects.requireNonNull(str, "Header line cannot be null");
+                // we specifically do not let the token system format this, we trust the
+                // header is formatted literally and to the extent the user wants
+                lines.add(Token.toCommentLine(str));
+            }
+            // add blank line so that it's kinda separated from the other comments
+            lines.add(new CommentLine(null, null, "", CommentType.BLANK_LINE));
+            // don't want to override existing comments completely
+            if (representation.getBlockComments() != null) {
+                lines.addAll(representation.getBlockComments());
+            }
+            representation.setBlockComments(lines);
+        }
+
+        // now that we wrote the header, write to file
+        Files.createDirectories(absolutePath.getParent());
+        try (final FileWriter fw = new FileWriter(absolutePath.toFile())) {
+            serialize(representation, fw);
+        }
+    }
+
+    protected static void serialize(final Node representation, final Writer fw) {
+        YAML.serialize(representation, fw);
     }
 }

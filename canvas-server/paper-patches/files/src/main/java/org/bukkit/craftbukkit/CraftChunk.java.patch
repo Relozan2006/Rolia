@@ -1,6 +1,6 @@
 --- a/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
-@@ -136,10 +_,13 @@
+@@ -134,10 +_,13 @@
          int index = 0;
          ChunkAccess chunk = this.getHandle(ChunkStatus.FULL);
  
@@ -17,7 +17,7 @@
  
          return states;
      }
-@@ -154,8 +_,11 @@
+@@ -152,8 +_,11 @@
          ChunkAccess chunk = this.getHandle(ChunkStatus.FULL);
  
          List<BlockState> states = new ArrayList<>();
@@ -31,12 +31,3 @@
              if (blockPredicate.test(block)) {
                  states.add(block.getState(useSnapshot));
              }
-@@ -193,7 +_,7 @@
-     @Override
-     public boolean isSlimeChunk() {
-         // 987234911L is taken from Slime when seeing if a slime can spawn in a chunk
--        return this.level.paperConfig().entities.spawning.allChunksAreSlimeChunks || WorldgenRandom.seedSlimeChunk(this.getX(), this.getZ(), this.getWorld().getSeed(), level.spigotConfig.slimeSeed).nextInt(10) == 0; // Paper
-+        return this.level.paperConfig().entities.spawning.allChunksAreSlimeChunks || io.rolia.secureseed.WorldgenCryptoRandom.seedSlimeChunk(io.rolia.secureseed.Globals.stableDimensionId(this.level), this.getX(), this.getZ(), this.getWorld().getSeed(), level.spigotConfig.slimeSeed).nextInt(10) == 0; // Paper // Rolia - the Bukkit API must agree with where slimes actually spawn (computed directly, never via getHandle(), which would force-load the chunk)
-     }
- 
-     @Override

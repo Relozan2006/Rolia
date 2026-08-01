@@ -8,7 +8,7 @@ import java.util.List;
  *
  * <p>Everything here is derived from {@link Opt#entries()}, so the generated file cannot drift from the
  * options the server actually reads. Adding an option to the registry adds it to the file, to
- * {@code /rolia status}, and to the key list CI compares against the Russian documentation - with no
+ * the startup line, and to the key list CI compares against the Russian documentation - with no
  * second edit anywhere.</p>
  */
 public final class ConfigWriter {
@@ -111,7 +111,10 @@ public final class ConfigWriter {
                 }
             }
             if (opt.reload == Opt.Reload.RESTART) {
-                sb.append(pad).append("# (requires a server restart; /rolia reload will not apply it)\n");
+                // Rolia - build 46: this used to say "/rolia reload will not apply it". Build 46 removed
+                // the /rolia command along with the options it existed to report, so the shipped file was
+                // telling every operator to try a command that does not exist.
+                sb.append(pad).append("# (takes effect on the next server restart)\n");
             }
             sb.append(pad).append(segs[segs.length - 1]).append(": ").append(opt.yamlValue()).append('\n');
             atStart = false;

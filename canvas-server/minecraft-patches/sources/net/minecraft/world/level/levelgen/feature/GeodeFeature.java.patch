@@ -1,11 +1,11 @@
 --- a/net/minecraft/world/level/levelgen/feature/GeodeFeature.java
 +++ b/net/minecraft/world/level/levelgen/feature/GeodeFeature.java
-@@ -41,7 +_,7 @@
-         int maxGenOffset = config.maxGenOffset;
+@@ -43,7 +_,7 @@
+         int maxGenOffset = config.maxGenOffset();
          List<Pair<BlockPos, Integer>> points = Lists.newLinkedList();
-         int numPoints = config.distributionPoints.sample(random);
+         int numPoints = config.distributionPoints().sample(random);
 -        WorldgenRandom random1 = new WorldgenRandom(new LegacyRandomSource(level.getSeed()));
 +        WorldgenRandom random1 = new io.rolia.secureseed.WorldgenCryptoRandom(0, 0, io.rolia.secureseed.Globals.Salt.GEODE_FEATURE, 0);
          NormalNoise noise = NormalNoise.create(random1, -4, 1.0);
          List<BlockPos> crackPoints = Lists.newLinkedList();
-         double crackSizeAdjustment = (double)numPoints / config.outerWallDistance.maxInclusive();
+         double crackSizeAdjustment = (double)numPoints / config.outerWallDistance().maxInclusive();

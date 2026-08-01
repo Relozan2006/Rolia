@@ -23,10 +23,12 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.Level;
-import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@NullMarked
 public class WorldConfig extends Part {
 
     // all constants for configurations go here
@@ -45,7 +47,7 @@ public class WorldConfig extends Part {
     // we have a logger internally here for level-config related things, and should not be used globally. the global
     // config class should be the logger publicly used
 
-    private static final Logger LOGGER = LoggerFactory.getLogger("Rolia");
+    private static final Logger LOGGER = LoggerFactory.getLogger("CanvasWorlds");
 
     private static final Path BASE_FILE = Path.of("config/canvas-worlds.yml").toAbsolutePath().normalize();
 
@@ -56,7 +58,13 @@ public class WorldConfig extends Part {
         //noinspection ResultOfMethodCallIgnored
         GlobalConfiguration.getInstance(); // preload global
 
-        reload();
+        try {
+            reload();
+        } catch (final Throwable thrown) {
+            // we at least need to make sure this is logged
+            LOGGER.error("Couldn't load Canvas worlds default configuration", thrown);
+            throw thrown;
+        }
     }
 
     public static void reload() {
@@ -87,10 +95,10 @@ public class WorldConfig extends Part {
                 }
             },
             Style.create()
-                .literal("Worlds default configuration file for Rolia").endLine()
+                .literal("Worlds default configuration file for CanvasMC").endLine()
                 .blank()
                 .wordWrap(
-                    "This is the defaults for the per-world configuration file, inherited from Canvas.",
+                    "This is the defaults for the per-world configuration file for CanvasMC.",
                     "Each option can be overridden by the patch variant in each dimension folder. You are",
                     "free to modify, add, or remove comments as you please."
                 ).endLine()
@@ -110,12 +118,12 @@ public class WorldConfig extends Part {
                 .wordWrap(
                     "If you have questions about certain configuration options please reach out in our discord"
                 ).endLine()
-                .literal("https://github.com/Relozan2006/Rolia/issues")
+                .literal("https://canvasmc.io/discord")
                 .compile(60)
         );
 
         // on reload, if the server started, we need to swap out the configs
-        if (TickRegions.started) {
+        if (TickRegions.hasStarted()) {
             for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
 
                 // this will swap the config with the new patchable variant
@@ -126,18 +134,17 @@ public class WorldConfig extends Part {
         }
     }
 
-    public static WorldConfig buildForLevel(final @NonNull ServerLevel level, final ResourceKey<Level> dimension) {
+    public static WorldConfig buildForLevel(final ServerLevel level, final ResourceKey<Level> dimension) {
 
         // we build it as a patch here, and from here we can set the level properly
         final WorldConfig[] result = new WorldConfig[1];
 
         ConfigurationProvider.buildPatchableConfiguration(
-            MinecraftServer.getServer().storageSource.getDimensionPath(dimension)
-                .resolve("canvas-patch.yml"),
+            MinecraftServer.getServer().storageSource.getDimensionPath(dimension).resolve("canvas-patch.yml"),
             BASE_FILE,
             WorldConfig::new,
             instance -> {
-                LOGGER.info("Loaded world config patch for level {}", dimension.identifier());
+                LOGGER.info("Loaded Canvas config patch for level {}", dimension.identifier());
 
                 result[0] = instance;
 
@@ -158,39 +165,10 @@ public class WorldConfig extends Part {
                 .compile(60)
         );
 
-        if (result[0] == null) { // Rolia - never return null if the load callback was skipped
-            result[0] = new WorldConfig();
-            result[0].onLoad(level);
-        }
         return result[0];
     }
 
-    /**
-     * Rolia - build 44: force the overrides the operator asked for in rolia.yml.
-     *
-     * <p>Same reasoning as {@code GlobalConfiguration#applyRoliaOverrides}: the field defaults above are
-     * only consulted when the config file does not exist yet. From the second boot onwards the file
-     * wins, so these four keys were inert while {@code /rolia status} reported them as changed.</p>
-     *
-     * <p>A key set to true forces the behaviour on; left false, Canvas's own file decides.</p>
-     */
-    private void applyRoliaOverrides() {
-        if (io.rolia.RoliaConfig.parityProjectileDeflection()) {
-            this.entities.projectiles.crossRegionRedirectableProjectileDeflection = true;
-        }
-        if (io.rolia.RoliaConfig.canvasSuffocationOptimization()) {
-            this.enableSuffocationOptimization = true;
-        }
-        if (io.rolia.RoliaConfig.canvasDisableRegionBars()) {
-            this.regionBars.enableTpsBar = false;
-            this.regionBars.enableRamBar = false;
-        }
-    }
-
-    private void onLoad(final @NonNull ServerLevel level) {
-
-        // Rolia - apply the rolia.yml overrides BEFORE validation, so a forced value is validated too
-        applyRoliaOverrides();
+    private void onLoad(final ServerLevel level) {
 
         // validate the object here too, because some users may do
         // something stupid in the patch variant
@@ -231,25 +209,13 @@ public class WorldConfig extends Part {
     public static class RegionBars extends Part {
 
         {
-            // Rolia - Canvas's default (true) is kept; canvas-overrides.disable-region-bars turns both bars off
-            option("enableTpsBar").docs(
-                "Enables a regionized TPS-Bar implementation.",
-                "A Canvas extra, not a Vanilla feature. While enabled it ticks once a second for every region even",
-                "when no player has ever run /regionbar. Canvas's default (true) is kept; set",
-                "canvas-overrides.disable-region-bars in rolia.yml to turn both bars off by default."
-            );
+            option("enableTpsBar").docs("Enables a regionized TPS-Bar implementation for Canvas.");
             option("tpsBarFormat")
                 .docs(
                     "MiniMessage-formatted line for the TPS bar. Placeholders are <tps>, <mspt>, <util>, and <players>.",
                     "Legacy tokens(%tps%, %mspt%, %util%, %players%) are also accepted and auto-converted."
                 ).greedyString();
-            // Rolia - Canvas's default (true) is kept; canvas-overrides.disable-region-bars turns both bars off
-            option("enableRamBar").docs(
-                "Enables a regionized RAM-Bar implementation.",
-                "Same reasoning as enableTpsBar: a Canvas extra that costs a per-region tick every second whether",
-                "or not anybody asked for it. Canvas's default (true) is kept; see",
-                "canvas-overrides.disable-region-bars in rolia.yml."
-            );
+            option("enableRamBar").docs("Enables a regionized RAM-Bar implementation for Canvas.");
             option("ramBarFormat")
                 .docs(
                     "MiniMessage-formatted line for the RAM bar. Placeholders are <used>, <xmx>, <percent>.",
@@ -257,10 +223,10 @@ public class WorldConfig extends Part {
                 ).greedyString();
         }
 
-        public boolean enableTpsBar = !io.rolia.RoliaConfig.canvasDisableRegionBars(); // Rolia - Canvas default (true) unless canvas-overrides.disable-region-bars
+        public boolean enableTpsBar = true;
         public String tpsBarFormat = DEFAULT_TPSBAR_FORMAT;
 
-        public boolean enableRamBar = !io.rolia.RoliaConfig.canvasDisableRegionBars(); // Rolia - Canvas default (true) unless canvas-overrides.disable-region-bars
+        public boolean enableRamBar = true;
         public String ramBarFormat = DEFAULT_RAMBAR_FORMAT;
     }
 
@@ -345,15 +311,13 @@ public class WorldConfig extends Part {
             option("entityCollisionMode")
                 .docs(
                     Style.wrap("The entity collision mode for the server")
-                        .defineEnum(EntityCollisionMode.class, (mode) -> {
-                            return switch (mode) {
-                                case VANILLA -> "Default, all entities have collisions";
-                                case ONLY_PUSHABLE_PLAYERS_SMALL ->
-                                    "Only players are pushable by entities, searching in a small radius";
-                                case ONLY_PUSHABLE_PLAYERS_LARGE ->
-                                    "Only players are pushable by entities, searching in the normal radius";
-                                case NO_COLLISIONS -> "Disables entity collisions entirely";
-                            };
+                        .defineEnum(EntityCollisionMode.class, (mode) -> switch (mode) {
+                            case VANILLA -> "Default, all entities have collisions";
+                            case ONLY_PUSHABLE_PLAYERS_SMALL ->
+                                "Only players are pushable by entities, searching in a small radius";
+                            case ONLY_PUSHABLE_PLAYERS_LARGE ->
+                                "Only players are pushable by entities, searching in the normal radius";
+                            case NO_COLLISIONS -> "Disables entity collisions entirely";
                         })
                 );
         }
@@ -430,20 +394,11 @@ public class WorldConfig extends Part {
 
             {
                 option("loadChunks").docs("Specify which projectiles should load chunks when moving. Only works when thrown by players");
-                // Rolia - Canvas's default (false) is kept; see rolia.yml for the key that changes it
                 option("crossRegionRedirectableProjectileDeflection")
                     .docs(
                         Style.wrap(
                             "Restores Vanilla redirect behavior for arrow hits on redirectable projectiles",
                             "like wind charges and fireballs across region threads."
-                        )
-                        .blank()
-                        .wordWrap(
-                            "With this off, an arrow that hits a wind charge or fireball owned by another region thread",
-                            "silently fails to deflect it, so the same shot works or does not work purely depending on",
-                            "where the region boundary happens to fall - a Vanilla deviation players can hit without",
-                            "ever knowing why. Canvas's default (false) is kept; set",
-                            "vanilla-parity.cross-region-projectile-deflection in rolia.yml to make true the default."
                         )
                         .blank()
                         .wordWrap(
@@ -456,7 +411,7 @@ public class WorldConfig extends Part {
             public int maxProjectileChunkLoadsPerTick = 10;
             public int maxProjectileChunkLoadsPerProjectileBeforeRemoval = 10;
             public List<String> loadChunks = new ArrayList<>();
-            public boolean crossRegionRedirectableProjectileDeflection = io.rolia.RoliaConfig.parityProjectileDeflection(); // Rolia - Canvas default (false) unless vanilla-parity.cross-region-projectile-deflection
+            public boolean crossRegionRedirectableProjectileDeflection = false;
 
             private final CanonicalReference<Predicate<Projectile>> compiledPredicate = new CanonicalReference<>();
 
@@ -492,6 +447,7 @@ public class WorldConfig extends Part {
         }
 
         public boolean experienceOrbsAreFireResistant = false;
+        public boolean experienceOrbsImmuneToExplosions = false;
     }
 
     public Combat combat = new Combat();
@@ -613,9 +569,11 @@ public class WorldConfig extends Part {
     public double waypointUpdateScale = 4000.0D;
     public boolean disableCriterionTrigger = false;
     public boolean cactusCheckSurvivalBeforeGrowth = false;
-    public boolean enableSuffocationOptimization = io.rolia.RoliaConfig.canvasSuffocationOptimization(); // Rolia - Canvas default (false) unless canvas-overrides.suffocation-optimization
+    public boolean enableSuffocationOptimization = false;
 
     public Sleeping sleeping = new Sleeping();
+
+    @SuppressWarnings("FieldMayBeFinal")
     public static class Sleeping extends Part {
 
         // the following options are based of PurpurMC:
@@ -663,6 +621,7 @@ public class WorldConfig extends Part {
             return sleepNotPossible.isBlank();
         }
 
+        @Nullable
         public Component getSleepSkippingNight() {
             if (sleepSkippingNightDisabled()) {
                 return null;
@@ -679,6 +638,7 @@ public class WorldConfig extends Part {
             return message;
         }
 
+        @Nullable
         public Component getSleepingPlayersPercent(int amountSleeping, int sleepersNeeded) {
             if (sleepingPlayersPercentDisabled()) {
                 return null;
@@ -697,6 +657,7 @@ public class WorldConfig extends Part {
             return message;
         }
 
+        @Nullable
         public Component getSleepNotPossible() {
             if (sleepNotPossibleDisabled()) {
                return null;

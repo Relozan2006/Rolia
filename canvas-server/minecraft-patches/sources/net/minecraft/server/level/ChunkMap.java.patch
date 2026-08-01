@@ -5,7 +5,7 @@
          final int index = entity.getType().getCategory().ordinal();
          final ca.spottedleaf.moonrise.common.list.ReferenceList<ServerPlayer> inRange =
 -            this.level.moonrise$getNearbyPlayers().getPlayers(entity.chunkPosition(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE);
-+            this.level.moonrise$getNearbyPlayers().getPlayers(entity.chunkPosition(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE); // Rolia - Canvas changed this to SPAWN_RANGE, but this is the INCREMENT side of per-player mob-cap accounting and the READ side (NaturalSpawner's getMobCountNear loop) still uses TICK_VIEW_DISTANCE. Counting over one neighbourhood and reading over another means mobs in the ring between the two stop counting against a cap that is still consulted, so MORE mobs spawn than on Paper. Worse, getMobCountNear adds mobCounts (filled here) to mobBackoffCounts (filled by updateFailurePlayerMobTypeMap, still TICK_VIEW_DISTANCE) as if they measured the same thing. Both sides must use the same map; Paper uses this one.
++            this.level.moonrise$getNearbyPlayers().getPlayers(entity.chunkPosition(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.SPAWN_RANGE); // Canvas - fix mobs walking outside simulation distance with higher view distance causing mob caps to be ignored for per-player entities
          if (inRange == null) {
              return;
          }
@@ -18,7 +18,7 @@
                  this.ticketStorage.getTicketDebugString(posKey, true),
                  this.distanceManager.getChunkLevel(posKey, true),
                  fullChunk.<Integer>map(levelChunk -> levelChunk.getBlockTicks().count()).orElse(0),
-@@ -1327,7 +_,7 @@
+@@ -1330,7 +_,7 @@
                  double distanceSquared = deltaToPlayerX * deltaToPlayerX + deltaToPlayerZ * deltaToPlayerZ; // Paper
                  double rangeSquared = visibleRange * visibleRange;
                  // Paper start - Configurable entity tracking range by Y
@@ -27,7 +27,7 @@
                  if (visibleToPlayer && level.paperConfig().entities.trackingRangeY.enabled) {
                      double rangeY = level.paperConfig().entities.trackingRangeY.get(this.entity, -1);
                      if (rangeY != -1) {
-@@ -1345,7 +_,7 @@
+@@ -1348,7 +_,7 @@
                  }
                  // Folia end - region threading
                  // CraftBukkit start - respect vanish API

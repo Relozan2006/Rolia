@@ -1,6 +1,6 @@
 @echo off
 REM ==========================================================================
-REM  Rolia server launcher (Windows) - Minecraft 26.1.2, Java 25+
+REM  Rolia server launcher (Windows) - Minecraft 26.2, Java 25+
 REM
 REM  Edit MEM / CONC_GC_THREADS / JAR below and run this from the server folder.
 REM
@@ -13,9 +13,9 @@ REM ==========================================================================
 cd /d "%~dp0"
 
 REM --- edit me --------------------------------------------------------------
-set "MEM=4G"
-set "CONC_GC_THREADS=2"
-set "JAR=rolia-paperclip-26.1.2.jar"
+set "MEM=32G"
+set "CONC_GC_THREADS=4"
+set "JAR=rolia-paperclip-26.2.jar"
 REM --------------------------------------------------------------------------
 
 set "JVM_ARGS="
@@ -75,13 +75,14 @@ REM occupancy trigger so concurrent marking starts early instead of degenerating
 REM into a full GC, and MaxTenuringThreshold=1 so objects that do survive move to
 REM the old generation immediately rather than being copied between survivor
 REM spaces on every collection.
-REM Above ~12 GB of heap, retune: G1NewSizePercent=40, G1MaxNewSizePercent=50,
-REM G1HeapRegionSize=16M, G1ReservePercent=15, InitiatingHeapOccupancyPercent=20.
+REM These are the >12 GB settings of that profile. Below about 12 GB of heap, go
+REM back to G1NewSizePercent=30, G1MaxNewSizePercent=40, G1HeapRegionSize=8M,
+REM G1ReservePercent=20, InitiatingHeapOccupancyPercent=15.
 set "JVM_ARGS=%JVM_ARGS% -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200"
-set "JVM_ARGS=%JVM_ARGS% -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40"
-set "JVM_ARGS=%JVM_ARGS% -XX:G1HeapRegionSize=8M -XX:G1ReservePercent=20"
+set "JVM_ARGS=%JVM_ARGS% -XX:G1NewSizePercent=40 -XX:G1MaxNewSizePercent=50"
+set "JVM_ARGS=%JVM_ARGS% -XX:G1HeapRegionSize=16M -XX:G1ReservePercent=15"
 set "JVM_ARGS=%JVM_ARGS% -XX:G1HeapWastePercent=5 -XX:G1MixedGCCountTarget=4"
-set "JVM_ARGS=%JVM_ARGS% -XX:InitiatingHeapOccupancyPercent=15"
+set "JVM_ARGS=%JVM_ARGS% -XX:InitiatingHeapOccupancyPercent=20"
 set "JVM_ARGS=%JVM_ARGS% -XX:G1MixedGCLiveThresholdPercent=90"
 set "JVM_ARGS=%JVM_ARGS% -XX:G1RSetUpdatingPauseTimePercent=5"
 set "JVM_ARGS=%JVM_ARGS% -XX:SurvivorRatio=32 -XX:MaxTenuringThreshold=1"

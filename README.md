@@ -1,189 +1,253 @@
-<div align="center">
-
-<img width="820" alt="Rolia" src="https://github.com/user-attachments/assets/938e7151-29c5-4efd-a05a-b6b979b87ebd" />
-
 # Rolia
 
-High-performance Minecraft server core built on Canvas: public terrain, everything worth finding under a 1024-bit secret
+**Rolia is Canvas with a secret world seed.**
 
-![Minecraft](https://img.shields.io/badge/Minecraft-26.1.2-3fb950)
-![Java](https://img.shields.io/badge/Java-25%2B-f89820)
-![Base](https://img.shields.io/badge/base-Canvas%20%C2%B7%20Folia-3b82f6)
-![Secure seed](https://img.shields.io/badge/secure%20seed-1024--bit-8b5cf6)
-![License](https://img.shields.io/badge/license-GPL--3.0-lightgrey)
+That sentence is the whole design. Rolia takes [Canvas](https://github.com/CraftCanvasMC/Canvas)
+26.2 unchanged — every optimization, every region-threading fix, every default — and adds one thing:
+a 1024-bit secret that decides where the caves, ore, structures and loot are, while the landscape and
+the biome map stay reproducible from the ordinary `level-seed`.
 
-</div>
-
-<!-- ROLIA_RULE_44 -->
-> **Default rule (since build 43).** Stock Rolia behaves exactly like stock Canvas, plus the secure
-> seed. Every behaviour change is a key in `rolia.yml`, and **every one of those keys defaults to
-> `false`**. The only exception is `secure-seed.enabled`. Bug fixes are not keys and are always on.
->
-> Full per-option documentation, kept in step with the code by CI (written in Russian):
-> [`docs/rolia.yml.ru.md`](docs/rolia.yml.ru.md).
+Nothing else is different. There are no Rolia performance options, no Rolia gameplay changes, and no
+Rolia defaults that differ from Canvas. If you know Canvas, you know Rolia.
 
 ---
 
-**Rolia** is a Minecraft **26.1.2** server core built on [Canvas](https://github.com/CraftCanvasMC) (a Folia fork) with cryptographically protected world generation.
+## Why
 
-As of build 40, generation is deliberately split in two: **the shape of the terrain is public and reproducible from the ordinary `level-seed`**, while everything worth finding — biomes, caves, ores, structures, dungeons, loot, slime chunks — is derived from a secret **1024-bit** seed and a secret salt. Knowing the `level-seed` gets you the landscape and nothing else.
+A Minecraft world seed is a 64-bit number, and 64 bits is nothing. Given a handful of observations —
+a few chunk shapes, a village, a couple of biome borders — a seed cracker recovers it in seconds on a
+laptop. Once it is recovered, every player has an X-ray of your server: every diamond vein, every
+ancient city, every stronghold, every slime chunk, forever.
 
-## What is public and what is secret
+Rolia's answer is not to hide the seed harder. It is to split it.
 
-| | Source | Exactly what |
-| --- | --- | --- |
-| **Public** | `level-seed` in `server.properties` | The **shape of the terrain only**: the `continentalness`, `erosion`, `ridge`, `offset` and `jagged` noises plus `BlendedNoise` — i.e. the heightmap and the outline of the landmasses and oceans. Plus the shape of the End islands. |
-| **Secret** | a 1024-bit seed + a 64+ char salt from `rolia.yml` | Everything else: biome climate (`temperature`, `vegetation` — i.e. **which** biome sits on a given landform), caves, ravines, aquifers, ore veins, surface rules, structures, dungeons, decorations, loot, slime chunks. |
+| | Public — from `level-seed` | Secret — from the 1024-bit key |
+|---|---|---|
+| Landscape shape | ✅ | |
+| Biome map | ✅ | |
+| Surface rules (banding, beaches, snow) | | ✅ |
+| Trees, plants, decorations | | ✅ |
+| Caves and ravines | | ✅ |
+| Aquifers | | ✅ |
+| Ore veins | | ✅ |
+| Structures and their loot | | ✅ |
+| Slime chunks | | ✅ |
+| End spike layout, stronghold rings | | ✅ |
 
-The routing is a **whitelist**: the public noises are named explicitly and everything else falls to the secret side, so a future Minecraft version that adds a new noise fails safe — the new noise is secret — instead of silently leaking.
+So a player can still take your `level-seed` to a seed-finding site, see the same mountains and the
+same jungle, and pick where to build. What the map cannot tell them is where anything **is**. The
+1024-bit key is not guessable — not with a laptop, not with a datacentre, not ever.
 
-## What that means in practice
+This is Rolia's own implementation of the idea behind
+[SecureSeed](https://github.com/Earthcomputer/SecureSeed) by Earthcomputer, rebuilt for Canvas 26.2
+and for region threading.
 
-- You can hand out your `level-seed`. Someone who has it can reproduce the **landscape** of your world — the mountains, the plains, the coastline. It will not find them a single structure, ore, cave or dungeon.
-- Online seed finders and local world generators fed the public seed will show the right terrain and the **wrong** biomes, structures and ores.
-- Two worlds with the same `level-seed` and different salts are the same landscape wearing different biomes, with completely different contents.
+### The honest limits
 
-An honest caveat: terrain is **intentionally** not secret, and it does leak something. Some structures can only stand on suitable terrain (a monument needs deep ocean, a mineshaft needs land), so knowing the terrain narrows the search area. It does not hand over coordinates. And nothing protects against a player simply walking into a structure — this protects against computing the world offline, not against exploring it in game.
+- **Biome borders leak more than they used to.** Because the biome map is public by design, anything
+  that follows strictly from biome — which biomes a structure *could* be in, roughly where a mushroom
+  island sits — is inferable. What is not inferable is the actual placement roll.
+- **The world spawn point becomes predictable**, because spawn selection is biome-driven.
+- **Caves break the surface.** A cave mouth or ravine that cuts the ground is visible, and it came
+  from the secret. Terrain reproduced from the public seed therefore matches to about 80% of columns
+  exactly, with a median difference of zero — not 100%. The build-46 gate measured 79% exact, a mean
+  difference of 1.06 blocks and a 90th percentile of 3, over 36,864 columns.
+- **A plugin you install can read the secret.** Any plugin runs inside the server JVM and can reach
+  any field by reflection. Rolia does not pretend otherwise. Your plugins are inside your trust
+  boundary, and always were.
 
-## Where the secret lives
+---
 
-The secret lives **only in `rolia.yml`** (created with `0600` permissions):
+## Getting started
 
-```yaml
-secure-seed:
-  salt: "…64+ characters…"      # the secret salt
-```
+1. Download `rolia-paperclip-26.2.jar` from the
+   [Releases](https://github.com/Relozan2006/Rolia/releases) page.
+2. You need **Java 25 or newer**. Check with `java -version`.
+3. Start it once. Rolia writes `rolia.yml` next to the jar, with permissions `0600`, containing a
+   freshly generated salt and 1024-bit feature seed.
+4. **Back up `rolia.yml` together with your world.**
 
-- **`feature-level-seed` in `server.properties` has been removed** — the server no longer reads it.
-- The secret is **not written to `level.dat`**. Only a one-way **fingerprint** is stored there, so that booting a world with the wrong `rolia.yml` is noticed instead of silently appending chunks generated from a different secret.
-- `/seed` prints the ordinary seed and a **fingerprint** of the feature seed (`Feature seed fp:`) — 16 hex chars. The secret itself never reaches chat or `latest.log`; the fingerprint exists only so you can confirm the seed has not changed.
+`start.sh` and `start.bat` ship with the recommended flags already set.
 
-## Cryptography
+### Read this before your first world
 
-Hashing is real **BLAKE2b in RFC 7693 keyed mode** — a MAC, with the salt as the key. It replaces the homemade `H(K xor M)` construction used by earlier builds. CI checks the implementation against the published BLAKE2b test vectors on every build, and separately asserts that what the server prints is the keyed digest rather than the unkeyed one or `BLAKE2b(key ‖ message)`.
+`rolia.yml` holds the only copy of the secret. Rolia does not write backup copies of it — earlier
+builds did, and all that achieved was scattering readable copies of the key around the server
+directory and into every support archive. Keeping it safe is yours to do.
 
-The honest security bound:
+Lose the file and the world is not recoverable. The chunks already on disk stay as they are, but
+every chunk generated afterwards will have different caves, ore and structures, with a hard seam
+between old and new. There is no repair. Put it in the same backup job as your world folder.
 
-- The strength comes from the **salt (64+ chars) and the 1024-bit seed**, not from the hash length. Lose the salt and you lose everything; leak the salt and there is no protection left.
-- **Terrain is not secret and is not protected.** That is a decision, not an oversight: the world stays reproducible in shape, and there is nothing left to find by seed.
-- BLAKE3 would be faster, not stronger; BLAKE2b's security is not in question.
+Rolia keeps a one-way fingerprint of the secret in `level.dat`. It cannot be reversed into the key,
+and it exists so the server can tell whether the world in front of it belongs to the secret it is
+holding. If they disagree, the server refuses to start — see `secure-seed.on-secret-mismatch`.
 
-## Performance
-
-All the performance of Canvas and Folia: regionized multithreading, tick/chunk/entity optimizations. As of build 40 every Rolia-specific speedup is **off by default** — see the default rule at the top.
-
-- **DAB** (Dynamic Activation of Brain), off by default (`optimizations.dab.enabled`) — mobs far from every player **think less often**. N grows with distance from 1 up to `max-tick-interval` (20 by default); mobs within `start-distance` (12 blocks by default) are never throttled. Spectators do not count, creative-mode players do. Two things are throttled, and build 45 changed how: a goal-driven mob (zombie, skeleton) runs its goal and target selectors once every N ticks instead of every tick, and a brain-driven mob (villager, piglin) has its **sensor schedule stretched** to `max(the sensor's own configured rate, N)`. Before build 45 the sensors were gated at the call site instead, which multiplied the configured rate by N rather than replacing it — at both defaults of 20, a distant villager rescanned every 400 ticks rather than every 20. DAB can now stretch a sensor that runs faster than N, and can never make one slower than the rate written in `paper-world-defaults.yml`.
-
-  This is **not** behaviour-neutral: a throttled mob **reacts late** — it notices targets, repaths, flees and re-aims on a coarser clock, so distant mobs drift and converge differently than in Vanilla. Movement, physics, damage, despawning, mob caps and spawn rules are untouched, so farm *rates* are normally unaffected, but anything relying on precise distant pathfinding can change. Exempt specific types with `optimizations.dab.blacklist`, or leave DAB off.
-
-- **Stuck-villager optimization** (lobotomize), off by default (`optimizations.villager-lobotomize.enabled`): a villager boxed into a 1×1 cell cannot path anywhere, so its whole brain tick is skipped. Trades and **restocking are preserved**, so pure trading halls behave like Vanilla.
-
-  This is not behaviour-neutral either: skipping the brain skips every sensor and behaviour. A lobotomized villager does **not detect hostiles** (it will not flee or scream when a zombie arrives), does **not sleep**, does **not gossip**, does **not breed**, and does **not contribute to iron-golem spawning**. Leave it off if you run villager-based iron farms or breeders.
-
-- **Faster chunk-data serialization** (`optimizations.faster-network.enabled`), off by default — bulk long-array writes. This is the one speedup that genuinely changes nothing observable: the bytes on the wire are identical, just produced faster.
-
-- **Canvas's AFFINITY region scheduler** (`threaded-regions.scheduler: AFFINITY` in `config/paper-global.yml`) — work stealing plus keeping a region's tasks on their own tick thread. This one is Canvas's own setting, not a Rolia key, and it is worth turning on.
-
-Rolia also fixes genuine defects inherited from Canvas — broken snow accumulation, the mob spawn distance gate, spawn-chunk fairness, a Folia cross-region safety guard, a null dereference on the spawn path, a file-descriptor leak, ender pearls lost on world unload, a projectile reading its X coordinate as Z, a weak-collection compaction test that could never fire, and thread-guard severities that did not match their own documentation. Fixes are always on and have no switch.
-
-## Requirements
-
-Java **25** or newer.
-
-## Install and run
-
-Download `rolia-paperclip-26.1.2.jar` from [Releases](../../releases/latest) and put it next to the launch script.
-
-```bash
-bash start.sh          # Linux / macOS
-start.bat              # Windows
-```
-
-The scripts already carry the flags you want: `-Xms` = `-Xmx`, G1 with a pinned `-XX:ConcGCThreads`, `-XX:+AlwaysPreTouch`, `-XX:+PerfDisableSharedMem`, the Aikar set, and the two required flags `--add-modules=jdk.incubator.vector` (Canvas SIMD) and `--sun-misc-unsafe-memory-access=allow`.
-
-The shipped values are sized for a 4–8 GB heap. On a **32 GB** host, edit the two variables at the top of the script:
-
-```bash
-MEM="32G"              # -Xms and -Xmx are both set from this
-CONC_GC_THREADS=4      # -XX:ConcGCThreads
-```
-
-and raise the Aikar G1 values to their large-heap variants (`-XX:G1NewSizePercent=40`, `-XX:G1MaxNewSizePercent=50`, `-XX:G1HeapRegionSize=16M`, `-XX:G1ReservePercent=15`, `-XX:InitiatingHeapOccupancyPercent=20`), which is what Aikar's tuning prescribes above 12 GB. Every flag is explained in [LAUNCH.md](LAUNCH.md).
-
-## First run checklist
-
-The JVM flags are only half the job. Do this once, then restart.
-
-1. Java **25+**.
-2. Start the server once so it writes its configs, then stop it.
-3. **`config/paper-global.yml` → `chunk-system`**: set `worker-threads` and `io-threads` explicitly. Paper ships `-1` for both, and `-1` does **not** mean "use all cores": `io-threads` is resolved as `max(1, configured)`, so `-1` means **exactly one** I/O thread on every machine, and `worker-threads` auto-resolves to **one** thread on any box with 7 or fewer cores. It shows up as chunk-load stalls rather than high MSPT, which is why almost nobody finds it. Rolia warns about it at startup.
-4. **`config/paper-global.yml` → `threaded-regions.scheduler: AFFINITY`** — work stealing plus keeping a region's tasks on their own tick thread (needs ≥2 cores). It is also the only scheduler the Canvas region profiler supports.
-5. **`server.properties` → `level-seed`** — the public seed; it controls **only the shape of the terrain**. You may hand it out.
-6. **Back up `rolia.yml` together with your world** — see the section below.
-7. Decide whether you want `optimizations.dab` or `optimizations.villager-lobotomize` at all. Both are off by default and both change mob behaviour — see "Performance".
-
-| CPU cores | `worker-threads` | `io-threads` |
-| --- | --- | --- |
-| 4 | 2 | 2 |
-| 8 | 3 | 2 |
-| 16 | 6 | 3 |
-| 32 | 8 | 4 |
-
-```yaml
-# config/paper-global.yml
-chunk-system:
-  worker-threads: 3    # example for 8 cores
-  io-threads: 2
-threaded-regions:
-  scheduler: AFFINITY
-```
-
-These are deliberately **below** the core count. Folia also needs cores for its region tick threads, and G1 needs `-XX:ConcGCThreads` (set in the launch script) — all three budgets share the same CPUs.
+---
 
 ## Configuration
 
-`rolia.yml` is generated on first run and documents every option inline. The headline keys:
+`rolia.yml` has five keys. That is all of them.
 
-| Option | File | Purpose |
-| --- | --- | --- |
-| `level-seed` | `server.properties` | The public seed. Determines **the shape of the terrain only**. |
-| `secure-seed.enabled` | `rolia.yml` | Master switch, and the only key in the file that defaults to `true`. Set it to `false` and worldgen is plain Vanilla. |
-| `secure-seed.salt` | `rolia.yml` | The secret salt (64+ chars). Created automatically with `0600` permissions. |
-| `secure-seed.feature-seed` | `rolia.yml` | The 1024-bit secret, as a decimal integer. Created automatically. |
-| `secure-seed.on-secret-mismatch` | `rolia.yml` | What to do when `level.dat`'s fingerprint disagrees with `rolia.yml`. `warn` by default; `block` refuses to start. |
-| `optimizations.dab` | `rolia.yml` | DAB: `enabled` (`false` by default), `start-distance`, `max-tick-interval`, `blacklist`. |
-| `optimizations.villager-lobotomize` | `rolia.yml` | Stuck-villager lobotomization: `enabled` (`false` by default), `wait-until-trade-locked`, `check-interval`. |
-| `optimizations.faster-network.enabled` | `rolia.yml` | Faster chunk-data serialization (`false` by default). |
-| `chunk-system.worker-threads` / `io-threads` | `config/paper-global.yml` | Chunk-system thread pools. **Set these explicitly** — see the checklist above. |
-| `threaded-regions.scheduler` | `config/paper-global.yml` | Region scheduler. `AFFINITY` recommended. |
-
-`/rolia status` prints the live values, and `/rolia reload` re-reads the file (keys marked as restart-only keep their startup values until the next boot). Secrets are never printed by either.
-
-Note: slime chunks are driven by the secret seed, so the `slime-seed` option from `spigot.yml` has no effect on Rolia.
-
-## Important: back up `rolia.yml`
-
-`rolia.yml` holds the secret salt and the 1024-bit seed. **Everything except the shape of the terrain depends on them.** If the file is lost, every newly generated chunk in an existing world gets different biomes, caves, ores and structures — you will see a hard seam at the edge of explored territory, and it cannot be repaired. Keep the file secret and backed up **together with your world**.
-
-The server logs the absolute path of the `rolia.yml` it actually used (`Rolia: using config …`) — check it if you start the server from a directory other than the world folder. If the file exists but cannot be parsed, the server **refuses to start**: silently generating a new salt would rewrite the world.
-
-## Upgrading from build 39
-
-- Remove `feature-level-seed` from `server.properties` — the property is gone and is no longer read. Your 1024-bit seed belongs in `rolia.yml`.
-- **The terrain of an existing world will change.** In build 39 terrain was derived from the secret too; from build 40 on it comes from `level-seed` alone. Seams are unavoidable, so build 40 and later are meant for a fresh world.
-- The salt carries over unchanged: the structures, ores and biomes tied to it stay where they are.
-
-## Building from source
-
-```bash
-./gradlew applyAllPatches
-./gradlew createPaperclipJar
+```yaml
+secure-seed:
+  enabled: true
+  salt: "<generated on first run>"
+  feature-seed: "<generated on first run>"
+  on-secret-mismatch: block
+  seed-command: fingerprint
 ```
 
-The server jar is produced in `canvas-server/build/libs/`.
+**`enabled`** — the master switch, and the only Rolia option that defaults to `true`. Set it to
+`false` and worldgen is plain Vanilla: everything derives from the ordinary `level-seed`, the secret
+is ignored, and the world is an ordinary Minecraft world you can move to any server. Do not flip this
+on a world that already exists.
 
-## Built on
+**`salt`** and **`feature-seed`** — the two halves of the key, generated with `SecureRandom` on first
+run. Never share them, never paste them into a bug report.
 
-[Canvas](https://github.com/CraftCanvasMC) · [Folia / Paper](https://papermc.io) · secure-seed idea — [SecureSeed](https://github.com/Earthcomputer/SecureSeed) (Earthcomputer) · the "public terrain, secret features" model — [Matter](https://github.com/plasmoapp/matter) (plasmoapp).
+**`on-secret-mismatch`** — what happens when the secret does not match the world on disk: `block`
+(default, refuse to start), `warn` (start anyway, very loudly), `ignore`. The default is `block`
+because a server that will not start is an inconvenience, while a world quietly generating against
+the wrong secret cannot be repaired. On a new world nothing is stored yet, so it can only fire on a
+real mismatch.
 
-License: [GPL-3.0](LICENSE).
+**`seed-command`** — what `/seed` shows: `fingerprint` (the public `level-seed` plus a one-way
+fingerprint of the secret, the default), `hidden` (the `level-seed` only), or `vanilla`.
+
+Everything else lives where Canvas and Paper put it: `config/canvas-server.yml`,
+`config/canvas-worlds.yml`, `config/paper-global.yml`, `config/paper-world-defaults.yml`. Rolia does
+not duplicate, override or shadow any of them.
+
+---
+
+## Recommended launch flags
+
+For a **32 GB** server on Java 25. These are Aikar's G1 flags at their large-heap settings, plus the
+one flag Canvas asks for.
+
+```bash
+java -Xms32G -Xmx32G \
+  --add-modules=jdk.incubator.vector \
+  -XX:+UseG1GC \
+  -XX:+ParallelRefProcEnabled \
+  -XX:MaxGCPauseMillis=200 \
+  -XX:+UnlockExperimentalVMOptions \
+  -XX:+DisableExplicitGC \
+  -XX:+AlwaysPreTouch \
+  -XX:G1NewSizePercent=40 \
+  -XX:G1MaxNewSizePercent=50 \
+  -XX:G1HeapRegionSize=16M \
+  -XX:G1ReservePercent=15 \
+  -XX:G1HeapWastePercent=5 \
+  -XX:G1MixedGCCountTarget=4 \
+  -XX:InitiatingHeapOccupancyPercent=20 \
+  -XX:G1MixedGCLiveThresholdPercent=90 \
+  -XX:G1RSetUpdatingPauseTimePercent=5 \
+  -XX:SurvivorRatio=32 \
+  -XX:+PerfDisableSharedMem \
+  -XX:MaxTenuringThreshold=1 \
+  -Dusing.aikars.flags=https://mcflags.emc.gs \
+  -Daikars.new.flags=true \
+  -jar rolia-paperclip-26.2.jar --nogui
+```
+
+Notes that actually matter:
+
+- **`-Xms` equal to `-Xmx`.** With `AlwaysPreTouch` the JVM commits the whole heap at startup. It
+  makes boot a few seconds slower and removes a whole class of pause.
+- **Do not give the JVM all the machine's RAM.** 32 GB of heap wants a machine with 40 GB or more;
+  the JVM needs room outside the heap and the OS needs page cache for your region files.
+- **`--add-modules=jdk.incubator.vector`** must come *before* `-jar`. Without it Canvas logs a
+  warning at startup and its SIMD paths stay off.
+- **Check `config/paper-global.yml` → `chunk-system` before tuning anything else.** Paper ships
+  `worker-threads: -1` and `io-threads: -1`, and `-1` does not mean "use every core": `io-threads`
+  resolves to exactly one thread on every machine, and `worker-threads` resolves to one on any box
+  with 7 or fewer cores. On a 16-core host, `worker-threads: 6` and `io-threads: 3` is worth more
+  than every flag above put together.
+- **Generational ZGC** (`-XX:+UseZGC -XX:+ZGenerational`) is a reasonable alternative at this heap
+  size if you care about tail latency more than throughput. It is not the default recommendation
+  because G1 with these flags is what the Minecraft server community has actually tested at scale.
+
+---
+
+## What Rolia changes, in full
+
+Rolia is a fork of Canvas. This is the complete list of differences from stock Canvas 26.2 — if
+something is not on this list, Rolia does not touch it.
+
+### 1. The secret worldgen layer
+
+- A **1024-bit key**, stored only in `rolia.yml`, as a salt plus a feature seed. It is never written
+  to `server.properties`, never written to `level.dat`, and never printed by any command.
+- **Per-domain key derivation** using **BLAKE2b in RFC 7693 keyed mode**. Every secret system —
+  carvers, aquifers, ore, surface, structures, decorations, loot, slime — gets its own independent
+  128-bit root derived from the key and the domain name. They are not offsets of a shared root, so
+  recovering one does not give you the others.
+- The level seed is mixed into every derivation, so two worlds with different `level-seed` values do
+  not share caves at the same coordinates even when they share a secret.
+- **Terrain and biome climate stay public.** The noises `continentalness`, `erosion`, `ridge`,
+  `offset`, `jagged`, `temperature` and `vegetation` are routed to the public root, keyed by the
+  ordinary `level-seed`. Everything else is secret. The routing is a whitelist, so a Minecraft
+  update that adds a new noise fails safe — the new noise is secret rather than silently leaked.
+- **`/seed`** reports the public seed and, by default, a fingerprint of the secret rather than the
+  secret.
+- **A fingerprint in `level.dat`** and a startup guard that refuses to boot a world belonging to a
+  different secret.
+- Switching `secure-seed.enabled` to `false` returns worldgen to literal Vanilla behaviour — the
+  disabled path is the Vanilla code, not a second copy of it.
+
+### 2. Configuration
+
+- One new file, `rolia.yml`, with the five keys above, created `0600`.
+- No Canvas or Paper default is changed. A stock Rolia server and a stock Canvas server behave
+  identically apart from worldgen.
+
+### 3. Branding
+
+- Server brand, startup banner, `/version` and the F3 screen say Rolia.
+- bStats reports as Rolia.
+- The jar is `rolia-paperclip-26.2.jar`.
+- Canvas's own brand id is left intact, so plugins that detect Canvas still recognise the server —
+  Rolia *is* Canvas underneath, and pretending otherwise only breaks plugins.
+- Canvas's config files, directories and the `/canvas` command keep their names, so Canvas's
+  documentation applies to Rolia unchanged.
+
+### 4. Build and release
+
+- Every build runs a gauntlet before it is allowed to release: the full Paper/Canvas test suite, two
+  smoke boots, three generated worlds compared column by column to prove the public/secret split
+  holds, a determinism run, the fingerprint guard, a fresh-secret run, a config contract check, and
+  four runs with the secure seed switched off to prove that switch really does hand worldgen back to
+  Vanilla.
+- The BLAKE2b implementation is verified against the RFC 7693 test vectors on every build, including
+  a check that it is genuinely keyed mode rather than a naive `key || message` concatenation.
+
+That is the entire list.
+
+---
+
+## Compatibility
+
+Rolia is Canvas, which is a Folia-lineage server. Plugins must support Folia's region threading.
+Anything that runs on Canvas runs on Rolia.
+
+Worlds are **not** portable between a Rolia server and a non-Rolia server while
+`secure-seed.enabled` is `true` — the caves, ore and structures of a Rolia world cannot be
+regenerated without the key. With the switch off, worlds are ordinary Minecraft worlds.
+
+Worlds generated by Rolia builds 45 and earlier are **not** compatible with build 46: the Minecraft
+version changed, and biome climate moved from the secret side to the public side. Start a new world.
+
+---
+
+## Documentation
+
+- Russian configuration reference: [`docs/rolia.yml.ru.md`](docs/rolia.yml.ru.md)
+- Launch and operations guide: [`LAUNCH.md`](LAUNCH.md)
+
+## Licence
+
+Rolia inherits Canvas's licence: [GNU General Public License v3](LICENSE). Canvas itself inherits
+from Paper and Folia. Licences for the third-party patches Canvas bundles ship inside the jar under
+`META-INF/licenses/`.

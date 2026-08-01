@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  Rolia server launcher (Linux / macOS) - Minecraft 26.1.2, Java 25+
+#  Rolia server launcher (Linux / macOS) - Minecraft 26.2, Java 25+
 #
 #  Edit MEM / CONC_GC_THREADS / JAR below and run this from the server folder.
 #
@@ -13,9 +13,9 @@
 cd "$(dirname "$0")" || exit 1
 
 # --- edit me -----------------------------------------------------------------
-MEM="4G"                            # heap size; Xms and Xmx are deliberately equal
-CONC_GC_THREADS=2                   # G1 concurrent-marking threads, see below
-JAR="rolia-paperclip-26.1.2.jar"
+MEM="32G"                           # heap size; Xms and Xmx are deliberately equal
+CONC_GC_THREADS=4                  # G1 concurrent-marking threads, see below
+JAR="rolia-paperclip-26.2.jar"
 # -----------------------------------------------------------------------------
 
 JVM_ARGS=(
@@ -24,6 +24,11 @@ JVM_ARGS=(
   # server is running, and every resize is a full pause. Fixing both ends removes
   # the resize path entirely. Pick roughly half to two thirds of host RAM: Rolia
   # also needs off-heap memory for chunk I/O, Netty buffers and the JVM itself.
+  #
+  # This file ships tuned for 32G, which wants a host with 40G or more. Giving the
+  # heap every byte in the machine is the classic own goal: the JVM needs memory
+  # outside it, and whatever is left is what the OS uses to cache your region
+  # files. Starving page cache to feed the heap makes a server slower, not faster.
   -Xms"${MEM}" -Xmx"${MEM}"
 
   # --- Required module / compatibility flags ---------------------------------
@@ -51,7 +56,7 @@ JVM_ARGS=(
   # on a large box G1 quietly takes cores away from region threads mid-tick and
   # the result looks like random MSPT spikes. Pin it, and count it as spent when
   # you size threaded-regions / chunk-system threads.
-  # 2 suits a 4-8 GB heap; go to 3-4 only well above that.
+  # 2 suits a 4-8 GB heap; 4 is right for the 32 GB this file is tuned for.
   -XX:+UseG1GC
   -XX:ConcGCThreads="${CONC_GC_THREADS}"
 
@@ -70,24 +75,25 @@ JVM_ARGS=(
   -XX:+UnlockExperimentalVMOptions
   -XX:+DisableExplicitGC
 
-  # --- Aikar's G1 tuning, sized for a 4-8 GB heap ----------------------------
+  # --- Aikar's G1 tuning, sized for a 32 GB heap -----------------------------
   # The widely used Minecraft G1 profile: a large, aggressively collected young
   # generation so short-lived per-tick garbage never gets promoted, a low
   # occupancy trigger so concurrent marking starts early instead of degenerating
   # into a full GC, and MaxTenuringThreshold=1 so objects that do survive move to
   # the old generation immediately rather than being copied between survivor
   # spaces on every collection.
-  # Above ~12 GB of heap, retune: G1NewSizePercent=40, G1MaxNewSizePercent=50,
-  # G1HeapRegionSize=16M, G1ReservePercent=15, InitiatingHeapOccupancyPercent=20.
+  # These are the >12 GB settings of that profile. Below about 12 GB of heap, go
+  # back to G1NewSizePercent=30, G1MaxNewSizePercent=40, G1HeapRegionSize=8M,
+  # G1ReservePercent=20, InitiatingHeapOccupancyPercent=15.
   -XX:+ParallelRefProcEnabled
   -XX:MaxGCPauseMillis=200
-  -XX:G1NewSizePercent=30
-  -XX:G1MaxNewSizePercent=40
-  -XX:G1HeapRegionSize=8M
-  -XX:G1ReservePercent=20
+  -XX:G1NewSizePercent=40
+  -XX:G1MaxNewSizePercent=50
+  -XX:G1HeapRegionSize=16M
+  -XX:G1ReservePercent=15
   -XX:G1HeapWastePercent=5
   -XX:G1MixedGCCountTarget=4
-  -XX:InitiatingHeapOccupancyPercent=15
+  -XX:InitiatingHeapOccupancyPercent=20
   -XX:G1MixedGCLiveThresholdPercent=90
   -XX:G1RSetUpdatingPauseTimePercent=5
   -XX:SurvivorRatio=32
