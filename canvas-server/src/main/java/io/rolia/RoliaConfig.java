@@ -27,11 +27,15 @@ import java.util.Set;
  * is a key here, and every one of those keys is {@code false} by default. The single exception is
  * {@code secure-seed.enabled}, which is the reason this fork exists; it too can be turned off.</p>
  *
- * <p>Bug fixes are NOT keys. Rolia fixes a number of genuine defects inherited from Canvas - a null
- * dereference in the spawn path, a file-descriptor leak, ender pearls lost on world unload, a
- * projectile reading its X coordinate as Z. Those are always on and have no switch, because shipping a
- * known crash behind an opt-in flag would be a strange kind of configurability. They are listed in the
- * generated file for reference so it is clear what is happening and why there is no key for it.</p>
+ * <p>Build 46 made that rule literal by deleting everything it applied to. Builds 40-45 also carried
+ * patches to Canvas's own code - a null dereference in the spawn path, a file-descriptor leak, ender
+ * pearls lost on world unload, a projectile reading its X coordinate as Z, and a set of optimization
+ * options - and all of them are gone. A bare core cannot also be a collection of other people's
+ * patches. The only Rolia edit left outside the secure-seed layer is {@code CanvasVersionFetcher},
+ * because {@code /version} linked to CanvasMC's repository and queried their build API.</p>
+ *
+ * <p>If any of those Canvas defects still matters on 26.2, it should be reported upstream rather than
+ * carried here: a fork that quietly repairs its base is a fork nobody can reason about.</p>
  *
  * <h2>How options are declared</h2>
  *
@@ -506,10 +510,10 @@ public final class RoliaConfig {
         "plus the secure seed. Every behaviour Rolia changes is a key here, and every one of those keys",
         "defaults to false. The only exception is secure-seed.enabled, which is why this fork exists.",
         "",
-        "Rolia's BUG FIXES are not keys and are always applied - a null dereference in the mob spawn",
-        "path, a file-descriptor leak on config reload, ender pearls lost when a world unloads, a",
-        "projectile reading its X coordinate as Z, and several data races. Shipping a known crash",
-        "behind an opt-in flag would be a strange kind of configurability, so there is no switch.",
+        "That rule is now literal. Builds 40-45 also carried patches to Canvas's own code - bug fixes",
+        "and behaviour options - and build 46 dropped all of them. The only Rolia edit left outside the",
+        "secure seed is the /version command, which pointed at CanvasMC's repository and build API.",
+        "So the code you are running is Canvas 26.2, and the seed layer is the whole difference.",
         "",
         "РУССКАЯ ВЕРСИЯ ЭТОГО ФАЙЛА (Russian translation of every comment below):",
         ConfigWriter.DOCS_URL_RU,
