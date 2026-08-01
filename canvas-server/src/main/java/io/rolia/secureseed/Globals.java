@@ -380,6 +380,10 @@ public class Globals {
             // here makes the biome map reproducible from the ordinary level-seed, which is the point:
             // a seed-finder site now shows the right biomes as well as the right landscape.
             //
+            // The two legacy Nether climate noises moved with them, by deleting their hooks in
+            // apply_seed_hooks.py: "the biome map is public" has to hold in all three dimensions, or a
+            // seed-finding site shows the right Overworld and the wrong Nether and the claim is false.
+            //
             // Nothing else moves. Surface rules, decorations, carvers, aquifers, ore, structures, loot
             // and slime chunks keep their own independent secret domains, so the biome map still cannot
             // tell you where anything actually is.
