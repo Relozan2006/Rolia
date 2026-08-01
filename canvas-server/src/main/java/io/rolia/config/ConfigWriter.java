@@ -8,7 +8,7 @@ import java.util.List;
  *
  * <p>Everything here is derived from {@link Opt#entries()}, so the generated file cannot drift from the
  * options the server actually reads. Adding an option to the registry adds it to the file, to
- * {@code /rolia status}, and to the key list CI compares against the Russian documentation - with no
+ * the startup line, and to the key list CI compares against the Russian documentation - with no
  * second edit anywhere.</p>
  */
 public final class ConfigWriter {

@@ -1,8 +1,6 @@
 package io.canvasmc.canvas.util.version;
 
 import com.destroystokyo.paper.util.VersionFetcher;
-import io.canvasmc.canvas.ClientV2;
-import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.util.Util;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.ServerBuildInfoImpl;
@@ -224,7 +222,10 @@ public class CanvasVersionFetcher implements VersionFetcher {
      * own, so the honest answer is the local one.</p>
      */
     private Status computeStatus() {
-        return new LocalStatus();
+        // A jar with a build number came out of CI and is a release; only a local ./gradlew build has
+        // none. Reporting a released build as "DEV" would be as wrong as the old lookup was.
+        final OptionalInt buildNumber = ServerBuildInfo.buildInfo().buildNumber();
+        return buildNumber.isPresent() ? new ReleaseStatus(buildNumber.getAsInt()) : new LocalStatus();
     }
 
     private static TextComponent formatList(final List<String> inputArguments) {
@@ -267,6 +268,27 @@ public class CanvasVersionFetcher implements VersionFetcher {
         @Override
         public Component getStatus() {
             return text("DEV", RED, TextDecoration.BOLD);
+        }
+
+        @Override
+        public boolean isError() {
+            return false;
+        }
+    }
+
+    /**
+     * Rolia - build 46: what a released build reports.
+     *
+     * <p>Rolia has no update endpoint, so there is no honest way to say "you are N builds behind". It
+     * says which build this is and leaves it there. {@code BetaStatus} and {@code StableStatus} above
+     * are unreachable now - they exist to render that distance - and are kept only because they belong
+     * to Canvas's file and deleting them would widen the next rebase for no benefit.</p>
+     */
+    private record ReleaseStatus(int build) implements Status {
+        @Contract(value = " -> new", pure = true)
+        @Override
+        public Component getStatus() {
+            return text("BUILD " + build, GREEN, TextDecoration.BOLD);
         }
 
         @Override

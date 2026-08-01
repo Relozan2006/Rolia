@@ -42,10 +42,11 @@ build 46 is a bare core by design.
   (`GeodeConfiguration` became a record, so context lines gained parentheses, and the hunk moved
   from line 41 to 43). `Slime.java` moved to `monster/cubemob/` and its patch moved with it.
 - `apply_dab_hooks.py` → **`apply_seed_hooks.py`**: the optimization hooks are deleted. What remains
-  is **thirteen hooks over fourteen checksummed occurrences** — the original eight worldgen hooks,
-  plus five carried over from Canvas's own per-file patches (see item 2 below). Every anchor still
-  exists in 26.2; seven of the original eight checksums are unchanged; one moved
-  (`f24baae1b478b3fa` → `cb26b5aec4877d1a`). Verified by running the finished script end to end
+  is **eleven hooks over twelve checksummed occurrences** — six worldgen hooks, plus five carried
+  over from Canvas's own per-file patches. Two of the original eight were dropped: the legacy Nether
+  climate pair, because build 46 makes the biome map public and that has to hold in all three
+  dimensions. Every anchor still exists in 26.2; seven of the then-eight checksums are unchanged; one
+  moved (`f24baae1b478b3fa` → `cb26b5aec4877d1a`). Verified by running the finished script end to end
   against the real 26.2 sources.
 - CI: build number 46, version strings, DAB step removed, hook step repointed, and the **biome
   assertion inverted** — biomes must now MATCH when the secret changes and differ across

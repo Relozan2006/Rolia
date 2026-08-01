@@ -14,15 +14,18 @@ Build 46 note. This file used to be apply_dab_hooks.py and carried the optimizat
 villager lobotomization, faster network writes, line-of-sight caching, collision-shape caching. Those
 options are gone from a bare core, so their hooks are gone with them and the name no longer fits.
 
-What remains is thirteen hooks over fourteen checksummed occurrences (one hook matches twice): eight
-that route worldgen through the secret, and five that were moved here from Canvas's own per-file
-patches when Rolia rebased onto 26.2 - see the build-46 section further down for why those five could
-not stay as patch hunks.
+What remains is eleven hooks over twelve checksummed occurrences (one hook matches twice): six that
+route worldgen through the secret, and five that were moved here from Canvas's own per-file patches
+when Rolia rebased onto 26.2 - see the build-46 section further down for why those five could not
+stay as patch hunks.
 
-Porting 26.1.2 -> 26.2 cost almost nothing for the original eight, which was worth measuring rather
+Two more were removed outright in build 46: the legacy Nether climate pair. Build 46 makes the biome
+map public, and that has to hold in all three dimensions or the claim is not true.
+
+Porting 26.1.2 -> 26.2 cost almost nothing for the worldgen hooks, which was worth measuring rather
 than assuming: every anchor still existed with exactly the expected number of occurrences, and seven
-of their eight checksums were unchanged, because RandomState.java is identical in every region they
-touch. Exactly one moved - the first of the two NoiseBasedChunkGenerator sites,
+of the then-eight checksums were unchanged, because RandomState.java is identical in every region
+they touch. Exactly one moved - the first of the two NoiseBasedChunkGenerator sites,
 f24baae1b478b3fa -> cb26b5aec4877d1a.
 """
 import hashlib
@@ -103,6 +106,16 @@ def patch(path, old, new, what, hint=None, count=1, marker=None, context=None, c
     """
     s = open(path, encoding="utf-8").read()
     if marker is not None and marker in s:
+        # Rolia - build 46: never skip during a hash-printing run. Regenerating the checksums against a
+        # tree where the hooks are already applied is the natural thing to reach for after a failure,
+        # and skipping would have printed a confident, silently incomplete list instead of failing.
+        if PRINT_HASHES:
+            print("ERROR: %s is already applied in %s." % (what, path), file=sys.stderr)
+            print("       --print-context-hashes must run against a CLEAN tree, in execution order,",
+                  file=sys.stderr)
+            print("       or the hashes it prints do not describe the windows the hooks will see.",
+                  file=sys.stderr)
+            sys.exit(1)
         print("SKIP (already applied): " + what)
         return
     n = s.count(old)
@@ -211,19 +224,21 @@ patch(RANDOMSTATE,
       "                : io.rolia.secureseed.Globals.secretOr(this.roliaSecretRandom.fromHashOf(name).forkPositional(), \"factory:\" + name));\n",
       "RandomState named-factory public/secret routing", context="7ecba93f08a2b3e2",
       hint="positionalRandoms", marker="isPublicTerrainFactory(name)")
-# The two legacy Nether climate noises are SECRET, and must not go through LegacyRandomSource's 48-bit
-# state. newLegacyInstance() itself is left alone because useLegacyInit also routes BlendedNoise (which
-# is terrain, and public) through it.
-patch(RANDOMSTATE,
-      "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(this.newLegacyInstance(0L), noiseData.value());\n",
-      "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(io.rolia.secureseed.Globals.isSecureSeedEnabled() ? io.rolia.secureseed.Globals.secretClimateSource(0L) : this.newLegacyInstance(0L), noiseData.value()); // Rolia - SECRET, full width (vanilla when secure-seed.enabled=false)\n",
-      "RandomState nether temperature climate under the secret", context="5ea8cc55701c6fcb",
-      hint="TEMPERATURE_NETHER", marker="secretClimateSource(0L)")
-patch(RANDOMSTATE,
-      "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(this.newLegacyInstance(1L), noiseData.value());\n",
-      "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(io.rolia.secureseed.Globals.isSecureSeedEnabled() ? io.rolia.secureseed.Globals.secretClimateSource(1L) : this.newLegacyInstance(1L), noiseData.value()); // Rolia - SECRET, full width (vanilla when secure-seed.enabled=false)\n",
-      "RandomState nether vegetation climate under the secret", context="264930f2e13eb7f3",
-      hint="VEGETATION_NETHER", marker="secretClimateSource(1L)")
+# Rolia - build 46: the two legacy Nether climate hooks were REMOVED here, not moved.
+#
+# Builds 40-45 routed TEMPERATURE_NETHER and VEGETATION_NETHER through the secret, because biome
+# climate was secret everywhere. Build 46 made the biome map public - and it has to be public in all
+# three dimensions or the claim is not true. Leaving these two would have meant a seed-finding site
+# showing the right Overworld biomes and the wrong Nether ones, with nothing in the CI biome gate to
+# catch it, because that gate only samples the Overworld.
+#
+# Removing them is safe for the checksums of the hooks above: those all run BEFORE these did, so
+# their context windows were hashed against text these substitutions had not yet touched. The hooks
+# below are in other files entirely.
+#
+# newLegacyInstance() itself was already left alone, because useLegacyInit also routes BlendedNoise -
+# which is terrain, and public - through it. So dropping these two hooks leaves both Nether climate
+# noises on vanilla's own construction, which is exactly what "the biome map is public" means.
 
 # 6) (removed in build 40) TamableAnimal.canTeleportTo unloaded-chunk guard.
 #    It was a no-op. pos.below() is in the same chunk column as pos, and getPathTypeStatic(this, pos) -

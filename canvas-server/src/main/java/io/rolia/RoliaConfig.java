@@ -35,7 +35,7 @@ import java.util.Set;
  *
  * <h2>How options are declared</h2>
  *
- * <p>Once, below, as an {@link Opt}. The parser, the generated YAML, {@code /rolia status} and the key
+ * <p>Once, below, as an {@link Opt}. The parser, the generated YAML, the startup line and the key
  * list CI checks the Russian documentation against are all derived from that single declaration, so
  * they cannot fall out of step. See {@link Opt} for why that matters.</p>
  *
@@ -239,8 +239,9 @@ public final class RoliaConfig {
             // SnakeYAML's MarkedYAMLException embeds a ~75-character snippet of the offending source
             // line, and the likeliest line to be malformed in this file is the salt or the 309-digit
             // feature seed - the two strings that must never reach latest.log or a pasted crash report.
-            // The class name and position are enough to fix the file.
-            refuseUnreadable(file, e.getClass().getSimpleName());
+            // The position is pulled out separately, without the snippet, because "fix the YAML" with
+            // no line number is not much of an instruction.
+            refuseUnreadable(file, e.getClass().getSimpleName() + describePosition(e));
             throw new IllegalStateException("Rolia: unreadable " + FILE_NAME + " - refusing to start");
         }
         if (!(parsed instanceof Map)) {
@@ -250,6 +251,21 @@ public final class RoliaConfig {
             throw new IllegalStateException("Rolia: " + FILE_NAME + " contains no configuration mapping");
         }
         return (Map<String, Object>) parsed;
+    }
+
+    /**
+     * Rolia - " at line N, column M" from a SnakeYAML error, and nothing else.
+     *
+     * <p>{@code Mark.toString()} - which is what the exception's own message contains - includes a
+     * snippet of the source line. That is the one thing that must not be logged here. The coordinates
+     * on their own carry no content.</p>
+     */
+    private static String describePosition(final Exception e) {
+        if (e instanceof org.yaml.snakeyaml.error.MarkedYAMLException m && m.getProblemMark() != null) {
+            return " at line " + (m.getProblemMark().getLine() + 1)
+                + ", column " + (m.getProblemMark().getColumn() + 1);
+        }
+        return "";
     }
 
     private static void refuseUnreadable(final File file, final String why) {
@@ -280,7 +296,13 @@ public final class RoliaConfig {
 
         // Only (re)write the file on first generation or migration - never clobber a user-edited file.
         if (firstGen) {
-            createPrivate(file); // owner-only (0600) BEFORE the secret is written into it
+            // Rolia - build 46: no createPrivate(file) here any more. It called Files.createFile, so a
+            // fresh install always passed through a state where rolia.yml existed and was EMPTY. That
+            // used to be self-healing, because an empty file parsed as "no config yet"; now that an
+            // empty file is a hard refusal - which it has to be, since it is indistinguishable from a
+            // truncated one - the same window would brick the NEXT boot if the process died inside it.
+            // writeConfig creates rolia.yml.tmp owner-only, writes the secret into that, and moves it
+            // atomically, so the target is never world-readable and never exists empty.
             if (!writeConfig(file)) {
                 // Rolia - build 44: refuse to start. See writeConfig's javadoc - continuing here means
                 // generating a world against a secret that was never persisted, which is exactly the

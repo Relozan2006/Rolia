@@ -66,7 +66,7 @@ public abstract class Opt<T> {
     volatile boolean fromFile;
     /**
      * Rolia - holds a secret. Its value round-trips through the file (it has to - losing it loses the
-     * world) but is never printed by {@code /rolia status}, never written to a log, and never included
+     * world) but is never printed by the startup line, never written to a log, and never included
      * in the documentation key dump. The generated file is the ONLY place it appears.
      */
     private boolean secret;
@@ -136,7 +136,7 @@ public abstract class Opt<T> {
         return Collections.unmodifiableList(ENTRIES);
     }
 
-    /** Rolia - every option, in declaration order. Used by /rolia status and the CI docs check. */
+    /** Rolia - every option, in declaration order. Used by the startup line and the CI docs check. */
     public static List<Opt<?>> options() {
         final List<Opt<?>> out = new ArrayList<>();
         for (final Object e : ENTRIES) {
@@ -153,7 +153,7 @@ public abstract class Opt<T> {
     /** The compiled-in default, i.e. what stock Rolia does with no file present. */
     public abstract T defaultValue();
 
-    /** Is this option still at its default? Drives the "non-default settings" list in /rolia status. */
+    /** Is this option still at its default? Drives the "non-default settings" part of the startup line. */
     public boolean isDefault() {
         final T v = get();
         final T d = defaultValue();
@@ -167,13 +167,16 @@ public abstract class Opt<T> {
      * Apply a value read from the file.
      *
      * @param raw       the parsed YAML node for this path, or null when the key is absent
-     * @param dryRun    when true, validate and report but do not assign (used by /rolia reload to
-     *                  decide whether a RESTART option actually changed)
+     * @param dryRun    when true, validate and report but do not assign. Build 46 removed the reload
+     *                  command that used this, so every caller passes false today; the parameter is
+     *                  kept because "would this change anything?" is the question any future reload
+     *                  has to ask, and answering it by assigning first is how you get a half-applied
+     *                  config
      * @return true when the effective value changed
      */
     public abstract boolean apply(Object raw, boolean dryRun);
 
-    /** Reset to the compiled-in default. Used when a reload finds the key removed from the file. */
+    /** Reset to the compiled-in default. No caller since build 46 removed the reload command. */
     public abstract void reset();
 
     @Override
@@ -240,8 +243,11 @@ public abstract class Opt<T> {
                     // "enabled: ture" silently turned the entire fork off on a world that needs it -
                     // the most consequential possible outcome for a one-character typo, in the safest
                     // possible direction to get wrong.
+                    // Rolia - the value is redacted for a secret option. No secret is a boolean today,
+                    // but Opt.toString() was hardened for exactly this and a value-printing branch
+                    // without the guard is how the next one leaks.
                     LOGGER.warn("Rolia: {} has an unrecognised value '{}'; keeping the default ({}).",
-                        this.path, raw, this.def);
+                        this.path, this.isSecret() ? "<secret>" : raw, this.def);
                     next = this.def;
                 }
             } else {

@@ -150,6 +150,7 @@ public class Globals {
     }
 
     private static volatile boolean fingerprintDone = false;
+    private static volatile boolean fingerprintStarted = false;
     private static volatile long fingerprintDeadline = 0L;
     private static volatile long lastFingerprintAttempt = 0L;
     private static final long FINGERPRINT_RETRY_NANOS = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(250);
@@ -171,22 +172,25 @@ public class Globals {
      */
     private static void verifyFingerprintOnce() {
         final long now = System.nanoTime();
-        long deadline = fingerprintDeadline;
-        if (deadline == 0L) {
-            deadline = now + java.util.concurrent.TimeUnit.SECONDS.toNanos(60);
-            fingerprintDeadline = deadline;
+        // Rolia - a separate flag rather than `deadline == 0L`, because nanoTime's origin is arbitrary
+        // and on Linux it counts from boot, so 0 is a value it can genuinely return. Using it as an
+        // "unset" sentinel would silently disengage the throttle below.
+        if (!fingerprintStarted) {
+            fingerprintStarted = true;
+            fingerprintDeadline = now + java.util.concurrent.TimeUnit.SECONDS.toNanos(60);
+            lastFingerprintAttempt = now;
+        } else {
+            // Throttle the retries. This runs from ServerChunkCache#getGenerator(), which is called
+            // constantly while chunks generate, and the check lists a directory. Build 40.0 ran it
+            // unconditionally here and chunk generation fell from ~44 chunks/s to ~7. One attempt per
+            // 250ms costs nothing and is bounded by wall clock rather than by thread count, so adding
+            // workers cannot make it either more expensive or less likely to succeed.
+            if (now - lastFingerprintAttempt < FINGERPRINT_RETRY_NANOS) {
+                return;
+            }
+            lastFingerprintAttempt = now;
         }
-
-        // Throttle the retries. This runs from ServerChunkCache#getGenerator(), which is called
-        // constantly while chunks generate, and the check lists a directory. Build 40.0 ran it
-        // unconditionally here and chunk generation fell from ~44 chunks/s to ~7. One attempt per
-        // 250ms costs nothing and is bounded by wall clock rather than by thread count, so adding
-        // workers cannot make it either more expensive or less likely to succeed.
-        final long last = lastFingerprintAttempt;
-        if (last != 0L && now - last < FINGERPRINT_RETRY_NANOS) {
-            return;
-        }
-        lastFingerprintAttempt = now;
+        final long deadline = fingerprintDeadline;
 
         if (RoliaConfig.verifyWorldFingerprint(seedFingerprintCached())) {
             fingerprintDone = true;
@@ -454,18 +458,12 @@ public class Globals {
         return new net.minecraft.world.level.levelgen.XoroshiroRandomSource(k[0], k[1]).forkPositional();
     }
 
-    /**
-     * Rolia - a full-width secret RandomSource for the two legacy Nether climate noises.
-     *
-     * <p>Vanilla builds those from {@code new LegacyRandomSource(seed + offset)}, which keeps 48 bits of
-     * state. Nether biome climate is a SECRET system in the build 40 model, so it must not go through a
-     * 48-bit funnel derived from anything public.</p>
-     */
-    public static net.minecraft.util.RandomSource secretClimateSource(final long offset) {
-        // Rolia - build 44: mix the level seed, same reasoning as secretPositionalFactory above.
-        final long[] k = Hashing.derive("climate-legacy", publishedWorldSeed(), offset ^ levelSeed());
-        return new net.minecraft.world.level.levelgen.XoroshiroRandomSource(k[0], k[1]);
-    }
+    // Rolia - build 46: secretClimateSource was deleted here along with its two callers.
+    //
+    // It produced a full-width secret RandomSource for the two legacy Nether climate noises, because
+    // in the build 40 model biome climate was secret. Build 46 makes the biome map public, and it has
+    // to be public in all three dimensions or the claim is not true - so the Nether climate noises go
+    // back to vanilla's own construction and this has nothing left to serve.
 
     // ---------------------------------------------------------------------------------------------
     // Seed derivation for vanilla systems that would otherwise leak the raw level seed
@@ -545,9 +543,13 @@ public class Globals {
     public static Optional<long[]> parseSeed(String seedStr) {
         if (seedStr == null || seedStr.isEmpty()) return Optional.empty();
         final String trimmed = seedStr.trim();
-        // A 1024-bit value is at most 309 decimal digits. Bounding the length before BigInteger also
-        // stops a file- or operator-supplied value of unbounded length from stalling startup.
-        if (trimmed.isEmpty() || trimmed.length() > 309) return Optional.empty();
+        // A loose guard only, so a file- or operator-supplied value of unbounded length cannot stall
+        // startup inside BigInteger. The real bound is bitLength below. Testing the DIGIT COUNT against
+        // 309 (the exact width of a 1024-bit value) was tried first and was too sharp: it also rejected
+        // a leading "+" or leading zeros, which are valid decimal that BigInteger accepts, and the
+        // consequence of a false rejection here is that the server refuses to boot on a mathematically
+        // correct seed.
+        if (trimmed.isEmpty() || trimmed.length() > 512) return Optional.empty();
 
         try {
             final BigInteger value = new BigInteger(trimmed);
@@ -588,8 +590,8 @@ public class Globals {
      * <ul>
      *   <li>{@link #isPublicTerrainNoise} and {@link #isPublicTerrainFactory} answer true for
      *       everything, so {@code RandomState} routes every noise back through the public root;</li>
-     *   <li>{@link #secretPositionalFactory} and {@link #secretClimateSource} are not called at all -
-     *       the hooks in {@code RandomState} pick the vanilla expression instead;</li>
+     *   <li>{@link #secretPositionalFactory} is not called at all - the hooks in {@code RandomState}
+     *       pick the vanilla expression instead;</li>
      *   <li>{@link WorldgenCryptoRandom} degrades to the plain {@code WorldgenRandom} it extends, so
      *       every one of the fifteen worldgen call sites becomes vanilla without being touched;</li>
      *   <li>{@link #isActive} is false, so the fingerprint written beside {@code level.dat} is the
