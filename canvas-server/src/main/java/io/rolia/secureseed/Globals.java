@@ -61,7 +61,12 @@ public class Globals {
      * five-argument {@link WorldgenCryptoRandom} constructor; relying on the ambient value there gave
      * wrong and unstable answers before build 40.</p>
      */
-    public static final ThreadLocal<Integer> dimension = ThreadLocal.withInitial(() -> 0);
+    // Rolia - build 46: package-private, was public. Build 44 made the 1024-bit seed private for the
+    // same reason and this field is the same class of hazard from the other end: a plugin could call
+    // Globals.dimension.set(...) on a region thread and silently corrupt every chunk generated on it
+    // afterwards, with no error anywhere. The only legitimate writer is setupGlobals, and the only
+    // reader outside it is WorldgenCryptoRandom, which is in this package.
+    static final ThreadLocal<Integer> dimension = ThreadLocal.withInitial(() -> 0);
 
     private static volatile boolean seedInitialized = false;
     private static final java.util.concurrent.ConcurrentHashMap<net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>, Integer> DIMENSION_ID_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
@@ -110,7 +115,7 @@ public class Globals {
         if (!fingerprintDone) {
             verifyFingerprintOnce();
         }
-        dimension.set(stableDimensionId(world.dimension()));
+        dimension.set(boxedDimensionId(world.dimension()));
     }
 
     /**
@@ -220,6 +225,18 @@ public class Globals {
      * got IDENTICAL separators. The identifier never moves, so the separator never moves.</p>
      */
     public static int stableDimensionId(net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> key) {
+        return boxedDimensionId(key);
+    }
+
+    /**
+     * Rolia - the same value, kept boxed.
+     *
+     * <p>{@link #setupGlobals} stores it in a {@code ThreadLocal<Integer>} on a path its own comment
+     * says must not allocate per call. Returning {@code int} meant every one of those stores boxed a
+     * fresh {@code Integer}, because the id is a MAC output and so is essentially never inside the
+     * {@code Integer} cache range. The cache already holds a boxed instance; hand that one out.</p>
+     */
+    private static Integer boxedDimensionId(net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> key) {
         Integer cached = DIMENSION_ID_CACHE.get(key);
         if (cached != null) {
             return cached;
@@ -228,9 +245,9 @@ public class Globals {
         // worlds whose ids agreed on a 64-byte prefix shared a separator - the very collision this
         // method exists to prevent.
         final byte[] idBytes = key.identifier().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        final int id = (int) Hashing.mac(null, idBytes)[0];
-        DIMENSION_ID_CACHE.put(key, id);
-        return id;
+        final Integer id = (int) Hashing.mac(null, idBytes)[0];
+        final Integer raced = DIMENSION_ID_CACHE.putIfAbsent(key, id);
+        return raced != null ? raced : id; // one shared box per dimension, even under a race
     }
 
     /** Rolia - convenience for call sites that hold a level and must not rely on the ambient value. */

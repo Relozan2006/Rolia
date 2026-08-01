@@ -41,45 +41,53 @@ build 46 is a bare core by design.
 - Nine of the ten seed patches apply to 26.2 **unchanged**. `GeodeFeature` needed rewriting
   (`GeodeConfiguration` became a record, so context lines gained parentheses, and the hunk moved
   from line 41 to 43). `Slime.java` moved to `monster/cubemob/` and its patch moved with it.
-- `apply_dab_hooks.py` → **`apply_seed_hooks.py`**: eight worldgen hooks, optimization hooks
-  deleted. Every anchor still exists in 26.2; seven of eight context checksums are unchanged; one
-  moved (`f24baae1b478b3fa` → `cb26b5aec4877d1a`). Verified by running the finished script end to
-  end against the real 26.2 sources.
+- `apply_dab_hooks.py` → **`apply_seed_hooks.py`**: the optimization hooks are deleted. What remains
+  is **thirteen hooks over fourteen checksummed occurrences** — the original eight worldgen hooks,
+  plus five carried over from Canvas's own per-file patches (see item 2 below). Every anchor still
+  exists in 26.2; seven of the original eight checksums are unchanged; one moved
+  (`f24baae1b478b3fa` → `cb26b5aec4877d1a`). Verified by running the finished script end to end
+  against the real 26.2 sources.
 - CI: build number 46, version strings, DAB step removed, hook step repointed, and the **biome
   assertion inverted** — biomes must now MATCH when the secret changes and differ across
   level-seeds, both directions asserted.
 - README rewritten; `LAUNCH.md` and the Russian config reference match the five keys; launch
   scripts retuned from 4 GB to 32 GB.
 
-## Remaining, in order
+## Done since
 
-1. **Verify the `Slime` patch** against the second source dump (path
-   `net/minecraft/world/entity/monster/cubemob/Slime.java`).
-2. **Re-apply four seed-critical edits** to Canvas 26.2's own patch files. Only the seed parts —
-   the parity and optimization parts of those same edits are deliberately dropped:
-   - `ChunkGenerator.java.patch` — import `Globals`/`WorldgenCryptoRandom`; the decoration-seed
-     `WorldgenCryptoRandom(origin.getX(), origin.getZ(), Salt.UNDEFINED, 0)`; the
-     `Salt.BUKKIT_POPULATOR` site; the structure-set weighting sites.
-   - `ServerChunkCache.java.patch` — `Globals.setupGlobals(level)` in `getGenerator()`.
-     **Not** the spawn-chunk fairness shuffle.
-   - `ServerLevel.java.patch` — `Globals.setupGlobals(this)`. **Not**
-     `warnIfChunkSystemThreadsUnderconfigured` (deleted) and **not** the random-tick parity block.
-   - `CraftChunk.java.patch` — `isSlimeChunk()` through `WorldgenCryptoRandom.seedSlimeChunk`.
-3. **Rebrand**, on top of Canvas 26.2's `0001-Rebrand.patch` (they changed it by 1676 lines):
-   brand name, banner, `/version`, F3, bStats, jar name. Keep `BRAND_CANVAS_ID` meaning Canvas and
-   add `BRAND_ROLIA_ID`, as in build 45 — Rolia is a Canvas fork and plugins that detect Canvas
-   should keep working.
-4. **`GlobalConfiguration`** — the hook that loads `rolia.yml` at startup.
-5. **CI details** — the reference-source dump list, and the config-contract step's expectations now
-   that there are five keys rather than twenty-eight.
-6. Re-enable `build.yml` on the `v26.2` branch, then iterate to green.
+Items 1–5 of the original plan are complete: the `Slime` patch is verified against the real dump,
+the five seed-critical edits are carried as hooks rather than patch hunks (a patch numbers its hunks
+against the *pre*-patch file, and the only 26.2 sources available to write against are post-patch),
+the rebrand is applied on top of Canvas 26.2's own, and the CI config-contract step expects five
+keys.
+
+CI rounds so far, and what each actually failed on — worth recording, because three of them were
+spent on the wrong step:
+
+1. Branding gate — the jar manifest still said Canvas. Fixed in `build.gradle.kts.patch`.
+2. Terrain gate — land mask 96 against a floor of 97; three bounds recalibrated for 26.2.
+3. and 4. Diagnosed as the config-contract step, which was wrong. The job was dying one step
+   earlier, in the auto-random seed test: it asserts the fragment `; DAB off` on the startup line,
+   and build 46 deleted DAB along with that fragment, so the grep could never match. The tell was
+   `auto_b.log` ending mid-shutdown seven seconds before the publish step ran. The replacement
+   anchors the END of the line instead of naming DAB, which is stronger: it fails if any future
+   option appends itself there.
+
+## Remaining
+
+1. Push the review fixes and iterate `v26.2` to green.
+2. Delete `.github/workflows/sources.yml` — it is scaffolding.
+3. Merge `v26.2` into `main`, then a `[release]` commit for `v26.2-build.46`.
 
 ## Notes for whoever continues
 
 - The dumped sources on the `srcdump` branch are **post-Canvas-patch**. Canvas's own patches will
   not re-apply to them, and should not be expected to. Only Rolia's patches are testable that way.
 - Hook checksums must be computed **in execution order**, applying each substitution before hashing
-  the next hook's window. Three of the eight differ between the pristine file and the real sequence.
+  the next hook's window. Three of the original eight differ between the pristine file and the real
+  sequence. `--print-context-hashes` does that correctly and now actually prints the result — until
+  build 46 it collected the values into a list nothing ever read, which is why every hash in the file
+  had to be harvested one at a time out of failure messages.
 - The Linux sandbox serves stale file sizes for this repo after a Windows-side write, so a grep
   there can read a truncated file and report "clean". Verify from the Windows side.
 - `.github/workflows/sources.yml` is scaffolding. Delete it once build 46 is green.
