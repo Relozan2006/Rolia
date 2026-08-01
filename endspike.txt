@@ -1,0 +1,20 @@
+canvas-server/src/minecraft/java/net/minecraft/world/level/dimension/end/EnderDragonFight.java:61:import net.minecraft.world.level.levelgen.feature.EndSpikeFeature;
+canvas-server/src/minecraft/java/net/minecraft/world/level/dimension/end/EnderDragonFight.java:439:        for (EndSpikeFeature.EndSpike spike : EndSpikeFeature.getSpikesForLevel(this.level)) {
+canvas-server/src/minecraft/java/net/minecraft/world/level/dimension/end/EnderDragonFight.java:483:        for (final EndSpikeFeature.EndSpike spike : EndSpikeFeature.getSpikesForLevel(this.level)) {
+canvas-server/src/minecraft/java/net/minecraft/world/level/dimension/end/EnderDragonFight.java:680:        for (EndSpikeFeature.EndSpike spike : EndSpikeFeature.getSpikesForLevel(this.level)) {
+canvas-server/src/minecraft/java/net/minecraft/world/level/dimension/end/DragonRespawnStage.java:13:import net.minecraft.world.level.levelgen.feature.EndSpikeFeature;
+canvas-server/src/minecraft/java/net/minecraft/world/level/dimension/end/DragonRespawnStage.java:15:import net.minecraft.world.level.levelgen.feature.configurations.EndSpikeConfiguration;
+canvas-server/src/minecraft/java/net/minecraft/world/level/dimension/end/DragonRespawnStage.java:49:                List<EndSpikeFeature.EndSpike> spikes = EndSpikeFeature.getSpikesForLevel(level);
+canvas-server/src/minecraft/java/net/minecraft/world/level/dimension/end/DragonRespawnStage.java:52:                    EndSpikeFeature.EndSpike spike = spikes.get(index);
+canvas-server/src/minecraft/java/net/minecraft/world/level/dimension/end/DragonRespawnStage.java:68:                        EndSpikeConfiguration configuration = new EndSpikeConfiguration(true, ImmutableList.of(spike), new BlockPos(0, 128, 0));
+canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/feature/configurations/EndSpikeConfiguration.java:8:import net.minecraft.world.level.levelgen.feature.EndSpikeFeature;
+canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/feature/configurations/EndSpikeConfiguration.java:11:public class EndSpikeConfiguration implements FeatureConfiguration {
+canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/feature/configurations/EndSpikeConfiguration.java:12:    public static final Codec<EndSpikeConfiguration> CODEC = RecordCodecBuilder.create(
+canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/feature/configurations/EndSpikeConfiguration.java:15:                EndSpikeFeature.EndSpike.CODEC.listOf().fieldOf("spikes").forGetter(c -> c.spikes),
+canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/feature/configurations/EndSpikeConfiguration.java:18:            .apply(i, EndSpikeConfiguration::new)
+canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/feature/configurations/EndSpikeConfiguration.java:21:    private final List<EndSpikeFeature.EndSpike> spikes;
+canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/feature/configurations/EndSpikeConfiguration.java:24:    public EndSpikeConfiguration(final boolean crystalInvulnerable, final List<EndSpikeFeature.EndSpike> spikes, final @Nullable BlockPos crystalBeamTarget) {
+canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/feature/configurations/EndSpikeConfiguration.java:28:    private EndSpikeConfiguration(final boolean crystalInvulnerable, final List<EndSpikeFeature.EndSpike> spikes, final Optional<BlockPos> crystalBeamTarget) {
+canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/feature/configurations/EndSpikeConfiguration.java:38:    public List<EndSpikeFeature.EndSpike> getSpikes() {
+canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/feature/configurations/SpikeConfiguration.java:8:public record SpikeConfiguration(BlockState state, BlockPredicate canPlaceOn, BlockPredicate canReplace) implements FeatureConfiguration {
+canvas-server/src/minecraft/java/net/minecraft/world/level/levelgen/feature/configurations/SpikeConfiguration.java:9:    public static final Codec<SpikeConfiguration> CODEC = RecordCodecBuilder.create(

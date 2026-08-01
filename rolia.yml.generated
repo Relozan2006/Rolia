@@ -1,0 +1,97 @@
+# Rolia configuration - everything Rolia adds on top of Canvas lives here.
+
+# Canvas keeps its own configuration in config/canvas-server.yml and config/canvas-worlds.yml,
+# and Paper keeps its own in config/paper-global.yml and config/paper-world-defaults.yml.
+# Rolia does not override either; do not put Rolia options there or Canvas options here.
+
+# THE RULE THIS FILE FOLLOWS: a stock Rolia server behaves exactly like a stock Canvas server,
+# plus the secure seed. Every behaviour Rolia changes is a key here, and every one of those keys
+# defaults to false. The only exception is secure-seed.enabled, which is why this fork exists.
+
+# That rule is now literal. Builds 40-45 also carried patches to Canvas's own code - bug fixes
+# and behaviour options - and build 46 dropped all of them. The only Rolia edit left outside the
+# secure seed is the /version command, which pointed at CanvasMC's repository and build API.
+# So the code you are running is Canvas 26.2, and the seed layer is the whole difference.
+
+# РУССКАЯ ВЕРСИЯ ЭТОГО ФАЙЛА (Russian translation of every comment below):
+# https://github.com/Relozan2006/Rolia/blob/main/docs/rolia.yml.ru.md
+
+# IMPORTANT: this file contains the secret that protects your world. Keep it secret and BACK IT
+# UP together with the world folder.
+
+# THE SECURE 1024-BIT WORLD SEED - the reason this fork exists.
+#
+# Ordinary Minecraft derives everything from one 64-bit level seed. That seed can be
+# recovered from a handful of observed structures, after which every stronghold, every
+# ancient city, every buried treasure and every ore vein in the world is known to whoever
+# recovered it. Rolia keeps a separate 1024-bit secret, stored only in this file, and derives
+# the parts of the world worth hiding from it instead.
+#
+# WHAT IS PUBLIC: terrain SHAPE. Continentalness, erosion, ridges, offset, jagged noise and
+# blended noise all still come from the level-seed in server.properties, so the landscape is
+# reproducible by anyone who knows it, and you can still pick a landscape you like from a
+# seed-finding site.
+#
+# WHAT IS SECRET: everything else. Biome climate (which biome sits on a given landform),
+# caves, ravines, ore veins, aquifers, surface rules, structures, decorations, loot and slime
+# chunks - all derived from the 1024-bit secret below.
+#
+# THE HONEST LIMIT: since Minecraft 1.18 the biome source reads six parameters, and four of
+# them (continentalness, erosion, depth, ridges) are the same noises that build the terrain.
+# Anyone with the level-seed therefore knows four of the six. Temperature and vegetation stay
+# secret, and those are what decide whether a given mountain is snowy or jungle. This is a
+# deliberate, documented consequence of keeping terrain public - not an oversight.
+secure-seed:
+
+  # BACK THIS FILE UP, TOGETHER WITH YOUR WORLD.
+  # The salt and feature-seed below exist nowhere else. They are no longer stored in
+  # server.properties (world-readable) or in level.dat (which travels with any world download).
+  # level.dat keeps only a fingerprint, which proves a world matches this secret without
+  # revealing it. Lose this file and the caves, ores and structures of an existing world are
+  # gone - newly generated chunks will not match the ones already on disk, and it cannot be
+  # repaired afterwards.
+
+  # Master switch. This is the ONLY option in this file that defaults to true.
+  #
+  # Set to false and worldgen goes back to plain Vanilla: everything is derived from the ordinary
+  # level-seed, exactly as on Paper or Folia, and the secret below is ignored entirely. A world
+  # generated with this false is an ordinary Minecraft world and can be moved to any server.
+  #
+  # Do not flip this on a world that already exists. See on-secret-mismatch below.
+  # (takes effect on the next server restart)
+  enabled: true
+
+  # The 64+ character secret salt, generated with SecureRandom on first run.
+  # Half of the master key. Never share it, never paste it into a bug report.
+  # (takes effect on the next server restart)
+  salt: <redacted>
+
+  # The 1024-bit feature seed as a decimal integer, generated on first run.
+  # The other half of the master key.
+  # (takes effect on the next server restart)
+  feature-seed: <redacted>
+
+  # What to do when this file's secret does not match the world on disk - because the file was
+  # lost and regenerated, or because secure-seed.enabled was flipped after the world existed.
+  #
+  #   block  refuse to start, so nothing is generated until you have decided (default)
+  #   warn   log a very loud warning and start anyway
+  #   ignore say nothing
+  #
+  # The consequence of continuing is not subtle: newly generated chunks get different caves, ores
+  # and structures from the ones already on disk, with a hard seam between them, and there is no
+  # way to repair it afterwards. That is why the default is 'block' - a server that will not start
+  # is an inconvenience, a world quietly generating against the wrong secret is unrecoverable. On a
+  # brand new world nothing is stored yet, so this can only trigger when there is a real mismatch.
+  # (takes effect on the next server restart)
+  on-secret-mismatch: "block"
+
+  # What /seed shows.
+  #
+  #   fingerprint  the public level-seed plus a one-way fingerprint of the secret (default).
+  #                The fingerprint proves two worlds share a secret without revealing it.
+  #   hidden       the public level-seed only.
+  #   vanilla      Vanilla behaviour. Harmless when secure-seed.enabled is false; when it is true
+  #                this still only shows the public level-seed, because the secret is never in
+  #                level.dat to begin with.
+  seed-command: "fingerprint"

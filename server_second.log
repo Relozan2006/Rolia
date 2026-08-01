@@ -1,0 +1,121 @@
+Starting org.bukkit.craftbukkit.Main
+2026-08-01T10:39:58.337584284Z ServerMain WARN Advanced terminal features are not available in this environment
+[10:39:58 INFO]: [bootstrap] Running Java 25 (OpenJDK 64-Bit Server VM 25.0.3+9-LTS; Eclipse Adoptium Temurin-25.0.3+9) on Linux 6.17.0-1020-azure (amd64)
+[10:39:58 INFO]: [bootstrap] Loading Rolia 26.2-46-main@7f433c1 (1970-01-01T00:00:00Z) for Minecraft 26.2
+[10:39:58 INFO]: [PluginInitializerManager] Initializing plugins...
+[10:39:58 INFO]: [PluginInitializerManager] Initialized 0 plugins
+[10:39:59 INFO]: [CanvasMC] Loading Canvas server configuration
+[10:39:59 WARN]: [CanvasMC] SIMD operations are available for your server, but are not configured!
+[10:39:59 WARN]: [CanvasMC] To enable additional optimizations, add "--add-modules=jdk.incubator.vector" to your startup flags, BEFORE the "-jar".
+[10:39:59 WARN]: [CanvasMC] If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.
+[10:39:59 WARN]: [CanvasMC] Debug: Java: 25.0.3, test run: true
+[10:39:59 INFO]: [CanvasMC] Registered all Canvas commands
+[10:39:59 INFO]: [CanvasMC] Server will autosave enabled selection every 5m
+[10:39:59 INFO]: [CanvasMC] Using 20.0 as default tick rate
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.joml.MemUtil$MemUtilUnsafe (file:/home/runner/work/Rolia/Rolia/testrun/libraries/org/joml/joml/1.10.8/joml-1.10.8.jar)
+WARNING: Please consider reporting this to the maintainers of class org.joml.MemUtil$MemUtilUnsafe
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+[10:40:03 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Initialising converters for DataConverter...
+[10:40:03 INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, profilesHost=https://api.mojang.com, name=PROD]
+[10:40:03 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Finished initialising converters for DataConverter in 703.2ms
+[10:40:05 INFO]: Loaded 1585 recipes
+[10:40:05 INFO]: Loaded 1688 advancements
+[10:40:05 INFO]: Starting minecraft server version 26.2
+[10:40:05 INFO]: Loading properties
+[10:40:05 INFO]: This server is running Rolia version 26.2-46-main@7f433c1 (1970-01-01T00:00:00Z) (Implementing API version 26.2.build.46-stable)
+[10:40:05 INFO]: [spark] This server bundles the spark profiler. For more information please visit https://docs.papermc.io/paper/profiling
+[10:40:05 INFO]: Server Ping Player Sample Count: 12
+[10:40:05 INFO]: Using 4 threads for Netty based IO
+[10:40:06 INFO]: [MoonriseCommon] Setting up Paper chunk system
+[10:40:06 INFO]: [MoonriseCommon] Rolia is using 1 worker threads, 1 I/O threads
+[10:40:06 INFO]: [TickRegions] Initialised EDF Folia scheduler with initial 1 target thread(s)
+[10:40:06 INFO]: Default game type: SURVIVAL
+[10:40:06 INFO]: Generating keypair
+[10:40:06 INFO]: Starting Minecraft server on *:25565
+[10:40:06 INFO]: Paper: Using libdeflate (Linux x86_64) compression from Velocity.
+[10:40:06 INFO]: Paper: Using OpenSSL 3.x.x (Linux x86_64) cipher from Velocity.
+[10:40:06 INFO]: Preparing level "world"
+[10:40:06 INFO]: [CanvasWorlds] Loaded Canvas config patch for level minecraft:overworld
+[10:40:06 INFO]: [Rolia] using config /home/runner/work/Rolia/Rolia/testrun/rolia.yml
+[10:40:06 INFO]: [io.rolia.secureseed.Globals] Rolia: config loaded (secure seed ACTIVE fp=b38c40d8d6ba0553).
+[10:40:06 INFO]: [io.rolia.secureseed.Globals] Rolia: all 3 options are at their defaults (stock Canvas behaviour + the secure seed).
+[10:40:06 INFO]: [io.rolia.secureseed.Globals] Rolia: blake2b-selftest 06bbc3dedf13a31139498655251b7588ccd3bb5aaa071b2d44d8e0a04095579ed590fbfdcf941f4370ce5ce623624e7a76d33e7a8109dcda9b57d72f8f8efa51
+[10:40:06 INFO]: [io.rolia.secureseed.Globals] Rolia: slime-selftest c00170ff8fd2544d
+[10:40:07 INFO]: [CanvasWorlds] Loaded Canvas config patch for level minecraft:the_nether
+[10:40:07 INFO]: [CanvasWorlds] Loaded Canvas config patch for level minecraft:the_end
+[10:40:07 INFO]: Loading 0 persistent chunks for level 'minecraft:overworld'...
+[10:40:07 INFO]: Preparing spawn area: 100%
+[10:40:07 INFO]: Prepared spawn area in 1 ms
+[10:40:07 INFO]: Loading 0 persistent chunks for level 'minecraft:the_nether'...
+[10:40:07 INFO]: Prepared spawn area in 0 ms
+[10:40:07 INFO]: Loading 0 persistent chunks for level 'minecraft:the_end'...
+[10:40:07 INFO]: Prepared spawn area in 0 ms
+[10:40:07 INFO]: Done preparing level "world" (0.506s)
+[10:40:07 INFO]: [spark] Starting background profiler...
+[10:40:07 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:overworld
+[10:40:07 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_nether
+[10:40:07 INFO]: Saving chunks for level 'ServerLevel[world]'/minecraft:the_end
+[10:40:07 INFO]: ThreadedAnvilChunkStorage (world): All chunks are saved
+[10:40:07 INFO]: ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[10:40:07 INFO]: ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[10:40:07 INFO]: ThreadedAnvilChunkStorage: All dimensions are saved
+[10:40:07 INFO]: [TickRegionScheduler] Starting EDF region scheduler
+[10:40:07 WARN]: [TickRegionScheduler] Region profiling not supported in this environment
+[10:40:07 INFO]: Done (9.711s)! For help, type "help"
+[10:40:07 WARN]: [CanvasMC] Running unknown build channel, proceed with caution
+[10:40:17 INFO]: Checking version, please wait...
+[10:40:17 INFO]: [Rolia] 26.2 | main#46 [7f433c1] | BUILD 46
+>> Java 25, (Eclipse Adoptium) OS Linux amd64 [hover]
+>> Mem 3.0GB CPU AMD EPYC 7763 64-Core Processor (4)
+[10:40:23 INFO]: Seed: [2566200503875106159]
+[10:40:23 INFO]: Rolia: Feature seed fp: b38c40d8d6ba0553
+[10:40:28 INFO]: Stopping the server
+[10:40:28 INFO]: [RegionShutdownThread] Awaiting scheduler termination for 60s...
+[10:40:28 INFO]: [RegionShutdownThread] Scheduler halted
+[10:40:28 INFO]: Stopping server
+[10:40:28 INFO]: [RegionShutdownThread] Removing players
+[10:40:28 INFO]: [RegionShutdownThread] Halting chunk systems...
+[10:40:28 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:overworld'
+[10:40:28 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:overworld'
+[10:40:28 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:the_nether'
+[10:40:28 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:the_nether'
+[10:40:28 INFO]: [ChunkHolderManager] Waiting 60s for chunk system to halt for world 'minecraft:the_end'
+[10:40:28 INFO]: [ChunkHolderManager] Halted chunk system for world 'minecraft:the_end'
+[10:40:28 INFO]: [RegionShutdownThread] Halted chunk systems
+[10:40:28 INFO]: [RegionShutdownThread] Finishing pending teleports...
+[10:40:28 INFO]: [RegionShutdownThread] Finished pending teleports
+[10:40:28 INFO]: [RegionShutdownThread] Saving all worlds
+[10:40:28 INFO]: [RegionShutdownThread] Saving world data for world 'minecraft:overworld'
+[10:40:28 INFO]: [RegionShutdownThread] Closing player inventories...
+[10:40:28 INFO]: [RegionShutdownThread] Closed player inventories
+[10:40:28 INFO]: [RegionShutdownThread] Saving chunks...
+[10:40:28 INFO]: [RegionShutdownThread] Saved chunks
+[10:40:28 INFO]: [RegionShutdownThread] Saving level data...
+[10:40:28 INFO]: [RegionShutdownThread] Saved level data
+[10:40:28 INFO]: [RegionShutdownThread] Saved world data for world 'minecraft:overworld'
+[10:40:28 INFO]: [RegionShutdownThread] Saving world data for world 'minecraft:the_nether'
+[10:40:28 INFO]: [RegionShutdownThread] Closing player inventories...
+[10:40:28 INFO]: [RegionShutdownThread] Closed player inventories
+[10:40:28 INFO]: [RegionShutdownThread] Saving chunks...
+[10:40:28 INFO]: [RegionShutdownThread] Saved chunks
+[10:40:28 INFO]: [RegionShutdownThread] Saving level data...
+[10:40:28 INFO]: [RegionShutdownThread] Saved level data
+[10:40:28 INFO]: [RegionShutdownThread] Saved world data for world 'minecraft:the_nether'
+[10:40:28 INFO]: [RegionShutdownThread] Saving world data for world 'minecraft:the_end'
+[10:40:28 INFO]: [RegionShutdownThread] Closing player inventories...
+[10:40:28 INFO]: [RegionShutdownThread] Closed player inventories
+[10:40:28 INFO]: [RegionShutdownThread] Saving chunks...
+[10:40:28 INFO]: [RegionShutdownThread] Saved chunks
+[10:40:28 INFO]: [RegionShutdownThread] Saving level data...
+[10:40:28 INFO]: [RegionShutdownThread] Saved level data
+[10:40:28 INFO]: [RegionShutdownThread] Saved world data for world 'minecraft:the_end'
+[10:40:28 INFO]: [RegionShutdownThread] Saved all worlds
+[10:40:28 INFO]: [RegionShutdownThread] Saving global world data...
+[10:40:28 INFO]: [RegionShutdownThread] Saved global world data.
+[10:40:28 INFO]: [RegionShutdownThread] Saving all player data...
+[10:40:28 INFO]: [RegionShutdownThread] Saved all player data
+[10:40:28 INFO]: Waiting for all RegionFile I/O tasks to complete...
+[10:40:28 INFO]: All RegionFile I/O tasks to complete
+[10:40:28 INFO]: [MoonriseCommon] Awaiting termination of worker pool for up to 60s...
+[10:40:28 INFO]: [MoonriseCommon] Awaiting termination of I/O pool for up to 60s...

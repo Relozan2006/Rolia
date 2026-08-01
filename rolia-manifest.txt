@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+Main-Class: io.papermc.paperclip.Main
+Enable-Native-Access: ALL-UNNAMED
+

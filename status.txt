@@ -1,0 +1,3 @@
+status=success
+jar=rolia-paperclip-26.2.jar
+commit=7f433c138b1a81322846f54b2e4277b19f285e5a

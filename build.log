@@ -1,0 +1,47 @@
+Calculating task graph as no cached configuration is available for tasks: createPaperclipJar
+Type-safe project accessors is an incubating feature.
+
+> Configure project :
+weaver-patcher v2.4.5 (running on 'Linux')
+
+> Configure project :canvas-server
+weaver-core v2.4.5 (running on 'Linux')
+
+> Task :canvas-api:processResources NO-SOURCE
+> Task :canvas-api:generateApiVersioningFile
+> Task :canvas-server:processLog4jPluginsResources NO-SOURCE
+> Task :canvas-server:downloadMcManifest
+> Task :canvas-server:downloadMcVersionManifest UP-TO-DATE
+> Task :canvas-server:downloadServerJar UP-TO-DATE
+> Task :canvas-server:extractFromBundler UP-TO-DATE
+> Task :canvas-api:compileJava FROM-CACHE
+> Task :canvas-api:classes UP-TO-DATE
+> Task :canvas-api:jar
+> Task :canvas-server:processResources
+> Task :canvas-server:compileLog4jPluginsJava FROM-CACHE
+> Task :canvas-server:log4jPluginsClasses UP-TO-DATE
+> Task :canvas-server:compileJava
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Note: Some input files use or override a deprecated API that is marked for removal.
+Note: Recompile with -Xlint:removal for details.
+Note: Some input files use unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+
+> Task :canvas-server:classes
+> Task :canvas-server:jar
+> Task :canvas-server:createBundlerJar
+> Task :canvas-server:createPaperclipJar
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_10-1785580542361.json
+
+[Incubating] Problems report is available at: file:///home/runner/work/Rolia/Rolia/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 1m 56s
+13 actionable tasks: 8 executed, 2 from cache, 3 up-to-date
+Configuration cache entry stored.

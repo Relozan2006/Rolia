@@ -1,0 +1,211 @@
+Calculating task graph as no cached configuration is available for tasks: test
+Type-safe project accessors is an incubating feature.
+
+> Configure project :
+weaver-patcher v2.4.5 (running on 'Linux')
+
+> Configure project :canvas-server
+weaver-core v2.4.5 (running on 'Linux')
+
+> Task :processResources NO-SOURCE
+> Task :compileJava NO-SOURCE
+> Task :classes UP-TO-DATE
+> Task :processTestResources NO-SOURCE
+> Task :canvas-api:processResources NO-SOURCE
+> Task :canvas-api:generateApiVersioningFile UP-TO-DATE
+> Task :compileTestJava NO-SOURCE
+> Task :testClasses UP-TO-DATE
+> Task :canvas-api:processTestResources
+> Task :test NO-SOURCE
+> Task :canvas-server:processTestResources
+> Task :canvas-server:processLog4jPluginsResources NO-SOURCE
+> Task :canvas-server:processResources UP-TO-DATE
+> Task :canvas-api:compileJava UP-TO-DATE
+> Task :canvas-api:classes UP-TO-DATE
+> Task :canvas-api:jar UP-TO-DATE
+> Task :canvas-api:compileTestJava FROM-CACHE
+> Task :canvas-api:testClasses
+> Task :canvas-server:compileLog4jPluginsJava UP-TO-DATE
+> Task :canvas-server:log4jPluginsClasses UP-TO-DATE
+> Task :canvas-api:test FROM-CACHE
+> Task :canvas-server:compileJava UP-TO-DATE
+> Task :canvas-server:classes UP-TO-DATE
+> Task :canvas-server:compileTestJava FROM-CACHE
+> Task :canvas-server:testClasses
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.jline.nativ.JLineNativeLoader in an unnamed module (file:/home/runner/.gradle/caches/modules-2/files-2.1/org.jline/jline-native/3.29.0/26561ce5618a0bee8ca0515a9bebcc9a0e12c633/jline-native-3.29.0.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+
+> Task :canvas-server:test
+
+Test suite for test which need registry values present, with all feature flags set > PerRegistryTest STANDARD_OUT
+    [10:37:47 INFO]: [CanvasMC] Loading Canvas server configuration
+    [10:37:47 INFO]: [ConfigurationProvider] canvas-server.yml doesn't exist, using flood fill
+    [10:37:47 WARN]: [CanvasMC] SIMD operations are available for your server, but are not configured!
+    [10:37:47 WARN]: [CanvasMC] To enable additional optimizations, add "--add-modules=jdk.incubator.vector" to your startup flags, BEFORE the "-jar".
+    [10:37:47 WARN]: [CanvasMC] If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.
+    [10:37:47 WARN]: [CanvasMC] Debug: Java: 25.0.3, test run: true
+    [10:37:47 INFO]: [CanvasMC] Registered all Canvas commands
+    [10:37:47 INFO]: [CanvasMC] Server will autosave enabled selection every 5m
+    [10:37:47 INFO]: [CanvasMC] Using 20.0 as default tick rate
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.joml.MemUtil$MemUtilUnsafe (file:/home/runner/.gradle/caches/modules-2/files-2.1/org.joml/joml/1.10.8/fc0a71dad90a2cf41d82a76156a0e700af8e4f8d/joml-1.10.8.jar)
+WARNING: Please consider reporting this to the maintainers of class org.joml.MemUtil$MemUtilUnsafe
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+
+> Task :canvas-server:test
+    [10:37:51 INFO]: Found new data pack paper, loading it automatically
+    [10:37:53 INFO]: Loaded 1585 recipes
+    [10:37:53 INFO]: Loaded 1688 advancements
+
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+
+> Task :canvas-server:test
+    [10:37:54 INFO]: [MoonriseCommon] Setting up Paper chunk system
+    [10:37:54 INFO]: [MoonriseCommon] Rolia is using 1 worker threads, 1 I/O threads
+    [10:37:54 INFO]: [TickRegions] Initialised EDF Folia scheduler with initial 1 target thread(s)
+
+Test suite for test which need registry values present, with all feature flags set > ItemMetaCloneTest > testClone() STANDARD_OUT
+    [10:37:58 WARN]: [org.bukkit.craftbukkit.legacy.CraftLegacy] Initializing Legacy Material Support. Unless you have legacy plugins and/or data this is a bug!
+
+Test suite for test which need registry values present, with all feature flags set > PersistentDataContainerTest > testYAMLStoring() STANDARD_OUT
+    [10:38:09 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Initialising converters for DataConverter...
+    [10:38:09 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Finished initialising converters for DataConverter in 652.5ms
+
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.jline.nativ.JLineNativeLoader in an unnamed module (file:/home/runner/.gradle/caches/modules-2/files-2.1/org.jline/jline-native/3.29.0/26561ce5618a0bee8ca0515a9bebcc9a0e12c633/jline-native-3.29.0.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+
+> Task :canvas-server:test
+
+Test suite for legacy tests > PersistentDataContainerLegacyTest STANDARD_OUT
+    [10:38:15 INFO]: [CanvasMC] Loading Canvas server configuration
+    [10:38:15 WARN]: [CanvasMC] SIMD operations are available for your server, but are not configured!
+    [10:38:15 WARN]: [CanvasMC] To enable additional optimizations, add "--add-modules=jdk.incubator.vector" to your startup flags, BEFORE the "-jar".
+    [10:38:15 WARN]: [CanvasMC] If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.
+    [10:38:15 WARN]: [CanvasMC] Debug: Java: 25.0.3, test run: true
+    [10:38:15 INFO]: [CanvasMC] Registered all Canvas commands
+    [10:38:16 INFO]: [CanvasMC] Server will autosave enabled selection every 5m
+    [10:38:16 INFO]: [CanvasMC] Using 20.0 as default tick rate
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.joml.MemUtil$MemUtilUnsafe (file:/home/runner/.gradle/caches/modules-2/files-2.1/org.joml/joml/1.10.8/fc0a71dad90a2cf41d82a76156a0e700af8e4f8d/joml-1.10.8.jar)
+WARNING: Please consider reporting this to the maintainers of class org.joml.MemUtil$MemUtilUnsafe
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+
+> Task :canvas-server:test
+    [10:38:20 INFO]: Found new data pack paper, loading it automatically
+    [10:38:22 INFO]: Loaded 1585 recipes
+    [10:38:22 INFO]: Loaded 1688 advancements
+
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+
+> Task :canvas-server:test
+    [10:38:23 INFO]: [MoonriseCommon] Setting up Paper chunk system
+    [10:38:23 INFO]: [MoonriseCommon] Rolia is using 1 worker threads, 1 I/O threads
+    [10:38:23 INFO]: [TickRegions] Initialised EDF Folia scheduler with initial 1 target thread(s)
+
+Test suite for legacy tests > LegacyTest > testRestricted() STANDARD_OUT
+    [10:38:23 WARN]: [org.bukkit.craftbukkit.legacy.CraftLegacy] Initializing Legacy Material Support. Unless you have legacy plugins and/or data this is a bug!
+
+Test suite for legacy tests > DeprecatedItemMetaCustomValueTest > testYAMLStoring() STANDARD_OUT
+    [10:38:31 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Initialising converters for DataConverter...
+    [10:38:32 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Finished initialising converters for DataConverter in 661.4ms
+
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.jline.nativ.JLineNativeLoader in an unnamed module (file:/home/runner/.gradle/caches/modules-2/files-2.1/org.jline/jline-native/3.29.0/26561ce5618a0bee8ca0515a9bebcc9a0e12c633/jline-native-3.29.0.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+
+> Task :canvas-server:test
+
+Test suite for standalone tests, which don't need any registry values present > CraftChatMessageTest STANDARD_OUT
+    [10:38:35 INFO]: [CanvasMC] Loading Canvas server configuration
+    [10:38:35 WARN]: [CanvasMC] SIMD operations are available for your server, but are not configured!
+    [10:38:35 WARN]: [CanvasMC] To enable additional optimizations, add "--add-modules=jdk.incubator.vector" to your startup flags, BEFORE the "-jar".
+    [10:38:35 WARN]: [CanvasMC] If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.
+    [10:38:35 WARN]: [CanvasMC] Debug: Java: 25.0.3, test run: true
+    [10:38:35 INFO]: [CanvasMC] Registered all Canvas commands
+    [10:38:35 INFO]: [CanvasMC] Server will autosave enabled selection every 5m
+    [10:38:35 INFO]: [CanvasMC] Using 20.0 as default tick rate
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.joml.MemUtil$MemUtilUnsafe (file:/home/runner/.gradle/caches/modules-2/files-2.1/org.joml/joml/1.10.8/fc0a71dad90a2cf41d82a76156a0e700af8e4f8d/joml-1.10.8.jar)
+WARNING: Please consider reporting this to the maintainers of class org.joml.MemUtil$MemUtilUnsafe
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+
+> Task :canvas-server:test
+    [10:38:39 INFO]: Found new data pack paper, loading it automatically
+    [10:38:41 INFO]: Loaded 1585 recipes
+    [10:38:41 INFO]: Loaded 1688 advancements
+
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+
+> Task :canvas-server:test
+    [10:38:42 INFO]: [MoonriseCommon] Setting up Paper chunk system
+    [10:38:42 INFO]: [MoonriseCommon] Rolia is using 1 worker threads, 1 I/O threads
+    [10:38:42 INFO]: [TickRegions] Initialised EDF Folia scheduler with initial 1 target thread(s)
+
+Test suite for standalone tests, which don't need any registry values present > PlayerProfileTest > testTexturesLoading() STANDARD_OUT
+    [10:38:42 INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, profilesHost=https://api.mojang.com, name=PROD]
+
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.jline.nativ.JLineNativeLoader in an unnamed module (file:/home/runner/.gradle/caches/modules-2/files-2.1/org.jline/jline-native/3.29.0/26561ce5618a0bee8ca0515a9bebcc9a0e12c633/jline-native-3.29.0.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+
+> Task :canvas-server:test
+
+Test suite for test which need vanilla registry values present > ParticleTest STANDARD_OUT
+    [10:38:52 INFO]: [CanvasMC] Loading Canvas server configuration
+    [10:38:52 WARN]: [CanvasMC] SIMD operations are available for your server, but are not configured!
+    [10:38:52 WARN]: [CanvasMC] To enable additional optimizations, add "--add-modules=jdk.incubator.vector" to your startup flags, BEFORE the "-jar".
+    [10:38:52 WARN]: [CanvasMC] If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.
+    [10:38:52 WARN]: [CanvasMC] Debug: Java: 25.0.3, test run: true
+    [10:38:52 INFO]: [CanvasMC] Registered all Canvas commands
+    [10:38:52 INFO]: [CanvasMC] Server will autosave enabled selection every 5m
+    [10:38:52 INFO]: [CanvasMC] Using 20.0 as default tick rate
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.joml.MemUtil$MemUtilUnsafe (file:/home/runner/.gradle/caches/modules-2/files-2.1/org.joml/joml/1.10.8/fc0a71dad90a2cf41d82a76156a0e700af8e4f8d/joml-1.10.8.jar)
+WARNING: Please consider reporting this to the maintainers of class org.joml.MemUtil$MemUtilUnsafe
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+
+> Task :canvas-server:test
+    [10:38:57 INFO]: Found new data pack paper, loading it automatically
+    [10:38:58 INFO]: Loaded 1585 recipes
+    [10:38:58 INFO]: Loaded 1688 advancements
+
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+
+> Task :canvas-server:test
+    [10:38:59 INFO]: [MoonriseCommon] Setting up Paper chunk system
+    [10:38:59 INFO]: [MoonriseCommon] Rolia is using 1 worker threads, 1 I/O threads
+    [10:38:59 INFO]: [TickRegions] Initialised EDF Folia scheduler with initial 1 target thread(s)
+
+Test suite for test which need vanilla registry values present > CompositeSerializationTest > testSaveRestoreCompositeList() STANDARD_OUT
+    [10:39:00 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Initialising converters for DataConverter...
+    [10:39:01 INFO]: [ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry] Finished initialising converters for DataConverter in 564.3ms
+
+Test suite for test which need vanilla registry values present > ItemMetaTest > testEachExtraData() STANDARD_OUT
+    [10:39:01 WARN]: [org.bukkit.craftbukkit.legacy.CraftLegacy] Initializing Legacy Material Support. Unless you have legacy plugins and/or data this is a bug!
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_11-1785580660397.json
+
+[Incubating] Problems report is available at: file:///home/runner/work/Rolia/Rolia/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 1m 31s
+12 actionable tasks: 3 executed, 3 from cache, 6 up-to-date
+Configuration cache entry stored.

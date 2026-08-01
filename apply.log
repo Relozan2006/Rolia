@@ -1,0 +1,112 @@
+Starting a Gradle Daemon (subsequent builds will be faster)
+Calculating task graph as no cached configuration is available for tasks: applyAllPatches
+Type-safe project accessors is an incubating feature.
+
+> Configure project :
+weaver-patcher v2.4.5 (running on 'Linux')
+
+> Task :collectPaperApiATsFromPatches
+> Task :mergePaperApiATs
+> Task :checkoutPaperRepo
+> Task :applyPaperSingleFilePatches
+> Task :filterPaperApiFromPaper
+
+> Task :runPaperApiSetup
+Applying access transformers...
+
+> Task :applyPaperApiBasePatches
+
+> Task :applyPaperApiFilePatches
+Applied 1 patches
+
+> Task :applyPaperApiFeaturePatches
+> Task :applyPaperApiPatches
+> Task :applyPaperPatches
+
+> Configure project :Rolia
+weaver-patcher v2.4.5 (running on 'Linux')
+
+> Configure project :Rolia:canvas-server
+weaver-core v2.4.5 (running on 'Linux')
+
+> Task :Rolia:canvas-server:downloadMcManifest
+> Task :Rolia:canvas-server:downloadMcVersionManifest FROM-CACHE
+> Task :Rolia:canvas-server:downloadServerJar FROM-CACHE
+> Task :Rolia:canvas-server:extractFromBundler
+> Task :Rolia:canvas-server:setupMacheResources FROM-CACHE
+> Task :Rolia:canvas-server:extractMacheResources
+
+> Task :Rolia:canvas-server:applyPaperMinecraftResourcePatches
+Applied 6 patches
+
+> Task :Rolia:canvas-server:downloadMcLibrariesSources FROM-CACHE
+> Task :Rolia:canvas-server:downloadRuntimeClasspathSources FROM-CACHE
+> Task :Rolia:canvas-server:indexLibraryFiles
+
+> Task :Rolia:canvas-server:importPaperLibraryFiles
+Importing 14 classes from library sources...
+
+> Task :Rolia:canvas-server:macheRemapJar FROM-CACHE
+> Task :Rolia:canvas-server:macheDecompileJar FROM-CACHE
+> Task :Rolia:canvas-server:collectPaperATsFromPatches
+> Task :Rolia:canvas-server:mergePaperATs
+> Task :Rolia:canvas-server:setupMacheSources FROM-CACHE
+> Task :Rolia:canvas-server:extractMacheSources
+> Task :Rolia:canvas-server:applyPaperMinecraftBasePatches
+
+> Task :Rolia:canvas-server:applyPaperMinecraftSourcePatches
+Applied 930 patches
+
+> Task :Rolia:canvas-server:applyPaperMinecraftFilePatches
+> Task :Rolia:canvas-server:applyPaperMinecraftFeaturePatches
+> Task :Rolia:canvas-server:collectCanvasATsFromPatches
+> Task :Rolia:canvas-server:mergeMinecraftATs
+> Task :Rolia:canvas-server:mergeCanvasATs
+
+> Task :Rolia:canvas-server:importCanvasLibraryFiles
+Importing 2 classes from library sources...
+
+> Task :Rolia:canvas-server:runCanvasSetup
+Applying access transformers...
+
+> Task :applyAllPatches
+> Task :Rolia:canvas-server:applyMinecraftBasePatches
+
+> Task :Rolia:canvas-server:applyMinecraftResourcePatches
+Applied 0 patches
+
+> Task :Rolia:canvas-server:applyMinecraftSourcePatches
+Applied 137 patches
+
+> Task :Rolia:canvas-server:applyMinecraftFilePatches
+> Task :Rolia:canvas-server:applyMinecraftFeaturePatches
+> Task :Rolia:canvas-server:applyMinecraftPatches
+> Task :Rolia:canvas-server:filterPaperServerFromPaper
+> Task :Rolia:canvas-server:collectPaperServerATsFromPatches
+> Task :Rolia:canvas-server:mergePaperServerATs
+
+> Task :Rolia:canvas-server:runPaperServerSetup
+Applying access transformers...
+
+> Task :Rolia:canvas-server:applyPaperServerBasePatches
+
+> Task :Rolia:canvas-server:applyPaperServerFilePatches
+Applied 12 patches
+
+> Task :Rolia:canvas-server:applyPaperServerFeaturePatches
+> Task :Rolia:canvas-server:applyPaperServerPatches
+> Task :Rolia:canvas-server:applyServerPatches
+> Task :Rolia:canvas-server:applyAllServerPatches
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/apply-1785580444208.json
+
+[Incubating] Problems report is available at: file:///home/runner/work/Rolia/Rolia/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 1m 43s
+10 actionable tasks: 10 executed
+Configuration cache entry stored.

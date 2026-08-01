@@ -1,0 +1,5 @@
+secure-seed.enabled|bool|true|RESTART
+secure-seed.salt|string|<secret>|RESTART
+secure-seed.feature-seed|string|<secret>|RESTART
+secure-seed.on-secret-mismatch|string|block|RESTART
+secure-seed.seed-command|string|fingerprint|LIVE

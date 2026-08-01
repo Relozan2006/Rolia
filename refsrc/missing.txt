@@ -1,0 +1,3 @@
+MISSING net/minecraft/world/entity/projectile/ThrownEnderpearl.java
+MISSING net/minecraft/world/entity/npc/villager/VillagerTrades.java
+MISSING net/minecraft/world/level/portal/PortalProcessor.java
