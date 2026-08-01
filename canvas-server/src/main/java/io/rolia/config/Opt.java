@@ -20,26 +20,37 @@ import java.util.Set;
  * not actually have. Those bugs are silent, which is the worst kind.</p>
  *
  * <p>So an option is declared exactly once, as an {@code Opt}, and everything else is derived from the
- * declaration: the parser, the generated file, the {@code /rolia status} output and the key list CI
- * checks the Russian documentation against. The four copies cannot disagree because there is only one.</p>
+ * declaration: the parser, the generated file, the startup log line and the key list CI checks the
+ * documentation against. The copies cannot disagree because there is only one.</p>
  *
  * <h2>Reading an option is a plain field read</h2>
  *
- * <p>Some of these sit on the hottest paths in the server - {@code dab.enabled} is consulted per mob per
- * tick from every region thread. So {@link BoolOpt#get()} and friends are a single volatile read of a
- * field on a final object, which the JIT inlines to nothing. There is deliberately no map lookup, no
- * string hashing and no lock on the read path.</p>
+ * <p>{@link BoolOpt#get()} and friends are a single volatile read of a field on a final object, which
+ * the JIT inlines to nothing. There is deliberately no map lookup, no string hashing and no lock on the
+ * read path. Build 46 leaves only five options, none of them hot, but the shape is kept: the reason it
+ * was written this way was {@code dab.enabled}, which was consulted per mob per tick from every region
+ * thread, and a fork that adds an option like that again should not have to rediscover this.</p>
  */
 public abstract class Opt<T> {
 
-    /** Rolia - can this option be applied by {@code /rolia reload}, or does it need a restart? */
+    // Rolia - build 46: the same logger name the rest of the fork uses, so an operator reading the
+    // console sees one project. Added because coercions used to be silent: a value this class did not
+    // recognise was quietly replaced and nothing said so, which is precisely the "silent bug" the class
+    // javadoc above complains about.
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("Rolia");
+
+    /** Rolia - could this option be applied at runtime, or does it need a restart? */
     public enum Reload {
-        /** Safe to change at runtime: the next read simply sees the new value. */
+        /** Safe to change at runtime: the next read would simply see the new value. */
         LIVE,
         /**
          * Needs a restart. Either the value is captured once during startup, or changing it mid-run
-         * would desynchronise a world that is already generating. {@code /rolia reload} reports these
-         * as skipped rather than pretending to apply them.
+         * would desynchronise a world that is already generating.
+         *
+         * <p>Build 46 removed the {@code /rolia} command, so nothing reloads anything today and every
+         * option needs a restart in practice. The distinction is kept because it is what the generated
+         * file's "(takes effect on the next server restart)" line is derived from, and because it is a
+         * property of the option rather than of the command that used to read it.</p>
          */
         RESTART
     }
@@ -217,7 +228,22 @@ public abstract class Opt<T> {
             } else if (raw != null) {
                 // Accept the string forms a hand-edited file produces ("true", "yes", "on").
                 final String s = String.valueOf(raw).trim().toLowerCase(java.util.Locale.ROOT);
-                next = s.equals("true") || s.equals("yes") || s.equals("on") || s.equals("1");
+                if (s.equals("true") || s.equals("yes") || s.equals("on") || s.equals("1")) {
+                    next = true;
+                } else if (s.equals("false") || s.equals("no") || s.equals("off") || s.equals("0")) {
+                    next = false;
+                } else {
+                    // Rolia - build 46: fall back to the DEFAULT, not to false.
+                    //
+                    // Anything unrecognised used to become false, and the only boolean in this file is
+                    // secure-seed.enabled, whose default is the single true in the whole registry. So
+                    // "enabled: ture" silently turned the entire fork off on a world that needs it -
+                    // the most consequential possible outcome for a one-character typo, in the safest
+                    // possible direction to get wrong.
+                    LOGGER.warn("Rolia: {} has an unrecognised value '{}'; keeping the default ({}).",
+                        this.path, raw, this.def);
+                    next = this.def;
+                }
             } else {
                 next = this.def;
             }

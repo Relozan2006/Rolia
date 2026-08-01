@@ -1,14 +1,10 @@
 package io.rolia;
 
-import com.mojang.logging.LogUtils;
 import io.rolia.config.ConfigWriter;
 import io.rolia.config.Opt;
 import io.rolia.config.Opt.BoolOpt;
-import io.rolia.config.Opt.IntOpt;
 import io.rolia.config.Opt.Reload;
-import io.rolia.config.Opt.StringListOpt;
 import io.rolia.config.Opt.StringOpt;
-import net.minecraft.world.entity.EntityType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.Yaml;
@@ -20,7 +16,6 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 import java.util.Set;
 
 /**
@@ -170,10 +165,6 @@ public final class RoliaConfig {
 
 
 
-    // Rolia - these seven feed the DEFAULT of a Canvas option. They are read while Canvas's config
-    // class is initialising, which is early but strictly after rolia.yml can be loaded (the loader
-    // only touches the filesystem and SnakeYAML). Canvas's own file still overrides them.
-
     /**
      * Rolia - the 1024-bit secret feature seed, as 16 longs.
      *
@@ -221,22 +212,55 @@ public final class RoliaConfig {
         }
     }
 
+    /**
+     * Rolia - read {@code rolia.yml}, or return null if and only if it does not exist.
+     *
+     * <p>Returning null for anything else would be a world-destroying bug, and was one until build 46.
+     * {@code Yaml.load} returns {@code null} rather than throwing for a file that is empty, contains
+     * only comments, or is truncated before its first mapping key, and returns a String or a List for
+     * a file clobbered with something else. All of those used to collapse into the same "null" that
+     * means "no file yet", so the caller generated a fresh secret and overwrote the file - destroying
+     * the only copy of the old one, with an INFO line for a gravestone.</p>
+     *
+     * <p>That is not a theoretical window. The generated file opens with roughly sixty lines of
+     * comments before the salt, so a truncated write or a power cut that lands anywhere in that header
+     * leaves a file which is perfectly valid YAML for {@code null}.</p>
+     */
     @SuppressWarnings("unchecked")
     private static Map<String, Object> parse(final File file) {
         if (!file.isFile()) {
-            return null;
+            return null; // the ONLY "there is no config yet" answer this method may give
         }
+        Object parsed;
         try (final InputStream in = new FileInputStream(file)) {
-            final Object parsed = new Yaml().load(in);
-            return parsed instanceof Map ? (Map<String, Object>) parsed : null;
+            parsed = new Yaml().load(in);
         } catch (final Exception e) {
-            LOGGER.error("{} exists but could not be parsed.", file, e);
-            LOGGER.error("Refusing to start. Fix the YAML (or restore it from backup) and retry.");
-            LOGGER.error("Continuing would generate a NEW secret and overwrite this file, which");
-            LOGGER.error("re-generates caves, ores, biomes and structures for every newly loaded chunk");
-            LOGGER.error("and destroys the only copy of the old secret.");
-            throw new IllegalStateException("Rolia: unreadable " + FILE_NAME + " - refusing to start", e);
+            // Rolia - build 46: the exception is deliberately NOT logged and NOT attached as a cause.
+            // SnakeYAML's MarkedYAMLException embeds a ~75-character snippet of the offending source
+            // line, and the likeliest line to be malformed in this file is the salt or the 309-digit
+            // feature seed - the two strings that must never reach latest.log or a pasted crash report.
+            // The class name and position are enough to fix the file.
+            refuseUnreadable(file, e.getClass().getSimpleName());
+            throw new IllegalStateException("Rolia: unreadable " + FILE_NAME + " - refusing to start");
         }
+        if (!(parsed instanceof Map)) {
+            refuseUnreadable(file, parsed == null
+                ? "the file is empty, contains only comments, or was truncated before the first key"
+                : "the top level is a " + parsed.getClass().getSimpleName() + ", not a mapping");
+            throw new IllegalStateException("Rolia: " + FILE_NAME + " contains no configuration mapping");
+        }
+        return (Map<String, Object>) parsed;
+    }
+
+    private static void refuseUnreadable(final File file, final String why) {
+        LOGGER.error("############################################################");
+        LOGGER.error("{} exists but could not be read: {}", file, why);
+        LOGGER.error("Refusing to start. Fix the YAML (or restore it from backup) and retry.");
+        LOGGER.error("Continuing would generate a NEW secret and overwrite this file, which");
+        LOGGER.error("re-generates caves, ores and structures for every newly loaded chunk");
+        LOGGER.error("and destroys the only copy of the old secret.");
+        LOGGER.error("If this world is genuinely new and you want a fresh secret, delete the file.");
+        LOGGER.error("############################################################");
     }
 
     private static void loadOnce() {
@@ -300,10 +324,7 @@ public final class RoliaConfig {
 
         String cfgSalt = root == null ? "" : str(Opt.resolve(root, SECURE_SEED_SALT.path));
         if (cfgSalt.length() < 64) {
-            final String legacy = readLegacySalt(file);
-            if (legacy != null) {
-                cfgSalt = legacy;
-            }
+            refuseLegacyMigration();
         }
         if (!cfgSalt.isEmpty() && cfgSalt.length() < 64) {
             // Never silently replace a salt the operator actually set - that would re-generate the world.
@@ -344,24 +365,39 @@ public final class RoliaConfig {
         return firstGen;
     }
 
-    /** Rolia - import the secret from the pre-build-40 rolia-seed.properties so an existing world survives. */
-    private static String readLegacySalt(final File configFile) {
-        final File legacy = new File(LEGACY_FILE);
-        if (!legacy.isFile()) {
-            return null;
+    /**
+     * Rolia - refuse to start on a pre-build-40 layout instead of half-migrating it.
+     *
+     * <p>Until build 46 this method imported the salt from {@code rolia-seed.properties} and logged
+     * "migrating secure seed salt", above a javadoc promising "so an existing world survives". It did
+     * not survive. Before build 40 the secret had two halves in two files: the salt in
+     * {@code rolia-seed.properties} and the 1024-bit feature seed in {@code server.properties} as
+     * {@code feature-level-seed}. This method only ever read the first, so the caller then generated a
+     * brand-new feature seed - replacing half the master key while reporting success.</p>
+     *
+     * <p>Nothing downstream could catch it either: no fingerprint file existed before build 40, so the
+     * mismatch guard wrote a fresh fingerprint rather than detecting anything. Migrating half a key is
+     * strictly worse than refusing, so build 46 refuses and says exactly what to carry over by hand.</p>
+     */
+    private static void refuseLegacyMigration() {
+        if (!new File(LEGACY_FILE).isFile()) {
+            return; // no legacy layout: the caller's normal generate-on-absence rules apply
         }
-        final Properties props = new Properties();
-        try (final InputStream in = new FileInputStream(legacy)) {
-            props.load(in);
-        } catch (final Exception ignored) {
-            return null;
-        }
-        final String s = props.getProperty("secure-seed.salt", "");
-        if (s != null && s.length() >= 64) {
-            LOGGER.info("migrating secure seed salt from {} to {}", LEGACY_FILE, FILE_NAME);
-            return s;
-        }
-        return null;
+        LOGGER.error("############################################################");
+        LOGGER.error("Found {}, which is the pre-build-40 layout, and no usable secret in {}.", LEGACY_FILE, FILE_NAME);
+        LOGGER.error("Rolia will NOT migrate it automatically. That secret has two halves and only one");
+        LOGGER.error("of them lives in that file, so an automatic import would replace the other half");
+        LOGGER.error("and silently destroy the world it was supposed to rescue.");
+        LOGGER.error("");
+        LOGGER.error("To migrate by hand, create {} with:", FILE_NAME);
+        LOGGER.error("  secure-seed:");
+        LOGGER.error("    salt: <the secure-seed.salt value from {}>", LEGACY_FILE);
+        LOGGER.error("    feature-seed: <the feature-level-seed value from server.properties>");
+        LOGGER.error("");
+        LOGGER.error("If you do not have both values, that world cannot be extended consistently.");
+        LOGGER.error("To start a NEW world instead, delete {}.", LEGACY_FILE);
+        LOGGER.error("############################################################");
+        throw new IllegalStateException("Rolia: pre-build-40 " + LEGACY_FILE + " found - migrate the secret by hand");
     }
 
     /**
@@ -407,56 +443,15 @@ public final class RoliaConfig {
         return o == null ? "" : String.valueOf(o).trim();
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Reload (/rolia reload)
-    // ---------------------------------------------------------------------------------------------
-
-    /** Rolia - the outcome of a reload, for the command to render. */
-    public record ReloadResult(List<String> applied, List<String> needsRestart, String error) {
-    }
-
-    /**
-     * Rolia - re-read the file and apply only what can safely change at runtime.
-     *
-     * <p>RESTART options are compared but not assigned. Telling an operator "reloaded" and then
-     * quietly not applying half of it is worse than telling them a restart is needed, so the command
-     * lists exactly which keys were skipped.</p>
-     *
-     * <p>The secret is never re-read: changing it mid-run would mean chunks generated after the reload
-     * disagree with chunks generated before it, in the same session, with no warning.</p>
-     */
-    public static synchronized ReloadResult reload() {
-        final File file = new File(FILE_NAME).getAbsoluteFile();
-        final Map<String, Object> root;
-        try {
-            root = parse(file);
-        } catch (final RuntimeException e) {
-            return new ReloadResult(List.of(), List.of(), e.getMessage());
-        }
-        final List<String> applied = new ArrayList<>();
-        final List<String> needsRestart = new ArrayList<>();
-        for (final Opt<?> opt : Opt.options()) {
-            if (opt.isSecret()) {
-                continue;
-            }
-            final Object raw = Opt.resolve(root, opt.path);
-            if (opt.reload == Reload.RESTART) {
-                if (opt.apply(raw, true)) { // dry run: would it change?
-                    needsRestart.add(opt.path);
-                }
-                continue;
-            }
-            if (opt.apply(raw, false)) {
-                applied.add(opt.path + " = " + opt.yamlValue());
-            }
-        }
-        // The blacklist is resolved into EntityType objects and cached; drop the cache so the next mob
-        // tick rebuilds it from whatever was just loaded.
-        return new ReloadResult(applied, needsRestart, null);
-    }
+    // Rolia - build 46: reload() and ReloadResult were deleted here. They existed only to serve
+    // `/rolia reload`, and build 46 removed that command along with the options it reported, so both
+    // had zero callers repo-wide. Keeping a public API that nothing calls invites someone to wire it
+    // back up without noticing that its last comment described an entity blacklist cache that no
+    // longer exists either. The Reload.LIVE/RESTART distinction stays: it is what the generated file's
+    // "(takes effect on the next server restart)" line is derived from.
 
     /**
-     * Rolia - every NON-SECRET option with its current value, for /rolia status and the startup line.
+     * Rolia - every NON-SECRET option with its current value, for the startup line.
      *
      * <p>Build 44: the filter used to live in each of the two callers, so the javadoc's promise that
      * "secrets are never included" was true only by the good behaviour of everyone who called it. A
@@ -523,12 +518,31 @@ public final class RoliaConfig {
         //
         // The atomic temp-file write below stays: that is not a backup, it is what stops a power cut
         // in the middle of a write from leaving a truncated config and an unrecoverable world.
+        //
+        // Rolia - build 46: that sentence was false until the force() calls below were added. The old
+        // code was Files.writeString followed by Files.move, and neither flushes anything: writeString
+        // closes the stream but leaves the data in the page cache, and move renames a directory entry.
+        // A crash could therefore make the RENAME durable while the DATA was not - the classic
+        // zero-length-file-after-rename outcome, and a normal post-crash result on XFS and btrfs. Since
+        // build 46 also removed the .bak copies, this file has no redundancy left at all, so its
+        // durability has to be real rather than asserted. Fsync the data, then fsync the directory that
+        // holds the new name.
+        final java.nio.file.Path target = file.toPath();
+        final java.nio.file.Path tmp = target.resolveSibling(FILE_NAME + ".tmp");
         try {
-            final java.nio.file.Path target = file.toPath();
-            final java.nio.file.Path tmp = target.resolveSibling(FILE_NAME + ".tmp");
             java.nio.file.Files.deleteIfExists(tmp);
             createPrivate(tmp.toFile()); // owner-only before the secret is written into it
-            java.nio.file.Files.writeString(tmp, yaml, java.nio.charset.StandardCharsets.UTF_8);
+            final byte[] bytes = yaml.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            try (final java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(tmp,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                    java.nio.file.StandardOpenOption.WRITE)) {
+                final java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(bytes);
+                while (buf.hasRemaining()) {
+                    ch.write(buf);
+                }
+                ch.force(true); // data and metadata on disk BEFORE anything points at it
+            }
             restrictPermissions(tmp.toFile());
             try {
                 java.nio.file.Files.move(tmp, target,
@@ -536,10 +550,40 @@ public final class RoliaConfig {
             } catch (final java.nio.file.AtomicMoveNotSupportedException e) {
                 java.nio.file.Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
+            fsyncDirectory(target.getParent());
             return true;
         } catch (final Exception e) {
             LOGGER.error("failed to save {}", file, e);
             return false;
+        } finally {
+            // Rolia - build 46: on a failed move the temp file used to survive, holding the full salt
+            // and 1024-bit seed. That is exactly the stray readable copy of the key that removing the
+            // .bak files was meant to stop. After a successful move it no longer exists and this is a
+            // no-op.
+            try {
+                java.nio.file.Files.deleteIfExists(tmp);
+            } catch (final Exception ignored) {
+                // nothing useful to do, and the caller already knows whether the write succeeded
+            }
+        }
+    }
+
+    /**
+     * Rolia - make a rename durable. A POSIX rename is only on disk once the DIRECTORY entry is.
+     *
+     * <p>Windows neither allows opening a directory as a channel nor needs this, so a failure is
+     * ignored rather than reported: the data itself was already forced before the rename, and the
+     * caller must not fail a write that actually succeeded.</p>
+     */
+    private static void fsyncDirectory(final java.nio.file.Path dir) {
+        if (dir == null) {
+            return;
+        }
+        try (final java.nio.channels.FileChannel ch =
+                 java.nio.channels.FileChannel.open(dir, java.nio.file.StandardOpenOption.READ)) {
+            ch.force(true);
+        } catch (final Exception ignored) {
+            // non-POSIX filesystem, or a directory that cannot be opened; see the javadoc
         }
     }
 
@@ -580,8 +624,10 @@ public final class RoliaConfig {
      * generated chunk silently stops matching the ones on disk, and that is unrecoverable. So a
      * fingerprint file is dropped beside {@code level.dat} and compared on every boot.</p>
      *
-     * <p>What happens on a mismatch is {@code secure-seed.on-secret-mismatch}. The default is to warn
-     * very loudly and continue; set it to {@code block} on a production server.</p>
+     * <p>What happens on a mismatch is {@code secure-seed.on-secret-mismatch}. Since build 46 the
+     * default is {@code block} - refuse to start. A server that will not start is an inconvenience,
+     * while a world quietly generating against the wrong secret cannot be repaired afterwards. Set it
+     * to {@code warn} if you would rather be told very loudly and continue anyway.</p>
      *
      * @return true when at least one world was actually examined, so the caller can stop retrying
      */
