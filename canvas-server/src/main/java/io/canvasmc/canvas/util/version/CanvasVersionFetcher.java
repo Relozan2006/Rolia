@@ -109,7 +109,14 @@ public class CanvasVersionFetcher implements VersionFetcher {
             builder.append(text(buildInfo.buildNumber().getAsInt(), SECONDARY));
             builder.append(text(" [", HEADER));
 
-            String url = "https://github.com/CraftCanvasMC/Canvas/";
+            // Rolia - build 46: derive the repository from Brand-Website instead of hard-coding
+            // CraftCanvasMC/Canvas. The commit hash printed here is Rolia's, so the old link resolved
+            // to a commit that does not exist in Canvas - /version is the single most visible surface
+            // on the server and it was pointing every reader at somebody else's repository.
+            String url = buildInfo.brandWebsite().orElse("https://github.com/Relozan2006/Rolia");
+            if (!url.endsWith("/")) {
+                url = url + "/";
+            }
             String commit = buildInfo.gitCommit().orElse("Unknown Commit");
 
             if (buildInfo.gitCommit().isPresent()) {
@@ -203,29 +210,21 @@ public class CanvasVersionFetcher implements VersionFetcher {
         return builder.build();
     }
 
+    /**
+     * Rolia - build 46: report the local build instead of asking CanvasMC how out of date we are.
+     *
+     * <p>This used to call {@code Util.CANVAS_CLIENT.getLatestBuild(...)}, which queries CanvasMC's
+     * build API. Rolia's build numbers do not exist there, so on a Rolia server the lookup either threw
+     * or returned a Canvas build number and subtracted Rolia's from it - meaning {@code /version}
+     * permanently rendered an error, or a meaningless "behind by N", and wrote a stack trace to the log
+     * under the Rolia logger name every time somebody ran it.</p>
+     *
+     * <p>It also sent a request to a third party on a server they have nothing to do with, which is not
+     * something a fork should do quietly on the operator's behalf. Rolia has no update endpoint of its
+     * own, so the honest answer is the local one.</p>
+     */
     private Status computeStatus() {
-        final ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
-        final OptionalInt buildNumber = buildInfo.buildNumber();
-
-        if (buildNumber.isEmpty()) {
-            return new LocalStatus();
-        }
-
-        final int localNum = buildNumber.getAsInt();
-        try {
-            ClientV2.Build build = Util.CANVAS_CLIENT.getLatestBuild(buildInfo.minecraftVersionId(), true);
-            final int distance = build.buildNumber() - localNum;
-
-            return switch (GlobalConfiguration.getBuildStatus()) {
-                case LOCAL -> new LocalStatus();
-                case STABLE -> new StableStatus(distance);
-                case EXPERIMENTAL -> new BetaStatus(distance);
-                case UNKNOWN -> new ErrorStatus();
-            };
-        } catch (Throwable thrown) {
-            GlobalConfiguration.LOGGER.error("Error parsing version information from CanvasMC's Jenkins API", thrown);
-            return new ErrorStatus();
-        }
+        return new LocalStatus();
     }
 
     private static TextComponent formatList(final List<String> inputArguments) {

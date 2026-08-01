@@ -10,14 +10,18 @@ source AROUND its anchor. If upstream moves the code, changes a neighbouring lin
 something the hook depends on, the build fails and says which hook and which occurrence - rather
 than substituting into text that no longer means what it meant.
 
-Build 46 note. This file used to be apply_dab_hooks.py and carried sixteen hooks: eight for the
-secret seed and eight for optimizations - DAB, villager lobotomization, faster network writes,
-line-of-sight caching, collision-shape caching. Those optimizations are gone, so their hooks are
-gone with them, and the name no longer fits. What remains is the eight that make worldgen secret.
+Build 46 note. This file used to be apply_dab_hooks.py and carried the optimization hooks too - DAB,
+villager lobotomization, faster network writes, line-of-sight caching, collision-shape caching. Those
+options are gone from a bare core, so their hooks are gone with them and the name no longer fits.
 
-Porting 26.1.2 -> 26.2 cost almost nothing here, which was worth measuring rather than assuming:
-every anchor still exists with exactly the expected number of occurrences, and seven of the eight
-context checksums are unchanged, because RandomState.java is identical in every region these hooks
+What remains is thirteen hooks over fourteen checksummed occurrences (one hook matches twice): eight
+that route worldgen through the secret, and five that were moved here from Canvas's own per-file
+patches when Rolia rebased onto 26.2 - see the build-46 section further down for why those five could
+not stay as patch hunks.
+
+Porting 26.1.2 -> 26.2 cost almost nothing for the original eight, which was worth measuring rather
+than assuming: every anchor still existed with exactly the expected number of occurrences, and seven
+of their eight checksums were unchanged, because RandomState.java is identical in every region they
 touch. Exactly one moved - the first of the two NoiseBasedChunkGenerator sites,
 f24baae1b478b3fa -> cb26b5aec4877d1a.
 """
@@ -137,7 +141,7 @@ def patch(path, old, new, what, hint=None, count=1, marker=None, context=None, c
             print("       expected context %s, found %s" % (exp, act), file=sys.stderr)
             print("       The anchor still matches, so the substitution would have been applied silently", file=sys.stderr)
             print("       into a method upstream has rewritten. Read the window below, decide whether the", file=sys.stderr)
-            print("       hook is still correct, then update the context hash in scripts/apply_dab_hooks.py", file=sys.stderr)
+            print("       hook is still correct, then update the context hash in scripts/apply_seed_hooks.py", file=sys.stderr)
             print("       (run it with --print-context-hashes to get the new values).", file=sys.stderr)
             print("       --- %s lines %d.. ---" % (path, firstlines[i]), file=sys.stderr)
             for k, line in enumerate(windows[i].split("\n")):
@@ -179,7 +183,7 @@ patch(RANDOMSTATE,
       "        this.aquiferRandom = io.rolia.secureseed.Globals.secretOr(this.random.fromHashOf(Identifier.withDefaultNamespace(\"aquifer\")).forkPositional(), \"aquifer\"); // Rolia - SECRET, own root\n"
       "        this.oreRandom = io.rolia.secureseed.Globals.secretOr(this.random.fromHashOf(Identifier.withDefaultNamespace(\"ore\")).forkPositional(), \"ore\"); // Rolia - SECRET, own root\n",
       "RandomState aquifer+ore under the secret", context="aa03c4885be73c83",
-      hint="aquiferRandom")
+      hint="aquiferRandom", marker="secretOr(this.random, \"worldgen-root\")")
 patch(RANDOMSTATE,
       "        this.surfaceSystem = new SurfaceSystem(this, settings.defaultBlock(), settings.seaLevel(), this.random);\n",
       "        // Rolia - SECRET, own root. This is the most exposed consumer of all: SurfaceSystem takes\n"
@@ -188,7 +192,7 @@ patch(RANDOMSTATE,
       "        // noise made that a readable constraint on all of them.\n"
       "        this.surfaceSystem = new SurfaceSystem(this, settings.defaultBlock(), settings.seaLevel(), io.rolia.secureseed.Globals.secretOr(this.random, \"surface\")); // Rolia\n",
       "RandomState surface rules under the secret", context="20e682c2d81715c8",
-      hint="surfaceSystem")
+      hint="surfaceSystem", marker="secretOr(this.random, \"surface\")")
 patch(RANDOMSTATE,
       "        return this.noiseIntances.computeIfAbsent(noise, key -> Noises.instantiate(this.noises, this.random, noise));\n",
       "        // Rolia - route each noise to the public or the secret root. Whitelist: unknown noises are SECRET.\n"
@@ -197,7 +201,7 @@ patch(RANDOMSTATE,
       "                ? this.random\n"
       "                : io.rolia.secureseed.Globals.secretOr(this.roliaSecretRandom, \"noise:\" + noise.identifier()), noise));\n",
       "RandomState per-noise public/secret routing", context="374470dcfbee24e3",
-      hint="noiseIntances")
+      hint="noiseIntances", marker="isPublicTerrainNoise(noise)")
 patch(RANDOMSTATE,
       "        return this.positionalRandoms.computeIfAbsent(name, key -> this.random.fromHashOf(name).forkPositional());\n",
       "        // Rolia - same split for named factories; only BlendedNoise's \"terrain\" factory stays public.\n"
@@ -206,7 +210,7 @@ patch(RANDOMSTATE,
       "                ? this.random.fromHashOf(name).forkPositional()\n"
       "                : io.rolia.secureseed.Globals.secretOr(this.roliaSecretRandom.fromHashOf(name).forkPositional(), \"factory:\" + name));\n",
       "RandomState named-factory public/secret routing", context="7ecba93f08a2b3e2",
-      hint="positionalRandoms")
+      hint="positionalRandoms", marker="isPublicTerrainFactory(name)")
 # The two legacy Nether climate noises are SECRET, and must not go through LegacyRandomSource's 48-bit
 # state. newLegacyInstance() itself is left alone because useLegacyInit also routes BlendedNoise (which
 # is terrain, and public) through it.
@@ -214,12 +218,12 @@ patch(RANDOMSTATE,
       "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(this.newLegacyInstance(0L), noiseData.value());\n",
       "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(io.rolia.secureseed.Globals.isSecureSeedEnabled() ? io.rolia.secureseed.Globals.secretClimateSource(0L) : this.newLegacyInstance(0L), noiseData.value()); // Rolia - SECRET, full width (vanilla when secure-seed.enabled=false)\n",
       "RandomState nether temperature climate under the secret", context="5ea8cc55701c6fcb",
-      hint="TEMPERATURE_NETHER")
+      hint="TEMPERATURE_NETHER", marker="secretClimateSource(0L)")
 patch(RANDOMSTATE,
       "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(this.newLegacyInstance(1L), noiseData.value());\n",
       "                    NormalNoise newNoise = NormalNoise.createLegacyNetherBiome(io.rolia.secureseed.Globals.isSecureSeedEnabled() ? io.rolia.secureseed.Globals.secretClimateSource(1L) : this.newLegacyInstance(1L), noiseData.value()); // Rolia - SECRET, full width (vanilla when secure-seed.enabled=false)\n",
       "RandomState nether vegetation climate under the secret", context="264930f2e13eb7f3",
-      hint="VEGETATION_NETHER")
+      hint="VEGETATION_NETHER", marker="secretClimateSource(1L)")
 
 # 6) (removed in build 40) TamableAnimal.canTeleportTo unloaded-chunk guard.
 #    It was a no-op. pos.below() is in the same chunk column as pos, and getPathTypeStatic(this, pos) -
@@ -281,8 +285,13 @@ patch(NBCG,
 # =================================================================================================
 
 SCC = "canvas-server/src/minecraft/java/net/minecraft/server/level/ServerChunkCache.java"
-# The generator is where worldgen begins, so this is where the secret has to be published. It is
-# idempotent - setupGlobals publishes once behind a volatile and returns immediately afterwards.
+# The generator is where worldgen begins, so this is where the secret has to be published.
+#
+# setupGlobals is NOT a no-op after the first call, and this hook has to be on getGenerator() for
+# exactly that reason: the publication happens once behind a volatile, but every call also sets the
+# worldgen dimension ThreadLocal for the calling thread. That is what makes off-worldgen paths such
+# as /locate and treasure-map lookups read the right dimension - they reach the generator through
+# this accessor first.
 patch(SCC,
       "    public ChunkGenerator getGenerator() {\n",
       "    public ChunkGenerator getGenerator() {\n"
@@ -308,16 +317,30 @@ CG = "canvas-server/src/minecraft/java/net/minecraft/world/level/chunk/ChunkGene
 # The decoration seed drives every structure and feature placement in the chunk. Vanilla keys it
 # from the public level seed; under Rolia it comes from the secret, which is the difference between
 # "a seed map shows you where the villages are" and "it does not".
+#
+# The ternary is not decoration. WorldgenCryptoRandom's switched-off path wraps a LegacyRandomSource,
+# and this is the ONE call site in the fork where vanilla wraps Xoroshiro instead. setDecorationSeed
+# draws two nextLong() values from whatever is wrapped and builds the population seed out of them, so
+# substituting the class unconditionally changed the population seed - and therefore every feature in
+# every chunk - on a server that had switched the secret OFF. That silently falsified the promise made
+# in rolia.yml and in the README, that `secure-seed.enabled: false` yields an ordinary Minecraft world
+# you can move to any Paper or Folia server. Branching keeps the disabled path byte-identical to the
+# line it replaced.
 patch(CG,
       "            WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));\n",
-      "            WorldgenRandom random = new io.rolia.secureseed.WorldgenCryptoRandom(origin.getX(), origin.getZ(), io.rolia.secureseed.Globals.Salt.UNDEFINED, 0); // Rolia - decoration seed under the secret\n",
+      "            WorldgenRandom random = io.rolia.secureseed.Globals.isSecureSeedEnabled() ? new io.rolia.secureseed.WorldgenCryptoRandom(origin.getX(), origin.getZ(), io.rolia.secureseed.Globals.Salt.UNDEFINED, 0) : new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed())); // Rolia - decoration seed under the secret, exactly vanilla when it is off\n",
       "ChunkGenerator decoration seed under the secret", context="6d7425f2032c038e",
       hint="generateUniqueSeed", marker="WorldgenCryptoRandom")
 # Bukkit's BlockPopulator API gets its own salt domain. UNDEFINED collided exactly with a datapack
 # structure set configured with salt: 0, which is a real configuration people write.
+#
+# Branched for the same reason as the hook above, plus one of its own: the switched-off path inside
+# WorldgenCryptoRandom seeds from Globals.levelSeed(), which is captured once from the FIRST world the
+# server opens. On a multiworld server that is the wrong seed for every other world. Here the level is
+# in scope, so the disabled path can just be the line it replaced.
 patch(CG,
       "                WorldgenRandom seededrandom = new WorldgenRandom(new net.minecraft.world.level.levelgen.LegacyRandomSource(level.getSeed()));\n",
-      "                WorldgenRandom seededrandom = new io.rolia.secureseed.WorldgenCryptoRandom(x, z, io.rolia.secureseed.Globals.Salt.BUKKIT_POPULATOR, 0); // Rolia - own salt domain\n",
+      "                WorldgenRandom seededrandom = io.rolia.secureseed.Globals.isSecureSeedEnabled() ? new io.rolia.secureseed.WorldgenCryptoRandom(x, z, io.rolia.secureseed.Globals.Salt.BUKKIT_POPULATOR, 0) : new WorldgenRandom(new net.minecraft.world.level.levelgen.LegacyRandomSource(level.getSeed())); // Rolia - own salt domain, exactly vanilla when the secret is off\n",
       "ChunkGenerator Bukkit populator under the secret", context="68f800ff45a58640",
       hint="seededrandom", marker="Salt.BUKKIT_POPULATOR")
 
@@ -337,3 +360,23 @@ patch(_cc[0],
       hint="isSlimeChunk", marker="WorldgenCryptoRandom.seedSlimeChunk")
 
 print("Rolia: worldgen source hooks applied")
+
+# Rolia - build 46: actually print what --print-context-hashes collected.
+#
+# _HASH_REPORT was appended to and never read, so the flag documented as "the way to regenerate the
+# checksums" emitted nothing at all, and the OK line above still echoed the DECLARED hash rather than
+# the computed one. Every hash in this file therefore had to be harvested one at a time out of failure
+# messages - which is also why the ordering guarantee this file rests on was never actually exercised.
+#
+# Note the substitutions are still written to disk during such a run, and must be: each hook's window
+# includes text an earlier hook rewrote, so hashes are only correct when computed in execution order,
+# against a tree where the earlier substitutions have already happened. Run it on a throwaway checkout.
+if PRINT_HASHES:
+    print("")
+    print("=== context hashes, in execution order ===")
+    for what, value in _HASH_REPORT:
+        if isinstance(value, list):
+            print('    context=%r,  # %s' % (value, what))
+        else:
+            print('    context="%s",  # %s' % (value, what))
+    print("=== %d hook(s); the tree was MODIFIED, do not build from it ===" % len(_HASH_REPORT))

@@ -460,13 +460,19 @@ public class Globals {
      */
     public static long transformSeed(long levelSeed, long domain) {
         if (!isSecureSeedEnabled()) {
-            // Rolia - build 44: this had NO enabled-check, and publishedWorldSeed() returns the real
-            // secret regardless of the switch. Its two callers are loot random sequences and the End
-            // spike layout, so with secure-seed.enabled=false a world still had non-Vanilla loot and
-            // non-Vanilla obsidian pillars, both keyed to rolia.yml - directly contradicting the
-            // config's own promise that such a world "is an ordinary Minecraft world and can be moved
-            // to any server". Vanilla's own mixing for these two call sites is the plain XOR.
-            return levelSeed ^ domain;
+            // Rolia - build 44 added this enabled-check, because without it a world with
+            // secure-seed.enabled=false still had non-Vanilla loot sequences and non-Vanilla obsidian
+            // pillars, both keyed to rolia.yml - contradicting the config's own promise that such a
+            // world "is an ordinary Minecraft world and can be moved to any server".
+            //
+            // Build 46: it returned `levelSeed ^ domain`, on the claim that "vanilla's own mixing for
+            // these two call sites is the plain XOR". That was wrong at both sites, so the promise was
+            // still not kept. Vanilla's EndSpikeFeature is createThreadLocalInstance(level.getSeed())
+            // with no XOR at all, and vanilla's RandomSequences is `(includeWorldSeed ? worldSeed : 0L)
+            // ^ salt` - an XOR with the caller's own salt, which the patched line still applies OUTSIDE
+            // this call. Mixing in the Rolia domain constant here was an extra term in both cases.
+            // Returning the seed untouched makes each call site reduce to exactly the line it replaced.
+            return levelSeed;
         }
         return Hashing.derive("legacy-transform", publishedWorldSeed(), levelSeed ^ domain)[0];
     }
